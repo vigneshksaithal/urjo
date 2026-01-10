@@ -8,6 +8,7 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 
 import { createPost } from './post'
+import { gameRouter } from './routes/game'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 
@@ -36,6 +37,9 @@ const createPostHandler = async (c: Context) => {
 
 app.post('/internal/on-app-install', createPostHandler)
 app.post('/internal/menu/post-create', createPostHandler)
+
+// Register game API routes
+app.route('/', gameRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 serve({ fetch: app.fetch, port: getServerPort(), createServer })

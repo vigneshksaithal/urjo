@@ -1,6 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
-  "name": "delete23423",
+  "name": "urjo-game",
   "post": {
     "dir": "dist/client",
     "entrypoints": {
@@ -18,8 +18,8 @@
   "menu": {
     "items": [
       {
-        "label": "Create a new post",
-        "description": "Svelte",
+        "label": "Urjo Game",
+        "description": "Urjo Game",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/post-create"
@@ -30,6 +30,6 @@
     "onAppInstall": "/internal/on-app-install"
   },
   "dev": {
-    "subreddit": "cat543"
+    "subreddit": "urjo"
   }
 }

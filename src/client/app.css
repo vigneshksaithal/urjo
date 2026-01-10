@@ -1,1 +1,8 @@
 @import "tailwindcss";
+
+/* Tailwind 4 Configuration */
+@theme {
+	/* Custom colors for Urjo game */
+	--color-urjo-coral: #e17560;
+	--color-urjo-blue: #5b9bd5;
+}
