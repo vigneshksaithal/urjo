@@ -1,0 +1,41 @@
+{
+  "private": true,
+  "name": "devvit-svelte-template",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "postinstall": "bun run build",
+    "build:client": "cd src/client && vite build",
+    "build:server": "cd src/server && vite build",
+    "build": "bun run build:client && bun run build:server",
+    "deploy": "bun run build && devvit upload",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"CLIENT,SERVER,DEVVIT\" -c \"blue,green,magenta\" \"bun run dev:client\" \"bun run dev:server\" \"bun run dev:devvit\"",
+    "dev:client": "cd src/client && vite build --watch",
+    "dev:devvit": "dotenv -e .env -- devvit playtest",
+    "dev:server": "cd src/server && vite build --watch",
+    "login": "devvit login",
+    "check": "svelte-check --tsconfig ./src/client/tsconfig.json",
+    "launch": "bun run build && bun run deploy && devvit publish",
+    "type-check": "tsc --build",
+    "local": "cd src/client && vite dev",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@devvit/web": "0.12.7",
+    "@hono/node-server": "^1.19.8",
+    "@tailwindcss/vite": "^4.1.18",
+    "devvit": "0.12.7",
+    "hono": "^4.11.3",
+    "tailwindcss": "^4.1.18",
+    "bun": "^1.3.5"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.3",
+    "concurrently": "^9.2.1",
+    "dotenv-cli": "^11.0.0",
+    "svelte": "^5.46.1",
+    "svelte-check": "^4.3.5",
+    "typescript": "^5.9.3",
+    "vite": "8.0.0-beta.7"
+  }
+}

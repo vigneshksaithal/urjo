@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "svelte": {
+      "url": "https://mcp.svelte.dev/mcp",
+      "type": "http"
+    },
+    "devvit": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@devvit/mcp"
+      ]
+    },
+    "playwright": {
+      "command": "npx @playwright/mcp@latest"
+    }
+  }
+}
