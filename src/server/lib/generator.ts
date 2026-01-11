@@ -29,7 +29,7 @@ function areRowsIdentical(row1: Cell[], row2: Cell[]): boolean {
 /**
  * Count neighbors of same color (8 directions)
  */
-function countSameColorNeighbors(grid: Grid, row: number, col: number): number {
+export function countSameColorNeighbors(grid: Grid, row: number, col: number): number {
 	const color = grid[row][col].color
 	if (color === null) return 0
 
@@ -69,7 +69,7 @@ function generateRow(): CellColor[] {
 /**
  * Check if grid has equal red/blue in all rows and columns
  */
-function isBalanced(grid: Grid): boolean {
+export function isBalanced(grid: Grid): boolean {
 	// Check rows
 	for (let row = 0; row < GRID_SIZE; row++) {
 		let redCount = 0
@@ -98,7 +98,7 @@ function isBalanced(grid: Grid): boolean {
 /**
  * Check if any adjacent rows are identical
  */
-function hasAdjacentIdenticalRows(grid: Grid): boolean {
+export function hasAdjacentIdenticalRows(grid: Grid): boolean {
 	for (let i = 0; i < GRID_SIZE - 1; i++) {
 		if (areRowsIdentical(grid[i], grid[i + 1])) {
 			return true
@@ -173,10 +173,12 @@ function addConstraints(
 	const selectedPositions = shuffledPositions.slice(0, clueCount)
 
 	// Add clues
+	// Numbered cells should be pre-filled with their solution color and locked
 	for (const { row, col } of selectedPositions) {
+		const solutionCell = solution[row][col]
 		const neighborCount = countSameColorNeighbors(solution, row, col)
 		puzzle[row][col] = {
-			color: null,
+			color: solutionCell.color, // Pre-fill with solution color
 			number: neighborCount,
 			locked: true,
 		}
@@ -243,7 +245,7 @@ export function deserializeGrid(colors: string, numbers: string): Grid {
 }
 
 /**
- * Generate a complete Urjo puzzle (simplified MVP - no number constraints)
+ * Generate a complete Urjo puzzle (simple MVP - empty grid)
  */
 export function generatePuzzle(
 	difficulty: 'easy' | 'medium' | 'hard' = 'medium'
@@ -251,7 +253,7 @@ export function generatePuzzle(
 	// Generate valid solution (2 red, 2 blue per row/column, no adjacent identical rows)
 	const solution = generateSolution()
 
-	// Create empty puzzle grid - all cells unlocked and empty
+	// Create empty puzzle grid - all cells empty and editable
 	const puzzle: Grid = []
 	for (let row = 0; row < GRID_SIZE; row++) {
 		const rowCells: Cell[] = []
@@ -269,7 +271,7 @@ export function generatePuzzle(
 	const serializedPuzzle: SerializedPuzzle = {
 		colors: serializeGrid(puzzle), // "................" (16 dots - all empty)
 		numbers: serializeNumbers(puzzle), // "----------------" (16 dashes - no numbers)
-		solution: serializeGrid(solution), // "rbbrrbbrrbbrrbbb" (the answer)
+		solution: serializeGrid(solution), // Complete solution
 		difficulty,
 	}
 

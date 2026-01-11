@@ -6,8 +6,28 @@
 import { Hono } from 'hono'
 import { context, redis } from '@devvit/web/server'
 import type { GameState, MoveRequest, MoveResponse } from '../../shared/types'
+import { deserializeGrid, isBalanced, hasAdjacentIdenticalRows } from '../lib/generator'
 
 export const gameRouter = new Hono()
+
+/**
+ * Validate that a solution follows all game rules
+ */
+function validateSolution(board: string, numbers: string): { valid: boolean; error?: string } {
+	const grid = deserializeGrid(board, numbers)
+
+	// Check if balanced (2 red, 2 blue per row and column)
+	if (!isBalanced(grid)) {
+		return { valid: false, error: 'Each row and column must have 2 red and 2 blue spots' }
+	}
+
+	// Check if adjacent rows are different
+	if (hasAdjacentIdenticalRows(grid)) {
+		return { valid: false, error: 'Adjacent rows must be different' }
+	}
+
+	return { valid: true }
+}
 
 /**
  * GET /api/game/state
@@ -77,17 +97,19 @@ gameRouter.post('/api/game/move', async (c) => {
 			return c.json({ error: 'Invalid row or column' }, 400)
 		}
 
+		// Get puzzle data
+		const puzzle = await redis.hGetAll(`game:${postId}:puzzle`)
+		if (!puzzle || !puzzle.colors) {
+			return c.json({ error: 'Game not found' }, 404)
+		}
+
 		// Get current user board
 		const userProgress = await redis.hGetAll(`user:${userId}:game:${postId}`)
 		let board = userProgress.board
 
 		// If no existing board, get initial puzzle state
 		if (!board) {
-			const puzzle = await redis.hGet(`game:${postId}:puzzle`, 'colors')
-			if (!puzzle) {
-				return c.json({ error: 'Game not found' }, 404)
-			}
-			board = puzzle
+			board = puzzle.colors
 		}
 
 		// Update cell
@@ -96,9 +118,18 @@ gameRouter.post('/api/game/move', async (c) => {
 		boardArray[index] = color === 'red' ? 'r' : color === 'blue' ? 'b' : '.'
 		const newBoard = boardArray.join('')
 
-		// Check if puzzle is complete
-		const solution = await redis.hGet(`game:${postId}:puzzle`, 'solution')
-		const isComplete = newBoard === solution
+		// Check if puzzle matches solution string
+		const solution = puzzle.solution
+		const matchesSolution = newBoard === solution
+
+		// Validate solution follows all game rules
+		const validation = validateSolution(newBoard, puzzle.numbers)
+		const isComplete = matchesSolution && validation.valid
+
+		// If solution matches but validation fails, return error
+		if (matchesSolution && !validation.valid) {
+			return c.json({ error: validation.error || 'Solution does not follow game rules' }, 400)
+		}
 
 		// Check if this is a new completion
 		const wasCompleted = userProgress.completed === 'true'

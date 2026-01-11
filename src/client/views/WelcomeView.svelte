@@ -43,7 +43,7 @@
 	<h1 class="text-5xl font-bold text-gray-800 dark:text-white mb-4">Urjo Game</h1>
 
 	<p class="text-gray-600 dark:text-gray-300 text-center mb-8 max-w-md">
-		A logic puzzle where you fill the grid with red and blue colors following the number clues
+		A simple logic puzzle. Fill each row and column with equal red and blue spots. Adjacent rows must be different.
 	</p>
 
 	<button
