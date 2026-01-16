@@ -26,7 +26,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "bun": "^1.3.5",
     "devvit": "0.12.7",
-    "hono": "^4.11.3",
+    "hono": "^4.11.4",
     "svelte-confetti": "^2.3.2",
     "tailwindcss": "^4.1.18"
   },
