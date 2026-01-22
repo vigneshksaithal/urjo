@@ -29,6 +29,14 @@
   "triggers": {
     "onAppInstall": "/internal/on-app-install"
   },
+  "scheduler": {
+    "tasks": {
+      "daily-puzzle": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "0 14 * * *"
+      }
+    }
+  },
   "dev": {
     "subreddit": "urjo"
   }

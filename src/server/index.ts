@@ -38,6 +38,35 @@ const createPostHandler = async (c: Context) => {
 app.post('/internal/on-app-install', createPostHandler)
 app.post('/internal/menu/post-create', createPostHandler)
 
+// Scheduler endpoint for daily puzzle posts
+app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
+  try {
+    const date = new Date()
+    const formattedDate = date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+    const title = `Daily Urjo Puzzle - ${formattedDate}`
+    
+    await createPost(title)
+    
+    return c.json({ status: 'ok' })
+  } catch (error) {
+    const errorMessage = error instanceof Error
+      ? error.message
+      : 'Failed to create scheduled post'
+    console.error('Scheduler error:', errorMessage)
+    return c.json(
+      {
+        status: 'error',
+        message: errorMessage
+      },
+      HTTP_STATUS_BAD_REQUEST
+    )
+  }
+})
+
 // Register game API routes
 app.route('/', gameRouter)
 
