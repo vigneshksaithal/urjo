@@ -1,6 +1,17 @@
 /**
  * Urjo Puzzle Generator
- * Generates valid 4x4 Urjo puzzles with unique solutions
+ * Generates valid 4x4 Urjo puzzles with unique solutions.
+ *
+ * Rules:
+ * 1. Each row and column has exactly 2 red and 2 blue cells.
+ * 2. Numbers on a cell indicate how many orthogonal neighbors share
+ *    that cell's color. Numbers are ALWAYS colored (never colorless).
+ * 3. No two adjacent rows are identical; no two adjacent columns are identical.
+ *
+ * Valid clue types:
+ * - Full clue: colored cell WITH number (locked)
+ * - Color-only: colored cell WITHOUT number (locked)
+ * - Empty: no color, no number (player fills in)
  */
 
 import type { Cell, Grid, SerializedPuzzle, CellColor } from '../../shared/types'
@@ -8,8 +19,10 @@ import type { Cell, Grid, SerializedPuzzle, CellColor } from '../../shared/types
 const GRID_SIZE = 4
 const MAX_GENERATION_ATTEMPTS = 200
 
+// ─── Utilities ───────────────────────────────────────────────────────────────
+
 /**
- * Shuffle array (Fisher-Yates)
+ * Shuffle array in place (Fisher-Yates) and return it.
  */
 function shuffle<T>(array: T[]): T[] {
 	const arr = [...array]
@@ -23,7 +36,7 @@ function shuffle<T>(array: T[]): T[] {
 }
 
 /**
- * Safely access a cell from the grid (returns undefined if out of bounds)
+ * Safely access a cell from the grid (returns undefined if out of bounds).
  */
 function getCell(grid: Grid, row: number, col: number): Cell | undefined {
 	if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) return undefined
@@ -31,7 +44,16 @@ function getCell(grid: Grid, row: number, col: number): Cell | undefined {
 }
 
 /**
- * Count orthogonal neighbors of same color (up, down, left, right only)
+ * Create a deep copy of the grid.
+ */
+function deepCopyGrid(grid: Grid): Grid {
+	return grid.map((row) => row.map((cell) => ({ ...cell })))
+}
+
+// ─── Constraint Checkers ─────────────────────────────────────────────────────
+
+/**
+ * Count orthogonal neighbors of same color (up, down, left, right only).
  */
 export function countSameColorNeighbors(grid: Grid, row: number, col: number): number {
 	const cell = getCell(grid, row, col)
@@ -57,7 +79,7 @@ export function countSameColorNeighbors(grid: Grid, row: number, col: number): n
 }
 
 /**
- * Check if grid has equal red/blue in all rows and columns
+ * Check if grid has equal red/blue in all fully-filled rows and columns.
  */
 export function isBalanced(grid: Grid): boolean {
 	for (let row = 0; row < GRID_SIZE; row++) {
@@ -86,7 +108,7 @@ export function isBalanced(grid: Grid): boolean {
 }
 
 /**
- * Check if any adjacent rows are identical
+ * Check if any adjacent rows are identical.
  */
 export function hasAdjacentIdenticalRows(grid: Grid): boolean {
 	for (let i = 0; i < GRID_SIZE - 1; i++) {
@@ -100,7 +122,7 @@ export function hasAdjacentIdenticalRows(grid: Grid): boolean {
 }
 
 /**
- * Check if any adjacent columns are identical
+ * Check if any adjacent columns are identical.
  */
 export function hasAdjacentIdenticalColumns(grid: Grid): boolean {
 	for (let col = 0; col < GRID_SIZE - 1; col++) {
@@ -118,6 +140,7 @@ export function hasAdjacentIdenticalColumns(grid: Grid): boolean {
 
 /**
  * Check all number constraints are satisfied.
+ * Only checks cells that have BOTH a color and a number (valid Urjo clues).
  */
 export function numberConstraintsSatisfied(grid: Grid): boolean {
 	for (let row = 0; row < GRID_SIZE; row++) {
@@ -132,66 +155,143 @@ export function numberConstraintsSatisfied(grid: Grid): boolean {
 	return true
 }
 
+// ─── Solution Generation (Backtracking) ──────────────────────────────────────
+
 /**
- * Generate a valid solution grid.
+ * Generate a valid solution grid using backtracking with constraint propagation.
+ * Fills cells left-to-right, top-to-bottom, enforcing row/column balance and
+ * adjacent line uniqueness at each step. Randomizes color order for variety.
  */
 function generateSolution(): Grid {
-	for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
-		const grid: Grid = []
-
-		for (let i = 0; i < GRID_SIZE; i++) {
-			const rowColors = shuffle<CellColor>(['red', 'red', 'blue', 'blue'])
-			const row: Cell[] = rowColors.map((color) => ({
-				color,
-				number: null,
-				locked: false,
-			}))
-			grid.push(row)
+	const grid: Grid = []
+	for (let r = 0; r < GRID_SIZE; r++) {
+		const row: Cell[] = []
+		for (let c = 0; c < GRID_SIZE; c++) {
+			row.push({ color: null, number: null, locked: false })
 		}
-
-		if (
-			isBalanced(grid) &&
-			!hasAdjacentIdenticalRows(grid) &&
-			!hasAdjacentIdenticalColumns(grid)
-		) {
-			return grid
-		}
+		grid.push(row)
 	}
 
-	throw new Error('Failed to generate valid solution')
+	// Track counts for fast constraint checking
+	const rowRed = new Array(GRID_SIZE).fill(0) as number[]
+	const rowBlue = new Array(GRID_SIZE).fill(0) as number[]
+	const colRed = new Array(GRID_SIZE).fill(0) as number[]
+	const colBlue = new Array(GRID_SIZE).fill(0) as number[]
+
+	const getRowString = (r: number): string => {
+		return grid[r]!.map((c) => c.color).join(',')
+	}
+
+	const getColString = (c: number): string => {
+		return grid.map((row) => row[c]!.color).join(',')
+	}
+
+	const fill = (index: number): boolean => {
+		if (index === GRID_SIZE * GRID_SIZE) return true
+
+		const row = Math.floor(index / GRID_SIZE)
+		const col = index % GRID_SIZE
+
+		// Randomize color order for diversity
+		const colors: CellColor[] = Math.random() < 0.5 ? ['red', 'blue'] : ['blue', 'red']
+
+		for (const color of colors) {
+			// Check row balance
+			if (color === 'red' && rowRed[row]! >= 2) continue
+			if (color === 'blue' && rowBlue[row]! >= 2) continue
+
+			// Check column balance
+			if (color === 'red' && colRed[col]! >= 2) continue
+			if (color === 'blue' && colBlue[col]! >= 2) continue
+
+			// Place the color
+			grid[row]![col]!.color = color
+			if (color === 'red') {
+				rowRed[row]!++
+				colRed[col]!++
+			} else {
+				rowBlue[row]!++
+				colBlue[col]!++
+			}
+
+			// Check adjacent row uniqueness when this row is fully filled
+			let valid = true
+			if (col === GRID_SIZE - 1) {
+				// Row is complete — check against adjacent rows
+				if (row > 0) {
+					const prevFilled = grid[row - 1]!.every((c) => c.color !== null)
+					if (prevFilled && getRowString(row) === getRowString(row - 1)) {
+						valid = false
+					}
+				}
+			}
+
+			// Check adjacent column uniqueness when this column is fully filled
+			if (valid && row === GRID_SIZE - 1) {
+				// Column is complete — check against adjacent columns
+				if (col > 0) {
+					const prevColFilled = grid.every((r) => r[col - 1]!.color !== null)
+					if (prevColFilled && getColString(col) === getColString(col - 1)) {
+						valid = false
+					}
+				}
+			}
+
+			if (valid && fill(index + 1)) return true
+
+			// Undo
+			grid[row]![col]!.color = null
+			if (color === 'red') {
+				rowRed[row]!--
+				colRed[col]!--
+			} else {
+				rowBlue[row]!--
+				colBlue[col]!--
+			}
+		}
+
+		return false
+	}
+
+	if (!fill(0)) {
+		throw new Error('Failed to generate valid solution')
+	}
+
+	return grid
 }
 
-// ─── Solution Uniqueness Solver ──────────────────────────────────────────────
+// ─── Brute-Force Uniqueness Checker ──────────────────────────────────────────
 
 /**
  * Check if placing a color at (row, col) could still lead to a valid solution.
+ * Used by the brute-force solver for pruning.
  */
 function couldBeValid(grid: Grid, row: number, col: number): boolean {
 	const cell = getCell(grid, row, col)
 	if (!cell || cell.color === null) return true
 
 	// Check row balance
-	let rowRed = 0
-	let rowBlue = 0
+	let rRed = 0
+	let rBlue = 0
 	for (let c = 0; c < GRID_SIZE; c++) {
 		const color = grid[row]![c]!.color
-		if (color === 'red') rowRed++
-		if (color === 'blue') rowBlue++
+		if (color === 'red') rRed++
+		if (color === 'blue') rBlue++
 	}
-	if (rowRed > 2 || rowBlue > 2) return false
+	if (rRed > 2 || rBlue > 2) return false
 
 	// Check column balance
-	let colRed = 0
-	let colBlue = 0
+	let cRed = 0
+	let cBlue = 0
 	for (let r = 0; r < GRID_SIZE; r++) {
 		const color = grid[r]![col]!.color
-		if (color === 'red') colRed++
-		if (color === 'blue') colBlue++
+		if (color === 'red') cRed++
+		if (color === 'blue') cBlue++
 	}
-	if (colRed > 2 || colBlue > 2) return false
+	if (cRed > 2 || cBlue > 2) return false
 
 	// Check adjacent row uniqueness when row is fully filled
-	const rowFilled = rowRed + rowBlue === GRID_SIZE
+	const rowFilled = rRed + rBlue === GRID_SIZE
 	if (rowFilled) {
 		const thisRow = grid[row]!
 		if (row > 0) {
@@ -211,7 +311,7 @@ function couldBeValid(grid: Grid, row: number, col: number): boolean {
 	}
 
 	// Check adjacent column uniqueness when column is fully filled
-	const colFilled = colRed + colBlue === GRID_SIZE
+	const colFilled = cRed + cBlue === GRID_SIZE
 	if (colFilled) {
 		if (col > 0) {
 			const prevColFilled = grid.every((r) => r[col - 1]!.color !== null)
@@ -227,7 +327,9 @@ function couldBeValid(grid: Grid, row: number, col: number): boolean {
 		}
 	}
 
-	// Check number constraints for this cell and its neighbors
+	// Check number constraints for this cell and its neighbors.
+	// Numbers always have a color in valid Urjo puzzles, so we only
+	// check cells where both color and number are present.
 	const cellsToCheck: Array<[number, number]> = [
 		[row, col],
 		[row - 1, col],
@@ -258,7 +360,9 @@ function couldBeValid(grid: Grid, row: number, col: number): boolean {
 			}
 		}
 
+		// Too many same-color neighbors already
 		if (sameCount > checkCell.number) return false
+		// Not enough potential neighbors to reach the target
 		if (sameCount + unfilledCount < checkCell.number) return false
 	}
 
@@ -267,26 +371,12 @@ function couldBeValid(grid: Grid, row: number, col: number): boolean {
 
 /**
  * Count solutions for a puzzle grid (early termination at maxCount).
+ * Works directly with the grid's embedded number constraints.
  */
-function countSolutions(
-	puzzleGrid: Grid,
-	numbersMap: Map<string, number>,
-	maxCount: number = 2
-): number {
-	// Deep copy
-	const grid: Grid = puzzleGrid.map((row) =>
-		row.map((cell) => ({ ...cell }))
-	)
+function countSolutions(puzzleGrid: Grid, maxCount: number = 2): number {
+	const grid = deepCopyGrid(puzzleGrid)
 
-	// Apply numbers from map
-	for (const [key, num] of numbersMap) {
-		const parts = key.split(',')
-		const r = parseInt(parts[0]!, 10)
-		const c = parseInt(parts[1]!, 10)
-		grid[r]![c]!.number = num
-	}
-
-	// Find empty cells
+	// Find empty cells (cells the player would need to fill)
 	const emptyCells: Array<[number, number]> = []
 	for (let row = 0; row < GRID_SIZE; row++) {
 		for (let col = 0; col < GRID_SIZE; col++) {
@@ -337,13 +427,6 @@ function countSolutions(
 // ─── Logic Solver ────────────────────────────────────────────────────────────
 
 /**
- * Create a deep copy of the grid.
- */
-function deepCopyGrid(grid: Grid): Grid {
-	return grid.map((row) => row.map((cell) => ({ ...cell })))
-}
-
-/**
  * Propagate deterministic constraints on the grid (mutates in place).
  * Applies balance forcing, number constraints, and adjacent uniqueness.
  * Returns 'invalid' on contradiction, 'progress' if cells were filled,
@@ -357,6 +440,7 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 		changed = false
 
 		// ── Rule 1: Row balance forcing ──
+		// If a row already has 2 of one color, remaining empty cells must be the other.
 		for (let row = 0; row < GRID_SIZE; row++) {
 			let red = 0
 			let blue = 0
@@ -415,9 +499,14 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 		}
 
 		// ── Rule 2: Number constraint forcing ──
+		// Numbers always have a color in valid Urjo puzzles.
+		// If a numbered cell's same-color neighbor count is satisfied, remaining
+		// neighbors must be the opposite color. If all unfilled neighbors are
+		// needed to reach the count, they must all be the same color.
 		for (let row = 0; row < GRID_SIZE; row++) {
 			for (let col = 0; col < GRID_SIZE; col++) {
 				const cell = grid[row]![col]!
+				// Only process cells with both a color and a number
 				if (cell.number === null || cell.color === null) continue
 
 				const dirs: Array<[number, number]> = [
@@ -440,6 +529,7 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 				if (sameCount + unfilled.length < cell.number) return 'invalid'
 
 				if (unfilled.length > 0) {
+					// All needed neighbors satisfied — rest must be opposite
 					if (sameCount === cell.number) {
 						const opp: CellColor = cell.color === 'red' ? 'blue' : 'red'
 						for (const [r, c] of unfilled) {
@@ -447,7 +537,9 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 						}
 						changed = true
 						anyProgress = true
-					} else if (sameCount + unfilled.length === cell.number) {
+					}
+					// All unfilled neighbors needed — they must all match
+					else if (sameCount + unfilled.length === cell.number) {
 						for (const [r, c] of unfilled) {
 							grid[r]![c]!.color = cell.color
 						}
@@ -459,6 +551,9 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 		}
 
 		// ── Rule 3: Adjacent row uniqueness (rows with 1 empty cell) ──
+		// If a row has exactly one empty cell and an adjacent row is fully filled,
+		// the empty cell must differ from the adjacent row's cell at that position
+		// (otherwise the two rows would be identical).
 		for (let i = 0; i < GRID_SIZE; i++) {
 			const row = grid[i]!
 			const emptyCols: number[] = []
@@ -522,7 +617,7 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 			}
 		}
 
-		// ── Validity: Identical adjacent fully-filled lines ──
+		// ── Validity: Detect contradictions from identical adjacent filled lines ──
 		for (let i = 0; i < GRID_SIZE - 1; i++) {
 			const r1 = grid[i]!
 			const r2 = grid[i + 1]!
@@ -549,15 +644,10 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 }
 
 /**
- * Check if placing a color at (row, col) could lead to a valid solution
+ * Check if placing a color at (row, col) leads to a contradiction
  * by propagating all deterministic constraints on a deep copy.
  */
-function canPlaceColor(
-	grid: Grid,
-	row: number,
-	col: number,
-	color: CellColor
-): boolean {
+function canPlaceColor(grid: Grid, row: number, col: number, color: CellColor): boolean {
 	const test = deepCopyGrid(grid)
 	test[row]![col]!.color = color
 	return propagateConstraints(test) !== 'invalid'
@@ -582,7 +672,10 @@ function solveByLogic(puzzleGrid: Grid): 'solved' | 'stuck' | 'invalid' {
 			continue
 		}
 
-		// Rule 4: Elimination – for each empty cell, eliminate impossible colors
+		// Rule 4: Elimination — for each empty cell, try both colors.
+		// If one leads to immediate contradiction (via propagation), the
+		// other must be correct. This is a human-applicable technique
+		// ("if red here, then row overflows → must be blue").
 		for (let row = 0; row < GRID_SIZE; row++) {
 			for (let col = 0; col < GRID_SIZE; col++) {
 				if (grid[row]![col]!.color !== null) continue
@@ -620,20 +713,20 @@ type DifficultyTarget = {
 }
 
 const DIFFICULTY_TARGETS: Record<'easy' | 'medium' | 'hard', DifficultyTarget> = {
-	easy: { minClues: 5 },
-	medium: { minClues: 4 },
-	hard: { minClues: 3 },
+	easy: { minClues: 6 },
+	medium: { minClues: 5 },
+	hard: { minClues: 4 },
 }
 
 /**
- * Count the number of clue cells (locked or has a number).
+ * Count the number of clue cells (cells that give the player information).
+ * A clue is any cell that is locked (has a color) — it may or may not have a number.
  */
 function countClues(grid: Grid): number {
 	let count = 0
 	for (let row = 0; row < GRID_SIZE; row++) {
 		for (let col = 0; col < GRID_SIZE; col++) {
-			const cell = grid[row]![col]!
-			if (cell.locked || cell.number !== null) count++
+			if (grid[row]![col]!.locked) count++
 		}
 	}
 	return count
@@ -641,8 +734,17 @@ function countClues(grid: Grid): number {
 
 /**
  * Generate puzzle clues by starting with the full solution and progressively
- * removing clues while verifying logic solvability at each step.
- * This guarantees every puzzle is solvable through pure deduction.
+ * removing information while verifying logic solvability at each step.
+ *
+ * Three-phase removal strategy:
+ * 1. Remove numbers from cells (keep color visible, drop the number).
+ * 2. Remove entire cells (make them empty — player deduces color).
+ * 3. Clean up remaining numbers on locked cells that aren't needed.
+ *
+ * This ensures every puzzle:
+ * - Is solvable through pure logical deduction (no guessing)
+ * - Has a unique solution
+ * - Only uses valid Urjo clue types (numbers always have a color)
  */
 function generateClues(
 	solution: Grid,
@@ -669,34 +771,49 @@ function generateClues(
 		}))
 	)
 
-	// Build shuffled position list for removal order
+	// Build shuffled position list
 	const positions: Array<{ row: number; col: number }> = []
 	for (let row = 0; row < GRID_SIZE; row++) {
 		for (let col = 0; col < GRID_SIZE; col++) {
 			positions.push({ row, col })
 		}
 	}
-	const shuffled = shuffle(positions)
 
-	// Phase 1: Remove clues while maintaining logic solvability
-	for (const { row, col } of shuffled) {
-		if (countClues(puzzle) <= targets.minClues) break
+	// Phase 1: Remove numbers from cells (keep color, drop number).
+	// This reduces visual clutter while keeping the color as a hint.
+	for (const { row, col } of shuffle(positions)) {
+		const cell = puzzle[row]![col]!
+		if (!cell.locked || cell.number === null) continue
 
-		const saved = { ...puzzle[row]![col]! }
+		const savedNumber = cell.number
+		cell.number = null
 
-		// Try removing entirely (empty cell)
-		puzzle[row]![col]! = { color: null, number: null, locked: false }
-		if (solveByLogic(puzzle) === 'solved') continue
-
-		// Try keeping number only (no color, player must deduce it)
-		puzzle[row]![col]! = { color: null, number: saved.number, locked: false }
-		if (solveByLogic(puzzle) === 'solved') continue
-
-		// Can't remove — put back full clue
-		puzzle[row]![col]! = saved
+		if (solveByLogic(puzzle) !== 'solved') {
+			cell.number = savedNumber
+		}
 	}
 
-	// Phase 2: Clean up — try removing numbers from locked cells
+	// Phase 2: Remove entire cells (make empty).
+	// Try to remove cells to reach the difficulty target.
+	for (const { row, col } of shuffle(positions)) {
+		if (countClues(puzzle) <= targets.minClues) break
+
+		const cell = puzzle[row]![col]!
+		if (!cell.locked) continue
+
+		const saved = { ...cell }
+
+		// Try making cell completely empty
+		puzzle[row]![col]! = { color: null, number: null, locked: false }
+
+		if (solveByLogic(puzzle) !== 'solved') {
+			// Can't remove — restore
+			puzzle[row]![col]! = saved
+		}
+	}
+
+	// Phase 3: Final cleanup — try removing numbers from remaining locked cells
+	// that still have them, in case earlier removals made them redundant.
 	for (const { row, col } of shuffle(positions)) {
 		const cell = puzzle[row]![col]!
 		if (!cell.locked || cell.number === null) continue
@@ -710,17 +827,7 @@ function generateClues(
 	}
 
 	// Safety net: verify unique solution with brute-force solver
-	const numbersMap = new Map<string, number>()
-	for (let row = 0; row < GRID_SIZE; row++) {
-		for (let col = 0; col < GRID_SIZE; col++) {
-			const cell = puzzle[row]![col]!
-			if (cell.number !== null) {
-				numbersMap.set(`${row},${col}`, cell.number)
-			}
-		}
-	}
-
-	if (countSolutions(puzzle, numbersMap) !== 1) return null
+	if (countSolutions(puzzle) !== 1) return null
 
 	return { puzzle, solution }
 }
@@ -774,7 +881,7 @@ export function deserializeGrid(colors: string, numbers: string, puzzleColors?: 
 
 			const color: CellColor = colorChar === 'r' ? 'red' : colorChar === 'b' ? 'blue' : null
 			const number = numberChar !== '-' ? parseInt(numberChar, 10) : null
-			const locked = puzzleColors ? (puzzleColors[index] ?? '.') !== '.' : number !== null
+			const locked = puzzleColors ? (puzzleColors[index] ?? '.') !== '.' : color !== null
 
 			rowCells.push({ color, number, locked })
 			index++
