@@ -38,15 +38,29 @@
 		Fill each row and column with 2 red and 2 blue spots. Use numbered clues to guide your way.
 	</p>
 
+	<!-- Bouncy play button -->
 	<button
 		onclick={onPlay}
 		class="
-			px-12 py-4 text-2xl font-bold
-			bg-blue-500 text-white rounded-lg
-			hover:bg-blue-600 active:scale-95
-			transition-all shadow-lg
+			px-14 py-4 text-2xl font-bold
+			bg-blue-500 text-white rounded-xl
+			hover:bg-blue-600 active:scale-90
+			transition-transform shadow-lg
+			animate-bounce-soft
 		"
 	>
-		Play
+		<span class="flex items-center gap-2">
+			<svg
+				width="24"
+				height="24"
+				viewBox="0 0 24 24"
+				fill="currentColor"
+			>
+				<path d="M8 5v14l11-7z" />
+			</svg>
+			Play
+		</span>
 	</button>
+
+	<p class="text-gray-500 text-xs mt-4">Tap to start</p>
 </div>

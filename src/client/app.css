@@ -5,4 +5,25 @@
 	/* Custom colors for Urjo game */
 	--color-urjo-coral: #e17560;
 	--color-urjo-blue: #5b9bd5;
+
+	/* Play button animation */
+	--animate-bounce-soft: bounce-soft 2s ease-in-out infinite;
+}
+
+@keyframes bounce-soft {
+	0%, 100% {
+		transform: translateY(0);
+	}
+	30% {
+		transform: translateY(-8px);
+	}
+	50% {
+		transform: translateY(0);
+	}
+	65% {
+		transform: translateY(-4px);
+	}
+	80% {
+		transform: translateY(0);
+	}
 }
