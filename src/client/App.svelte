@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { Grid, CellColor, GameState, MoveResponse, NextChallengeResponse, RestartResponse } from '../shared/types'
+	import type { Grid, CellColor, GameState, NextChallengeResponse } from '../shared/types'
 	import WelcomeView from './views/WelcomeView.svelte'
 	import GameView from './views/GameView.svelte'
 	import TutorialView from './views/TutorialView.svelte'
-	import { deserializeGrid } from './lib/utils'
+	import { deserializeGrid, serializeGrid } from './lib/utils'
 
 	type View = 'welcome' | 'tutorial' | 'game' | 'loading' | 'error'
 
@@ -12,8 +12,8 @@
 	let isCompleted = $state(false)
 	let errorMessage = $state('')
 	let puzzleColors = $state('')
-	let moveVersion = 0
 	let puzzleNumbers = $state('')
+	let puzzleSolution = $state('')
 	let tutorialCompleted = $state(false)
 
 	/**
@@ -30,10 +30,11 @@
 
 			puzzleColors = data.puzzle.colors
 			puzzleNumbers = data.puzzle.numbers
+			puzzleSolution = data.puzzle.solution
 			tutorialCompleted = data.tutorialCompleted
 
-			grid = deserializeGrid(data.userBoard, data.puzzle.numbers, data.puzzle.colors)
-			isCompleted = data.isCompleted
+			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
+			isCompleted = false
 
 			if (!data.tutorialCompleted) {
 				currentView = 'tutorial'
@@ -47,16 +48,16 @@
 	}
 
 	/**
-	 * Handle cell color change during gameplay.
+	 * Handle cell color change during gameplay (purely client-side).
 	 */
-	async function handleCellChange(row: number, col: number, color: CellColor) {
+	function handleCellChange(row: number, col: number, color: CellColor) {
 		const gridRow = grid[row]
 		if (!gridRow) return
 		const cell = gridRow[col]
 		if (!cell) return
 		if (cell.locked) return
 
-		// Optimistic update -- immutable to ensure Svelte reactivity
+		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
 			ri === row
 				? r.map((c, ci) =>
@@ -65,38 +66,10 @@
 				: r
 		)
 
-		// Track move version so stale server responses don't overwrite newer state
-		const thisMove = ++moveVersion
-
-		try {
-			const response = await fetch('/api/game/move', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ row, col, color }),
-			})
-
-			if (!response.ok) throw new Error('Failed to save move')
-
-			const data: MoveResponse = await response.json()
-
-			// Only apply server state if no newer move has been made
-			if (thisMove === moveVersion) {
-				if (data.isComplete) {
-					isCompleted = true
-				}
-				grid = deserializeGrid(data.board, puzzleNumbers, puzzleColors)
-			}
-		} catch (error) {
-			console.error('Error saving move:', error)
-			if (thisMove === moveVersion) {
-				try {
-					const response = await fetch('/api/game/state')
-					const data: GameState = await response.json()
-					grid = deserializeGrid(data.userBoard, data.puzzle.numbers, data.puzzle.colors)
-				} catch {
-					// silent fallback
-				}
-			}
+		// Check completion client-side
+		const boardString = serializeGrid(grid)
+		if (boardString === puzzleSolution) {
+			isCompleted = true
 		}
 	}
 
@@ -114,7 +87,8 @@
 
 			puzzleColors = data.puzzle.colors
 			puzzleNumbers = data.puzzle.numbers
-			grid = deserializeGrid(data.userBoard, data.puzzle.numbers, data.puzzle.colors)
+			puzzleSolution = data.puzzle.solution
+			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
 			isCompleted = false
 			currentView = 'game'
 		} catch (error) {
@@ -124,24 +98,11 @@
 	}
 
 	/**
-	 * Handle "Restart" button.
+	 * Handle "Restart" button (purely client-side).
 	 */
-	async function handleRestart() {
-		currentView = 'loading'
-
-		try {
-			const response = await fetch('/api/game/restart', { method: 'POST' })
-			if (!response.ok) throw new Error('Failed to restart')
-
-			const data: RestartResponse = await response.json()
-
-			grid = deserializeGrid(data.userBoard, puzzleNumbers, puzzleColors)
-			isCompleted = false
-			currentView = 'game'
-		} catch (error) {
-			errorMessage = error instanceof Error ? error.message : 'Failed to restart'
-			currentView = 'error'
-		}
+	function handleRestart() {
+		grid = deserializeGrid(puzzleColors, puzzleNumbers, puzzleColors)
+		isCompleted = false
 	}
 
 	/**

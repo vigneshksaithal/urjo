@@ -2,7 +2,7 @@
  * Client-side utilities
  */
 
-import type { Grid, Cell, CellColor } from '../../shared/types'
+import type { Cell, Grid, CellColor } from '../../shared/types'
 
 const GRID_SIZE = 4
 
@@ -32,4 +32,15 @@ export function deserializeGrid(colors: string, numbers: string, puzzleColors: s
 	}
 
 	return grid
+}
+
+/**
+ * Serialize a Grid back into a board string for completion comparison.
+ * Maps: 'red' → 'r', 'blue' → 'b', null → '.'
+ */
+export function serializeGrid(grid: Grid): string {
+	return grid
+		.flat()
+		.map((cell) => (cell.color === 'red' ? 'r' : cell.color === 'blue' ? 'b' : '.'))
+		.join('')
 }
