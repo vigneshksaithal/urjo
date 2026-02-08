@@ -7,7 +7,7 @@
 </script>
 
 <div class="h-full w-full flex flex-col items-center justify-center p-8">
-	<!-- Urjo Logo/Thumbnail -->
+	<!-- Urjo Logo -->
 	<div class="mb-6">
 		<svg
 			width="80"
@@ -16,17 +16,9 @@
 			xmlns="http://www.w3.org/2000/svg"
 			class="drop-shadow-lg"
 		>
-			<!-- 2x2 grid of circles representing Urjo game -->
-			<!-- Top-left: Red circle -->
 			<circle cx="20" cy="20" r="15" fill="#E17560" />
-
-			<!-- Top-right: Blue circle -->
 			<circle cx="60" cy="20" r="15" fill="#5B9BD5" />
-
-			<!-- Bottom-left: Blue circle -->
 			<circle cx="20" cy="60" r="15" fill="#5B9BD5" />
-
-			<!-- Bottom-right: Diagonal split circle -->
 			<defs>
 				<clipPath id="bottomLeftHalf">
 					<polygon points="45,45 45,75 75,75" />
@@ -40,22 +32,20 @@
 		</svg>
 	</div>
 
-	<h1 class="text-5xl font-bold text-gray-800 dark:text-white mb-4">Urjo Game</h1>
+	<h1 class="text-5xl font-bold text-white mb-4">Urjo</h1>
 
-	<p class="text-gray-600 dark:text-gray-300 text-center mb-8 max-w-md">
-		A simple logic puzzle. Fill each row and column with equal red and blue spots. Adjacent rows must be different.
+	<p class="text-gray-300 text-center mb-8 max-w-md text-sm">
+		Fill each row and column with 2 red and 2 blue spots. Use numbered clues to guide your way.
 	</p>
 
 	<button
 		onclick={onPlay}
 		class="
-      px-12 py-4 text-2xl font-bold
-      bg-blue-600 text-white rounded-lg
-      hover:bg-blue-700 active:scale-95
-      transition-all
-      shadow-lg
-      dark:bg-blue-500 dark:hover:bg-blue-600
-    "
+			px-12 py-4 text-2xl font-bold
+			bg-blue-500 text-white rounded-lg
+			hover:bg-blue-600 active:scale-95
+			transition-all shadow-lg
+		"
 	>
 		Play
 	</button>

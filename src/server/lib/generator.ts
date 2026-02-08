@@ -6,52 +6,51 @@
 import type { Cell, Grid, SerializedPuzzle, CellColor } from '../../shared/types'
 
 const GRID_SIZE = 4
+const MAX_GENERATION_ATTEMPTS = 200
+const MAX_HINT_ATTEMPTS = 50
 
 /**
- * Shuffle array in place (Fisher-Yates)
+ * Shuffle array (Fisher-Yates)
  */
 function shuffle<T>(array: T[]): T[] {
 	const arr = [...array]
 	for (let i = arr.length - 1; i > 0; i--) {
 		const j = Math.floor(Math.random() * (i + 1))
-		;[arr[i], arr[j]] = [arr[j], arr[i]]
+		const temp = arr[i]!
+		arr[i] = arr[j]!
+		arr[j] = temp
 	}
 	return arr
 }
 
 /**
- * Check if two rows are identical
+ * Safely access a cell from the grid (returns undefined if out of bounds)
  */
-function areRowsIdentical(row1: Cell[], row2: Cell[]): boolean {
-	return row1.every((cell, i) => cell.color === row2[i].color)
+function getCell(grid: Grid, row: number, col: number): Cell | undefined {
+	if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) return undefined
+	return grid[row]![col]!
 }
 
 /**
- * Count neighbors of same color (8 directions)
+ * Count orthogonal neighbors of same color (up, down, left, right only)
  */
 export function countSameColorNeighbors(grid: Grid, row: number, col: number): number {
-	const color = grid[row][col].color
-	if (color === null) return 0
+	const cell = getCell(grid, row, col)
+	if (!cell || cell.color === null) return 0
 
+	const color = cell.color
 	let count = 0
-	const directions = [
-		[-1, -1],
-		[-1, 0],
-		[-1, 1],
-		[0, -1],
-		[0, 1],
-		[1, -1],
-		[1, 0],
-		[1, 1],
+	const neighbors: Array<[number, number]> = [
+		[row - 1, col],
+		[row + 1, col],
+		[row, col - 1],
+		[row, col + 1],
 	]
 
-	for (const [dr, dc] of directions) {
-		const newRow = row + dr
-		const newCol = col + dc
-		if (newRow >= 0 && newRow < GRID_SIZE && newCol >= 0 && newCol < GRID_SIZE) {
-			if (grid[newRow][newCol].color === color) {
-				count++
-			}
+	for (const [nr, nc] of neighbors) {
+		const neighbor = getCell(grid, nr, nc)
+		if (neighbor && neighbor.color === color) {
+			count++
 		}
 	}
 
@@ -59,35 +58,27 @@ export function countSameColorNeighbors(grid: Grid, row: number, col: number): n
 }
 
 /**
- * Generate a valid row with equal red and blue cells
- */
-function generateRow(): CellColor[] {
-	const row: CellColor[] = ['red', 'red', 'blue', 'blue']
-	return shuffle(row)
-}
-
-/**
  * Check if grid has equal red/blue in all rows and columns
  */
 export function isBalanced(grid: Grid): boolean {
-	// Check rows
 	for (let row = 0; row < GRID_SIZE; row++) {
 		let redCount = 0
 		let blueCount = 0
 		for (let col = 0; col < GRID_SIZE; col++) {
-			if (grid[row][col].color === 'red') redCount++
-			if (grid[row][col].color === 'blue') blueCount++
+			const c = grid[row]![col]!.color
+			if (c === 'red') redCount++
+			if (c === 'blue') blueCount++
 		}
 		if (redCount !== 2 || blueCount !== 2) return false
 	}
 
-	// Check columns
 	for (let col = 0; col < GRID_SIZE; col++) {
 		let redCount = 0
 		let blueCount = 0
 		for (let row = 0; row < GRID_SIZE; row++) {
-			if (grid[row][col].color === 'red') redCount++
-			if (grid[row][col].color === 'blue') blueCount++
+			const c = grid[row]![col]!.color
+			if (c === 'red') redCount++
+			if (c === 'blue') blueCount++
 		}
 		if (redCount !== 2 || blueCount !== 2) return false
 	}
@@ -100,7 +91,9 @@ export function isBalanced(grid: Grid): boolean {
  */
 export function hasAdjacentIdenticalRows(grid: Grid): boolean {
 	for (let i = 0; i < GRID_SIZE - 1; i++) {
-		if (areRowsIdentical(grid[i], grid[i + 1])) {
+		const row1 = grid[i]!
+		const row2 = grid[i + 1]!
+		if (row1.every((cell, j) => cell.color === row2[j]!.color)) {
 			return true
 		}
 	}
@@ -108,18 +101,47 @@ export function hasAdjacentIdenticalRows(grid: Grid): boolean {
 }
 
 /**
- * Generate a valid solution grid
+ * Check if any adjacent columns are identical
+ */
+export function hasAdjacentIdenticalColumns(grid: Grid): boolean {
+	for (let col = 0; col < GRID_SIZE - 1; col++) {
+		let identical = true
+		for (let row = 0; row < GRID_SIZE; row++) {
+			if (grid[row]![col]!.color !== grid[row]![col + 1]!.color) {
+				identical = false
+				break
+			}
+		}
+		if (identical) return true
+	}
+	return false
+}
+
+/**
+ * Check all number constraints are satisfied.
+ */
+export function numberConstraintsSatisfied(grid: Grid): boolean {
+	for (let row = 0; row < GRID_SIZE; row++) {
+		for (let col = 0; col < GRID_SIZE; col++) {
+			const cell = grid[row]![col]!
+			if (cell.number !== null && cell.color !== null) {
+				const actual = countSameColorNeighbors(grid, row, col)
+				if (actual !== cell.number) return false
+			}
+		}
+	}
+	return true
+}
+
+/**
+ * Generate a valid solution grid.
  */
 function generateSolution(): Grid {
-	const MAX_ATTEMPTS = 1000
-	let attempts = 0
-
-	while (attempts < MAX_ATTEMPTS) {
+	for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
 		const grid: Grid = []
 
-		// Generate 4 rows
 		for (let i = 0; i < GRID_SIZE; i++) {
-			const rowColors = generateRow()
+			const rowColors = shuffle<CellColor>(['red', 'red', 'blue', 'blue'])
 			const row: Cell[] = rowColors.map((color) => ({
 				color,
 				number: null,
@@ -128,73 +150,318 @@ function generateSolution(): Grid {
 			grid.push(row)
 		}
 
-		// Check if valid (balanced and no identical adjacent rows)
-		if (isBalanced(grid) && !hasAdjacentIdenticalRows(grid)) {
+		if (
+			isBalanced(grid) &&
+			!hasAdjacentIdenticalRows(grid) &&
+			!hasAdjacentIdenticalColumns(grid)
+		) {
 			return grid
 		}
-
-		attempts++
 	}
 
 	throw new Error('Failed to generate valid solution')
 }
 
+// ─── Solution Uniqueness Solver ──────────────────────────────────────────────
+
 /**
- * Add number constraints to the puzzle
+ * Check if placing a color at (row, col) could still lead to a valid solution.
+ */
+function couldBeValid(grid: Grid, row: number, col: number): boolean {
+	const cell = getCell(grid, row, col)
+	if (!cell || cell.color === null) return true
+
+	// Check row balance
+	let rowRed = 0
+	let rowBlue = 0
+	for (let c = 0; c < GRID_SIZE; c++) {
+		const color = grid[row]![c]!.color
+		if (color === 'red') rowRed++
+		if (color === 'blue') rowBlue++
+	}
+	if (rowRed > 2 || rowBlue > 2) return false
+
+	// Check column balance
+	let colRed = 0
+	let colBlue = 0
+	for (let r = 0; r < GRID_SIZE; r++) {
+		const color = grid[r]![col]!.color
+		if (color === 'red') colRed++
+		if (color === 'blue') colBlue++
+	}
+	if (colRed > 2 || colBlue > 2) return false
+
+	// Check adjacent row uniqueness when row is fully filled
+	const rowFilled = rowRed + rowBlue === GRID_SIZE
+	if (rowFilled) {
+		const thisRow = grid[row]!
+		if (row > 0) {
+			const prevRow = grid[row - 1]!
+			const prevFilled = prevRow.every((c) => c.color !== null)
+			if (prevFilled && thisRow.every((c, i) => c.color === prevRow[i]!.color)) {
+				return false
+			}
+		}
+		if (row < GRID_SIZE - 1) {
+			const nextRow = grid[row + 1]!
+			const nextFilled = nextRow.every((c) => c.color !== null)
+			if (nextFilled && thisRow.every((c, i) => c.color === nextRow[i]!.color)) {
+				return false
+			}
+		}
+	}
+
+	// Check adjacent column uniqueness when column is fully filled
+	const colFilled = colRed + colBlue === GRID_SIZE
+	if (colFilled) {
+		if (col > 0) {
+			const prevColFilled = grid.every((r) => r[col - 1]!.color !== null)
+			if (prevColFilled && grid.every((r) => r[col]!.color === r[col - 1]!.color)) {
+				return false
+			}
+		}
+		if (col < GRID_SIZE - 1) {
+			const nextColFilled = grid.every((r) => r[col + 1]!.color !== null)
+			if (nextColFilled && grid.every((r) => r[col]!.color === r[col + 1]!.color)) {
+				return false
+			}
+		}
+	}
+
+	// Check number constraints for this cell and its neighbors
+	const cellsToCheck: Array<[number, number]> = [
+		[row, col],
+		[row - 1, col],
+		[row + 1, col],
+		[row, col - 1],
+		[row, col + 1],
+	]
+
+	for (const [r, c] of cellsToCheck) {
+		const checkCell = getCell(grid, r, c)
+		if (!checkCell || checkCell.number === null || checkCell.color === null) continue
+
+		let sameCount = 0
+		let unfilledCount = 0
+		const dirs: Array<[number, number]> = [
+			[r - 1, c],
+			[r + 1, c],
+			[r, c - 1],
+			[r, c + 1],
+		]
+		for (const [dr, dc] of dirs) {
+			const neighbor = getCell(grid, dr, dc)
+			if (!neighbor) continue
+			if (neighbor.color === null) {
+				unfilledCount++
+			} else if (neighbor.color === checkCell.color) {
+				sameCount++
+			}
+		}
+
+		if (sameCount > checkCell.number) return false
+		if (sameCount + unfilledCount < checkCell.number) return false
+	}
+
+	return true
+}
+
+/**
+ * Count solutions for a puzzle grid (early termination at maxCount).
+ */
+function countSolutions(
+	puzzleGrid: Grid,
+	numbersMap: Map<string, number>,
+	maxCount: number = 2
+): number {
+	// Deep copy
+	const grid: Grid = puzzleGrid.map((row) =>
+		row.map((cell) => ({ ...cell }))
+	)
+
+	// Apply numbers from map
+	for (const [key, num] of numbersMap) {
+		const parts = key.split(',')
+		const r = parseInt(parts[0]!, 10)
+		const c = parseInt(parts[1]!, 10)
+		grid[r]![c]!.number = num
+	}
+
+	// Find empty cells
+	const emptyCells: Array<[number, number]> = []
+	for (let row = 0; row < GRID_SIZE; row++) {
+		for (let col = 0; col < GRID_SIZE; col++) {
+			if (grid[row]![col]!.color === null) {
+				emptyCells.push([row, col])
+			}
+		}
+	}
+
+	let solutions = 0
+
+	const solve = (index: number): void => {
+		if (solutions >= maxCount) return
+
+		if (index === emptyCells.length) {
+			if (
+				isBalanced(grid) &&
+				!hasAdjacentIdenticalRows(grid) &&
+				!hasAdjacentIdenticalColumns(grid) &&
+				numberConstraintsSatisfied(grid)
+			) {
+				solutions++
+			}
+			return
+		}
+
+		const pos = emptyCells[index]!
+		const [row, col] = pos
+		const colors: CellColor[] = ['red', 'blue']
+
+		for (const color of colors) {
+			grid[row]![col]!.color = color
+
+			if (couldBeValid(grid, row, col)) {
+				solve(index + 1)
+			}
+
+			if (solutions >= maxCount) return
+		}
+
+		grid[row]![col]!.color = null
+	}
+
+	solve(0)
+	return solutions
+}
+
+// ─── Hint Placement ──────────────────────────────────────────────────────────
+
+type HintBudget = {
+	lockedMin: number
+	lockedMax: number
+	numberOnlyMin: number
+	numberOnlyMax: number
+}
+
+const HINT_BUDGETS: Record<'easy' | 'medium' | 'hard', HintBudget> = {
+	easy: { lockedMin: 4, lockedMax: 6, numberOnlyMin: 2, numberOnlyMax: 3 },
+	medium: { lockedMin: 2, lockedMax: 4, numberOnlyMin: 2, numberOnlyMax: 3 },
+	hard: { lockedMin: 1, lockedMax: 2, numberOnlyMin: 1, numberOnlyMax: 2 },
+}
+
+function randomInt(min: number, max: number): number {
+	return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+/**
+ * Add hints to puzzle with three cell types and verify unique solution.
  */
 function addConstraints(
 	solution: Grid,
 	difficulty: 'easy' | 'medium' | 'hard'
-): { puzzle: Grid; solution: Grid } {
-	const puzzle = solution.map((row) =>
-		row.map((cell) => ({
-			...cell,
-			color: null, // Start with empty cells
-			locked: false,
-		}))
-	)
+): { puzzle: Grid; solution: Grid } | null {
+	const budget = HINT_BUDGETS[difficulty]
 
-	// Determine how many clues to add based on difficulty
-	const clueCount = {
-		easy: 10,
-		medium: 7,
-		hard: 5,
-	}[difficulty]
+	for (let attempt = 0; attempt < MAX_HINT_ATTEMPTS; attempt++) {
+		// Start with all cells empty
+		const puzzle: Grid = solution.map((row) =>
+			row.map(() => ({
+				color: null as CellColor,
+				number: null as number | null,
+				locked: false,
+			}))
+		)
 
-	// Generate random positions for clues
-	const positions: Array<{ row: number; col: number }> = []
-	for (let row = 0; row < GRID_SIZE; row++) {
-		for (let col = 0; col < GRID_SIZE; col++) {
-			positions.push({ row, col })
+		// Generate and shuffle all positions
+		const positions: Array<{ row: number; col: number }> = []
+		for (let row = 0; row < GRID_SIZE; row++) {
+			for (let col = 0; col < GRID_SIZE; col++) {
+				positions.push({ row, col })
+			}
+		}
+		const shuffled = shuffle(positions)
+
+		const lockedCount = randomInt(budget.lockedMin, budget.lockedMax)
+		const numberOnlyCount = randomInt(budget.numberOnlyMin, budget.numberOnlyMax)
+
+		const lockedPositions = shuffled.slice(0, lockedCount)
+		const numberOnlyPositions = shuffled.slice(lockedCount, lockedCount + numberOnlyCount)
+
+		// Apply locked cells
+		for (const { row, col } of lockedPositions) {
+			const neighborCount = countSameColorNeighbors(solution, row, col)
+			const showNumber = Math.random() < 0.5
+			puzzle[row]![col]! = {
+				color: solution[row]![col]!.color,
+				number: showNumber ? neighborCount : null,
+				locked: true,
+			}
+		}
+
+		// Apply number-only cells
+		const numbersMap = new Map<string, number>()
+		for (const { row, col } of numberOnlyPositions) {
+			const neighborCount = countSameColorNeighbors(solution, row, col)
+			puzzle[row]![col]! = {
+				color: null,
+				number: neighborCount,
+				locked: false,
+			}
+			numbersMap.set(`${row},${col}`, neighborCount)
+		}
+
+		// Check uniqueness
+		const solutionCount = countSolutions(puzzle, numbersMap)
+
+		if (solutionCount === 1) {
+			return { puzzle, solution }
+		}
+
+		// If multiple solutions, try adding more locked cells
+		if (solutionCount > 1) {
+			const remaining = shuffled.slice(lockedCount + numberOnlyCount)
+			let found = false
+
+			for (const { row, col } of remaining) {
+				const cell = puzzle[row]![col]!
+				if (cell.color !== null || cell.number !== null) continue
+
+				puzzle[row]![col]! = {
+					color: solution[row]![col]!.color,
+					number: null,
+					locked: true,
+				}
+
+				const newCount = countSolutions(puzzle, numbersMap)
+				if (newCount === 1) {
+					found = true
+					break
+				}
+				if (newCount === 0) {
+					puzzle[row]![col]! = { color: null, number: null, locked: false }
+				}
+			}
+
+			if (found) {
+				return { puzzle, solution }
+			}
 		}
 	}
 
-	const shuffledPositions = shuffle(positions)
-	const selectedPositions = shuffledPositions.slice(0, clueCount)
-
-	// Add clues
-	// Numbered cells should be pre-filled with their solution color and locked
-	for (const { row, col } of selectedPositions) {
-		const solutionCell = solution[row][col]
-		const neighborCount = countSameColorNeighbors(solution, row, col)
-		puzzle[row][col] = {
-			color: solutionCell.color, // Pre-fill with solution color
-			number: neighborCount,
-			locked: true,
-		}
-	}
-
-	return { puzzle, solution }
+	return null
 }
 
+// ─── Serialization ───────────────────────────────────────────────────────────
+
 /**
- * Serialize grid to string format
+ * Serialize grid colors to string: 'r' = red, 'b' = blue, '.' = empty
  */
 export function serializeGrid(grid: Grid): string {
 	let result = ''
 	for (let row = 0; row < GRID_SIZE; row++) {
 		for (let col = 0; col < GRID_SIZE; col++) {
-			const color = grid[row][col].color
+			const color = grid[row]![col]!.color
 			if (color === 'red') result += 'r'
 			else if (color === 'blue') result += 'b'
 			else result += '.'
@@ -204,14 +471,14 @@ export function serializeGrid(grid: Grid): string {
 }
 
 /**
- * Serialize numbers to string format
+ * Serialize numbers to string: digit for number, '-' for no number
  */
-function serializeNumbers(grid: Grid): string {
+export function serializeNumbers(grid: Grid): string {
 	let result = ''
 	for (let row = 0; row < GRID_SIZE; row++) {
 		for (let col = 0; col < GRID_SIZE; col++) {
-			const number = grid[row][col].number
-			if (number !== null) result += number.toString()
+			const num = grid[row]![col]!.number
+			if (num !== null) result += num.toString()
 			else result += '-'
 		}
 	}
@@ -219,21 +486,22 @@ function serializeNumbers(grid: Grid): string {
 }
 
 /**
- * Deserialize string to grid
+ * Deserialize string to grid.
+ * puzzleColors determines which cells are locked (initial puzzle state).
  */
-export function deserializeGrid(colors: string, numbers: string): Grid {
+export function deserializeGrid(colors: string, numbers: string, puzzleColors?: string): Grid {
 	const grid: Grid = []
 	let index = 0
 
 	for (let row = 0; row < GRID_SIZE; row++) {
 		const rowCells: Cell[] = []
 		for (let col = 0; col < GRID_SIZE; col++) {
-			const colorChar = colors[index]
-			const numberChar = numbers[index]
+			const colorChar = colors[index] ?? '.'
+			const numberChar = numbers[index] ?? '-'
 
 			const color: CellColor = colorChar === 'r' ? 'red' : colorChar === 'b' ? 'blue' : null
 			const number = numberChar !== '-' ? parseInt(numberChar, 10) : null
-			const locked = number !== null
+			const locked = puzzleColors ? (puzzleColors[index] ?? '.') !== '.' : number !== null
 
 			rowCells.push({ color, number, locked })
 			index++
@@ -244,36 +512,27 @@ export function deserializeGrid(colors: string, numbers: string): Grid {
 	return grid
 }
 
+// ─── Main Generator ──────────────────────────────────────────────────────────
+
 /**
- * Generate a complete Urjo puzzle (simple MVP - empty grid)
+ * Generate a complete Urjo puzzle with proper hints and unique solution.
  */
 export function generatePuzzle(
 	difficulty: 'easy' | 'medium' | 'hard' = 'medium'
 ): SerializedPuzzle {
-	// Generate valid solution (2 red, 2 blue per row/column, no adjacent identical rows)
-	const solution = generateSolution()
+	for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
+		const solution = generateSolution()
+		const result = addConstraints(solution, difficulty)
 
-	// Create empty puzzle grid - all cells empty and editable
-	const puzzle: Grid = []
-	for (let row = 0; row < GRID_SIZE; row++) {
-		const rowCells: Cell[] = []
-		for (let col = 0; col < GRID_SIZE; col++) {
-			rowCells.push({
-				color: null, // Empty
-				number: null, // No numbers
-				locked: false, // All cells editable
-			})
+		if (result) {
+			return {
+				colors: serializeGrid(result.puzzle),
+				numbers: serializeNumbers(result.puzzle),
+				solution: serializeGrid(result.solution),
+				difficulty,
+			}
 		}
-		puzzle.push(rowCells)
 	}
 
-	// Serialize
-	const serializedPuzzle: SerializedPuzzle = {
-		colors: serializeGrid(puzzle), // "................" (16 dots - all empty)
-		numbers: serializeNumbers(puzzle), // "----------------" (16 dashes - no numbers)
-		solution: serializeGrid(solution), // Complete solution
-		difficulty,
-	}
-
-	return serializedPuzzle
+	throw new Error('Failed to generate puzzle with unique solution')
 }

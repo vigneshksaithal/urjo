@@ -1,70 +1,78 @@
 <script lang="ts">
-	import { navigateTo } from '@devvit/web/client'
 	import type { CellColor, Grid } from '../../shared/types'
 	import ConfettiEffect from '../components/ConfettiEffect.svelte'
 	import GameBoard from '../components/GameBoard.svelte'
-	import HowToPlayModal from '../components/HowToPlayModal.svelte'
 
 	type Props = {
 		grid: Grid
 		onCellChange: (row: number, col: number, color: CellColor) => void
 		isCompleted: boolean
-		subredditName?: string
+		onNextChallenge: () => void
+		onRestart: () => void
+		onHowToPlay: () => void
 	}
 
 	let {
 		grid,
 		onCellChange,
 		isCompleted,
-		subredditName = 'urjo',
+		onNextChallenge,
+		onRestart,
+		onHowToPlay,
 	}: Props = $props()
-	let showHowToPlay = $state(false)
 </script>
 
-<div class="h-full w-full flex flex-col p-4">
+<div class="h-full w-full flex flex-col p-4 overflow-hidden">
 	<!-- Header -->
-	<header class="flex-none h-12 flex items-center justify-between px-4">
+	<header class="flex-none h-10 flex items-center justify-between px-2">
 		<button
-			onclick={() => (showHowToPlay = true)}
-			class="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
+			onclick={onHowToPlay}
+			class="text-sm font-medium text-blue-400 hover:underline"
 		>
 			How to Play
 		</button>
-		<h1 class="text-2xl font-bold text-gray-800 dark:text-white">Urjo Game</h1>
+		<h1 class="text-xl font-bold text-white">Urjo</h1>
 		<div class="w-20"></div>
-		<!-- Spacer for centering -->
 	</header>
 
 	<!-- Main game area -->
-	<main class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4">
-		<!-- Join message -->
-		<p class="text-sm text-gray-600 dark:text-gray-300 text-center">
-			Join <button
-				onclick={() => navigateTo(`https://www.reddit.com/r/${subredditName}`)}
-				class="text-blue-600 dark:text-blue-400 font-semibold hover:underline bg-transparent border-none p-0 cursor-pointer"
-				>r/{subredditName}</button
-			>
-			for more puzzles!
-		</p>
-
+	<main class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative">
 		<!-- Game board -->
 		<GameBoard {grid} {onCellChange} />
 
-		<!-- Completion message -->
+		<!-- Completion overlay -->
 		{#if isCompleted}
-			<p
-				class="text-lg font-bold text-green-600 dark:text-green-400 animate-pulse"
-			>
-				🎉 Completed!
-			</p>
+			<div class="absolute inset-0 flex flex-col items-center justify-center z-20">
+				<div class="flex flex-col items-center gap-3">
+					<p class="text-lg font-bold text-white font-mono">
+						Puzzle complete!
+					</p>
+					<button
+						onclick={onNextChallenge}
+						class="px-8 py-2.5 bg-white text-black font-bold rounded-lg
+							text-base hover:bg-gray-100 active:scale-95 transition-all"
+					>
+						Next Challenge
+					</button>
+					<button
+						onclick={onRestart}
+						class="px-6 py-1.5 border border-white/50 text-white/80 rounded-lg
+							text-sm hover:bg-white/10 active:scale-95 transition-all"
+					>
+						Restart
+					</button>
+				</div>
+			</div>
 		{/if}
 	</main>
 
-	<!-- Footer with instructions -->
-	<footer class="flex-none h-16 flex items-center justify-center">
-		<p class="text-xs text-gray-500 dark:text-gray-400 text-center">
-			Tap to cycle colors
-		</p>
+	<!-- Footer instructions -->
+	<footer class="flex-none h-10 flex items-center justify-center">
+		{#if !isCompleted}
+			<p class="text-xs text-gray-400 text-center">
+				Tap to cycle colors &middot; Swipe up for blue, down for red
+			</p>
+		{/if}
 	</footer>
 </div>
 
@@ -72,9 +80,3 @@
 {#if isCompleted}
 	<ConfettiEffect />
 {/if}
-
-<!-- How to Play modal -->
-<HowToPlayModal
-	isOpen={showHowToPlay}
-	onClose={() => (showHowToPlay = false)}
-/>

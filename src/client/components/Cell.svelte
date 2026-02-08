@@ -3,67 +3,73 @@
 
 	type Props = {
 		color: CellColor
+		number: number | null
+		locked: boolean
 		onChange: (color: CellColor) => void
 	}
 
-	let { color, onChange }: Props = $props()
+	let { color, number, locked, onChange }: Props = $props()
 
 	let touchStartY = $state(0)
 	const SWIPE_THRESHOLD = 20
 
 	function handleTouchStart(e: TouchEvent) {
-		touchStartY = e.touches[0].clientY
+		if (locked) return
+		touchStartY = e.touches[0]?.clientY ?? 0
 	}
 
 	function handleTouchEnd(e: TouchEvent) {
-		const touchEndY = e.changedTouches[0].clientY
+		if (locked) return
+		const touchEndY = e.changedTouches[0]?.clientY ?? 0
 		const deltaY = touchStartY - touchEndY
 
 		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
-			// Swipe detected
 			if (deltaY > 0) {
-				// Swipe up → blue
 				onChange('blue')
 			} else {
-				// Swipe down → red
 				onChange('red')
 			}
 		} else {
-			// Tap → cycle colors
 			cycleColor()
 		}
 	}
 
 	function cycleColor() {
+		if (locked) return
 		if (color === null) {
-			onChange('red')
-		} else if (color === 'red') {
 			onChange('blue')
+		} else if (color === 'blue') {
+			onChange('red')
 		} else {
 			onChange(null)
 		}
+	}
+
+	function handleClick() {
+		if (locked) return
+		cycleColor()
 	}
 </script>
 
 <button
 	ontouchstart={handleTouchStart}
 	ontouchend={handleTouchEnd}
-	onclick={cycleColor}
+	onclick={handleClick}
+	disabled={locked}
 	class="
-    relative h-20 w-20 rounded-full
-    flex items-center justify-center
-    transition-transform active:scale-95
-  "
+		relative w-full aspect-square rounded-full
+		flex items-center justify-center
+		transition-transform
+		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
+	"
 >
-	<!-- Empty cells: diagonal split with DARK colors -->
+	<!-- Empty cell: diagonal split with dark colors -->
 	{#if color === null}
 		<div class="absolute inset-0 overflow-hidden rounded-full">
-			<!-- Dark coral half (bottom-left triangle) -->
 			<div
 				class="absolute inset-0 bg-[#8B4A3E]"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%)"
 			></div>
-			<!-- Dark blue half (top-right triangle) -->
 			<div
 				class="absolute inset-0 bg-[#3D5A6F]"
 				style="clip-path: polygon(0 0, 100% 0, 100% 100%)"
@@ -71,11 +77,24 @@
 		</div>
 	{/if}
 
-	<!-- Filled cells: bright solid colors -->
+	<!-- Filled red -->
 	{#if color === 'red'}
 		<div class="absolute inset-0 bg-[#E17560] rounded-full"></div>
 	{/if}
+
+	<!-- Filled blue -->
 	{#if color === 'blue'}
 		<div class="absolute inset-0 bg-[#5B9BD5] rounded-full"></div>
+	{/if}
+
+	<!-- Number overlay -->
+	{#if number !== null}
+		<span
+			class="absolute inset-0 flex items-center justify-center
+				text-white font-bold text-3xl z-10 select-none pointer-events-none
+				drop-shadow-md"
+		>
+			{number}
+		</span>
 	{/if}
 </button>

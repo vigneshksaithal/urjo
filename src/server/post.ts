@@ -1,14 +1,14 @@
 import { context, reddit, redis } from '@devvit/web/server'
 import { generatePuzzle } from './lib/generator'
 
-export const createPost = async (customTitle?: string) => {
+export const createPost = async (customTitle?: string): Promise<{ id: string }> => {
 	const { subredditName } = context
 	if (!subredditName) {
 		throw new Error('subredditName is required')
 	}
 
-	// Generate puzzle
-	const puzzle = generatePuzzle('medium')
+	// Generate puzzle with easy difficulty for shared post puzzle
+	const puzzle = generatePuzzle('easy')
 
 	// Create post with custom title or default
 	const title = customTitle || 'Urjo Puzzle - Can you solve it?'

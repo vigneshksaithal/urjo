@@ -24,6 +24,8 @@ export type GameState = {
 	puzzle: SerializedPuzzle
 	userBoard: string
 	isCompleted: boolean
+	solveCount: number
+	tutorialCompleted: boolean
 }
 
 export type MoveRequest = {
@@ -36,4 +38,13 @@ export type MoveResponse = {
 	success: boolean
 	isComplete: boolean
 	board: string
+}
+
+export type NextChallengeResponse = {
+	puzzle: SerializedPuzzle
+	userBoard: string
+}
+
+export type RestartResponse = {
+	userBoard: string
 }

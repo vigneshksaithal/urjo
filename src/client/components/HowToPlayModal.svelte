@@ -10,7 +10,7 @@
 {#if isOpen}
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
 		<!-- Backdrop -->
-		<div class="absolute inset-0 bg-black/70" onclick={onClose}></div>
+		<button type="button" class="absolute inset-0 bg-black/70" onclick={onClose} aria-label="Close modal"></button>
 
 		<!-- Modal -->
 		<div
