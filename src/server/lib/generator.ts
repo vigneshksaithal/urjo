@@ -7,7 +7,6 @@ import type { Cell, Grid, SerializedPuzzle, CellColor } from '../../shared/types
 
 const GRID_SIZE = 4
 const MAX_GENERATION_ATTEMPTS = 200
-const MAX_HINT_ATTEMPTS = 50
 
 /**
  * Shuffle array (Fisher-Yates)
@@ -335,121 +334,395 @@ function countSolutions(
 	return solutions
 }
 
-// ─── Hint Placement ──────────────────────────────────────────────────────────
+// ─── Logic Solver ────────────────────────────────────────────────────────────
 
-type HintBudget = {
-	lockedMin: number
-	lockedMax: number
-	numberOnlyMin: number
-	numberOnlyMax: number
-}
-
-const HINT_BUDGETS: Record<'easy' | 'medium' | 'hard', HintBudget> = {
-	easy: { lockedMin: 4, lockedMax: 6, numberOnlyMin: 2, numberOnlyMax: 3 },
-	medium: { lockedMin: 2, lockedMax: 4, numberOnlyMin: 2, numberOnlyMax: 3 },
-	hard: { lockedMin: 1, lockedMax: 2, numberOnlyMin: 1, numberOnlyMax: 2 },
-}
-
-function randomInt(min: number, max: number): number {
-	return Math.floor(Math.random() * (max - min + 1)) + min
+/**
+ * Create a deep copy of the grid.
+ */
+function deepCopyGrid(grid: Grid): Grid {
+	return grid.map((row) => row.map((cell) => ({ ...cell })))
 }
 
 /**
- * Add hints to puzzle with three cell types and verify unique solution.
+ * Propagate deterministic constraints on the grid (mutates in place).
+ * Applies balance forcing, number constraints, and adjacent uniqueness.
+ * Returns 'invalid' on contradiction, 'progress' if cells were filled,
+ * or 'stable' if no changes were made.
  */
-function addConstraints(
-	solution: Grid,
-	difficulty: 'easy' | 'medium' | 'hard'
-): { puzzle: Grid; solution: Grid } | null {
-	const budget = HINT_BUDGETS[difficulty]
+function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
+	let anyProgress = false
+	let changed = true
 
-	for (let attempt = 0; attempt < MAX_HINT_ATTEMPTS; attempt++) {
-		// Start with all cells empty
-		const puzzle: Grid = solution.map((row) =>
-			row.map(() => ({
-				color: null as CellColor,
-				number: null as number | null,
-				locked: false,
-			}))
-		)
+	while (changed) {
+		changed = false
 
-		// Generate and shuffle all positions
-		const positions: Array<{ row: number; col: number }> = []
+		// ── Rule 1: Row balance forcing ──
+		for (let row = 0; row < GRID_SIZE; row++) {
+			let red = 0
+			let blue = 0
+			const empty: number[] = []
+			for (let col = 0; col < GRID_SIZE; col++) {
+				const c = grid[row]![col]!.color
+				if (c === 'red') red++
+				else if (c === 'blue') blue++
+				else empty.push(col)
+			}
+			if (red > 2 || blue > 2) return 'invalid'
+			if (empty.length > 0) {
+				if (red === 2) {
+					for (const col of empty) {
+						grid[row]![col]!.color = 'blue'
+					}
+					changed = true
+					anyProgress = true
+				} else if (blue === 2) {
+					for (const col of empty) {
+						grid[row]![col]!.color = 'red'
+					}
+					changed = true
+					anyProgress = true
+				}
+			}
+		}
+
+		// ── Rule 1: Column balance forcing ──
+		for (let col = 0; col < GRID_SIZE; col++) {
+			let red = 0
+			let blue = 0
+			const empty: number[] = []
+			for (let row = 0; row < GRID_SIZE; row++) {
+				const c = grid[row]![col]!.color
+				if (c === 'red') red++
+				else if (c === 'blue') blue++
+				else empty.push(row)
+			}
+			if (red > 2 || blue > 2) return 'invalid'
+			if (empty.length > 0) {
+				if (red === 2) {
+					for (const row of empty) {
+						grid[row]![col]!.color = 'blue'
+					}
+					changed = true
+					anyProgress = true
+				} else if (blue === 2) {
+					for (const row of empty) {
+						grid[row]![col]!.color = 'red'
+					}
+					changed = true
+					anyProgress = true
+				}
+			}
+		}
+
+		// ── Rule 2: Number constraint forcing ──
 		for (let row = 0; row < GRID_SIZE; row++) {
 			for (let col = 0; col < GRID_SIZE; col++) {
-				positions.push({ row, col })
-			}
-		}
-		const shuffled = shuffle(positions)
+				const cell = grid[row]![col]!
+				if (cell.number === null || cell.color === null) continue
 
-		const lockedCount = randomInt(budget.lockedMin, budget.lockedMax)
-		const numberOnlyCount = randomInt(budget.numberOnlyMin, budget.numberOnlyMax)
+				const dirs: Array<[number, number]> = [
+					[row - 1, col],
+					[row + 1, col],
+					[row, col - 1],
+					[row, col + 1],
+				]
+				let sameCount = 0
+				const unfilled: Array<[number, number]> = []
 
-		const lockedPositions = shuffled.slice(0, lockedCount)
-		const numberOnlyPositions = shuffled.slice(lockedCount, lockedCount + numberOnlyCount)
-
-		// Apply locked cells
-		for (const { row, col } of lockedPositions) {
-			const neighborCount = countSameColorNeighbors(solution, row, col)
-			const showNumber = Math.random() < 0.5
-			puzzle[row]![col]! = {
-				color: solution[row]![col]!.color,
-				number: showNumber ? neighborCount : null,
-				locked: true,
-			}
-		}
-
-		// Apply number-only cells
-		const numbersMap = new Map<string, number>()
-		for (const { row, col } of numberOnlyPositions) {
-			const neighborCount = countSameColorNeighbors(solution, row, col)
-			puzzle[row]![col]! = {
-				color: null,
-				number: neighborCount,
-				locked: false,
-			}
-			numbersMap.set(`${row},${col}`, neighborCount)
-		}
-
-		// Check uniqueness
-		const solutionCount = countSolutions(puzzle, numbersMap)
-
-		if (solutionCount === 1) {
-			return { puzzle, solution }
-		}
-
-		// If multiple solutions, try adding more locked cells
-		if (solutionCount > 1) {
-			const remaining = shuffled.slice(lockedCount + numberOnlyCount)
-			let found = false
-
-			for (const { row, col } of remaining) {
-				const cell = puzzle[row]![col]!
-				if (cell.color !== null || cell.number !== null) continue
-
-				puzzle[row]![col]! = {
-					color: solution[row]![col]!.color,
-					number: null,
-					locked: true,
+				for (const [r, c] of dirs) {
+					const n = getCell(grid, r, c)
+					if (!n) continue
+					if (n.color === null) unfilled.push([r, c])
+					else if (n.color === cell.color) sameCount++
 				}
 
-				const newCount = countSolutions(puzzle, numbersMap)
-				if (newCount === 1) {
-					found = true
-					break
-				}
-				if (newCount === 0) {
-					puzzle[row]![col]! = { color: null, number: null, locked: false }
+				if (sameCount > cell.number) return 'invalid'
+				if (sameCount + unfilled.length < cell.number) return 'invalid'
+
+				if (unfilled.length > 0) {
+					if (sameCount === cell.number) {
+						const opp: CellColor = cell.color === 'red' ? 'blue' : 'red'
+						for (const [r, c] of unfilled) {
+							grid[r]![c]!.color = opp
+						}
+						changed = true
+						anyProgress = true
+					} else if (sameCount + unfilled.length === cell.number) {
+						for (const [r, c] of unfilled) {
+							grid[r]![c]!.color = cell.color
+						}
+						changed = true
+						anyProgress = true
+					}
 				}
 			}
+		}
 
-			if (found) {
-				return { puzzle, solution }
+		// ── Rule 3: Adjacent row uniqueness (rows with 1 empty cell) ──
+		for (let i = 0; i < GRID_SIZE; i++) {
+			const row = grid[i]!
+			const emptyCols: number[] = []
+			for (let col = 0; col < GRID_SIZE; col++) {
+				if (row[col]!.color === null) emptyCols.push(col)
+			}
+			if (emptyCols.length !== 1) continue
+			const emptyCol = emptyCols[0]!
+
+			for (const adj of [i - 1, i + 1]) {
+				if (adj < 0 || adj >= GRID_SIZE) continue
+				const adjRow = grid[adj]!
+				if (!adjRow.every((c) => c.color !== null)) continue
+
+				let allMatch = true
+				for (let col = 0; col < GRID_SIZE; col++) {
+					if (col === emptyCol) continue
+					if (row[col]!.color !== adjRow[col]!.color) {
+						allMatch = false
+						break
+					}
+				}
+
+				if (allMatch) {
+					const forbidden = adjRow[emptyCol]!.color!
+					row[emptyCol]!.color = forbidden === 'red' ? 'blue' : 'red'
+					changed = true
+					anyProgress = true
+				}
+			}
+		}
+
+		// ── Rule 3: Adjacent column uniqueness (columns with 1 empty cell) ──
+		for (let col = 0; col < GRID_SIZE; col++) {
+			const emptyRows: number[] = []
+			for (let row = 0; row < GRID_SIZE; row++) {
+				if (grid[row]![col]!.color === null) emptyRows.push(row)
+			}
+			if (emptyRows.length !== 1) continue
+			const emptyRow = emptyRows[0]!
+
+			for (const adj of [col - 1, col + 1]) {
+				if (adj < 0 || adj >= GRID_SIZE) continue
+				if (!grid.every((r) => r[adj]!.color !== null)) continue
+
+				let allMatch = true
+				for (let row = 0; row < GRID_SIZE; row++) {
+					if (row === emptyRow) continue
+					if (grid[row]![col]!.color !== grid[row]![adj]!.color) {
+						allMatch = false
+						break
+					}
+				}
+
+				if (allMatch) {
+					const forbidden = grid[emptyRow]![adj]!.color!
+					grid[emptyRow]![col]!.color = forbidden === 'red' ? 'blue' : 'red'
+					changed = true
+					anyProgress = true
+				}
+			}
+		}
+
+		// ── Validity: Identical adjacent fully-filled lines ──
+		for (let i = 0; i < GRID_SIZE - 1; i++) {
+			const r1 = grid[i]!
+			const r2 = grid[i + 1]!
+			if (
+				r1.every((c) => c.color !== null) &&
+				r2.every((c) => c.color !== null) &&
+				r1.every((c, j) => c.color === r2[j]!.color)
+			) {
+				return 'invalid'
+			}
+		}
+		for (let col = 0; col < GRID_SIZE - 1; col++) {
+			if (
+				grid.every((r) => r[col]!.color !== null) &&
+				grid.every((r) => r[col + 1]!.color !== null) &&
+				grid.every((r) => r[col]!.color === r[col + 1]!.color)
+			) {
+				return 'invalid'
 			}
 		}
 	}
 
-	return null
+	return anyProgress ? 'progress' : 'stable'
+}
+
+/**
+ * Check if placing a color at (row, col) could lead to a valid solution
+ * by propagating all deterministic constraints on a deep copy.
+ */
+function canPlaceColor(
+	grid: Grid,
+	row: number,
+	col: number,
+	color: CellColor
+): boolean {
+	const test = deepCopyGrid(grid)
+	test[row]![col]!.color = color
+	return propagateConstraints(test) !== 'invalid'
+}
+
+/**
+ * Solve a puzzle using only deterministic logic (no guessing/backtracking).
+ * Returns 'solved' if fully determined, 'stuck' if progress stalls,
+ * or 'invalid' if a contradiction is found.
+ */
+function solveByLogic(puzzleGrid: Grid): 'solved' | 'stuck' | 'invalid' {
+	const grid = deepCopyGrid(puzzleGrid)
+
+	let progress = true
+	while (progress) {
+		progress = false
+
+		const result = propagateConstraints(grid)
+		if (result === 'invalid') return 'invalid'
+		if (result === 'progress') {
+			progress = true
+			continue
+		}
+
+		// Rule 4: Elimination – for each empty cell, eliminate impossible colors
+		for (let row = 0; row < GRID_SIZE; row++) {
+			for (let col = 0; col < GRID_SIZE; col++) {
+				if (grid[row]![col]!.color !== null) continue
+
+				const canRed = canPlaceColor(grid, row, col, 'red')
+				const canBlue = canPlaceColor(grid, row, col, 'blue')
+
+				if (!canRed && !canBlue) return 'invalid'
+				if (canRed && !canBlue) {
+					grid[row]![col]!.color = 'red'
+					progress = true
+				} else if (!canRed && canBlue) {
+					grid[row]![col]!.color = 'blue'
+					progress = true
+				}
+			}
+		}
+	}
+
+	const allFilled = grid.every((row) => row.every((cell) => cell.color !== null))
+	if (!allFilled) return 'stuck'
+
+	if (!isBalanced(grid)) return 'invalid'
+	if (hasAdjacentIdenticalRows(grid)) return 'invalid'
+	if (hasAdjacentIdenticalColumns(grid)) return 'invalid'
+	if (!numberConstraintsSatisfied(grid)) return 'invalid'
+
+	return 'solved'
+}
+
+// ─── Clue Generation via Removal ─────────────────────────────────────────────
+
+type DifficultyTarget = {
+	minClues: number
+}
+
+const DIFFICULTY_TARGETS: Record<'easy' | 'medium' | 'hard', DifficultyTarget> = {
+	easy: { minClues: 5 },
+	medium: { minClues: 4 },
+	hard: { minClues: 3 },
+}
+
+/**
+ * Count the number of clue cells (locked or has a number).
+ */
+function countClues(grid: Grid): number {
+	let count = 0
+	for (let row = 0; row < GRID_SIZE; row++) {
+		for (let col = 0; col < GRID_SIZE; col++) {
+			const cell = grid[row]![col]!
+			if (cell.locked || cell.number !== null) count++
+		}
+	}
+	return count
+}
+
+/**
+ * Generate puzzle clues by starting with the full solution and progressively
+ * removing clues while verifying logic solvability at each step.
+ * This guarantees every puzzle is solvable through pure deduction.
+ */
+function generateClues(
+	solution: Grid,
+	difficulty: 'easy' | 'medium' | 'hard'
+): { puzzle: Grid; solution: Grid } | null {
+	const targets = DIFFICULTY_TARGETS[difficulty]
+
+	// Compute neighbor counts for every cell in the solution
+	const neighborCounts: number[][] = []
+	for (let row = 0; row < GRID_SIZE; row++) {
+		const rowCounts: number[] = []
+		for (let col = 0; col < GRID_SIZE; col++) {
+			rowCounts.push(countSameColorNeighbors(solution, row, col))
+		}
+		neighborCounts.push(rowCounts)
+	}
+
+	// Start with full puzzle: all cells locked with color + number
+	const puzzle: Grid = solution.map((row, r) =>
+		row.map((cell, c) => ({
+			color: cell.color,
+			number: neighborCounts[r]![c]!,
+			locked: true,
+		}))
+	)
+
+	// Build shuffled position list for removal order
+	const positions: Array<{ row: number; col: number }> = []
+	for (let row = 0; row < GRID_SIZE; row++) {
+		for (let col = 0; col < GRID_SIZE; col++) {
+			positions.push({ row, col })
+		}
+	}
+	const shuffled = shuffle(positions)
+
+	// Phase 1: Remove clues while maintaining logic solvability
+	for (const { row, col } of shuffled) {
+		if (countClues(puzzle) <= targets.minClues) break
+
+		const saved = { ...puzzle[row]![col]! }
+
+		// Try removing entirely (empty cell)
+		puzzle[row]![col]! = { color: null, number: null, locked: false }
+		if (solveByLogic(puzzle) === 'solved') continue
+
+		// Try keeping number only (no color, player must deduce it)
+		puzzle[row]![col]! = { color: null, number: saved.number, locked: false }
+		if (solveByLogic(puzzle) === 'solved') continue
+
+		// Can't remove — put back full clue
+		puzzle[row]![col]! = saved
+	}
+
+	// Phase 2: Clean up — try removing numbers from locked cells
+	for (const { row, col } of shuffle(positions)) {
+		const cell = puzzle[row]![col]!
+		if (!cell.locked || cell.number === null) continue
+
+		const savedNumber = cell.number
+		cell.number = null
+
+		if (solveByLogic(puzzle) !== 'solved') {
+			cell.number = savedNumber
+		}
+	}
+
+	// Safety net: verify unique solution with brute-force solver
+	const numbersMap = new Map<string, number>()
+	for (let row = 0; row < GRID_SIZE; row++) {
+		for (let col = 0; col < GRID_SIZE; col++) {
+			const cell = puzzle[row]![col]!
+			if (cell.number !== null) {
+				numbersMap.set(`${row},${col}`, cell.number)
+			}
+		}
+	}
+
+	if (countSolutions(puzzle, numbersMap) !== 1) return null
+
+	return { puzzle, solution }
 }
 
 // ─── Serialization ───────────────────────────────────────────────────────────
@@ -522,7 +795,7 @@ export function generatePuzzle(
 ): SerializedPuzzle {
 	for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
 		const solution = generateSolution()
-		const result = addConstraints(solution, difficulty)
+		const result = generateClues(solution, difficulty)
 
 		if (result) {
 			return {

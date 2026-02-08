@@ -32,7 +32,16 @@
 			How to Play
 		</button>
 		<h1 class="text-xl font-bold text-white">Urjo</h1>
-		<div class="w-20"></div>
+		{#if !isCompleted}
+			<button
+				onclick={onNextChallenge}
+				class="text-sm font-medium text-blue-400 hover:underline"
+			>
+				New Puzzle
+			</button>
+		{:else}
+			<div class="w-20"></div>
+		{/if}
 	</header>
 
 	<!-- Main game area -->
@@ -70,7 +79,7 @@
 	<footer class="flex-none h-10 flex items-center justify-center">
 		{#if !isCompleted}
 			<p class="text-xs text-gray-400 text-center">
-				Tap to cycle colors &middot; Swipe up for blue, down for red
+				Tap to cycle colors
 			</p>
 		{/if}
 	</footer>

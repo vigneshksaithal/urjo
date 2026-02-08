@@ -12,6 +12,7 @@
 	let isCompleted = $state(false)
 	let errorMessage = $state('')
 	let puzzleColors = $state('')
+	let moveVersion = 0
 	let puzzleNumbers = $state('')
 	let tutorialCompleted = $state(false)
 
@@ -64,6 +65,9 @@
 				: r
 		)
 
+		// Track move version so stale server responses don't overwrite newer state
+		const thisMove = ++moveVersion
+
 		try {
 			const response = await fetch('/api/game/move', {
 				method: 'POST',
@@ -75,19 +79,23 @@
 
 			const data: MoveResponse = await response.json()
 
-			if (data.isComplete) {
-				isCompleted = true
+			// Only apply server state if no newer move has been made
+			if (thisMove === moveVersion) {
+				if (data.isComplete) {
+					isCompleted = true
+				}
+				grid = deserializeGrid(data.board, puzzleNumbers, puzzleColors)
 			}
-
-			grid = deserializeGrid(data.board, puzzleNumbers, puzzleColors)
 		} catch (error) {
 			console.error('Error saving move:', error)
-			try {
-				const response = await fetch('/api/game/state')
-				const data: GameState = await response.json()
-				grid = deserializeGrid(data.userBoard, data.puzzle.numbers, data.puzzle.colors)
-			} catch {
-				// silent fallback
+			if (thisMove === moveVersion) {
+				try {
+					const response = await fetch('/api/game/state')
+					const data: GameState = await response.json()
+					grid = deserializeGrid(data.userBoard, data.puzzle.numbers, data.puzzle.colors)
+				} catch {
+					// silent fallback
+				}
 			}
 		}
 	}

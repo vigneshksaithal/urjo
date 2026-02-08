@@ -10,32 +10,27 @@
 
 	let { color, number, locked, onChange }: Props = $props()
 
-	let touchStartY = $state(0)
+	let pointerStartY = $state(0)
 	const SWIPE_THRESHOLD = 20
 
-	function handleTouchStart(e: TouchEvent) {
+	function handlePointerDown(e: PointerEvent) {
 		if (locked) return
-		touchStartY = e.touches[0]?.clientY ?? 0
+		pointerStartY = e.clientY
+		;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
 	}
 
-	function handleTouchEnd(e: TouchEvent) {
+	function handlePointerUp(e: PointerEvent) {
 		if (locked) return
-		const touchEndY = e.changedTouches[0]?.clientY ?? 0
-		const deltaY = touchStartY - touchEndY
+		const deltaY = pointerStartY - e.clientY
 
 		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
-			if (deltaY > 0) {
-				onChange('blue')
-			} else {
-				onChange('red')
-			}
+			onChange(deltaY > 0 ? 'blue' : 'red')
 		} else {
 			cycleColor()
 		}
 	}
 
 	function cycleColor() {
-		if (locked) return
 		if (color === null) {
 			onChange('blue')
 		} else if (color === 'blue') {
@@ -44,21 +39,18 @@
 			onChange(null)
 		}
 	}
-
-	function handleClick() {
-		if (locked) return
-		cycleColor()
-	}
 </script>
 
-<button
-	ontouchstart={handleTouchStart}
-	ontouchend={handleTouchEnd}
-	onclick={handleClick}
-	disabled={locked}
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	onpointerdown={handlePointerDown}
+	onpointerup={handlePointerUp}
+	role={locked ? undefined : 'button'}
+	tabindex={locked ? undefined : 0}
 	class="
 		relative w-full aspect-square rounded-full
 		flex items-center justify-center
+		touch-none select-none
 		transition-transform
 		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
 	"
@@ -97,4 +89,4 @@
 			{number}
 		</span>
 	{/if}
-</button>
+</div>
