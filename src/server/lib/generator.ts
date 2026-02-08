@@ -710,12 +710,13 @@ function solveByLogic(puzzleGrid: Grid): 'solved' | 'stuck' | 'invalid' {
 
 type DifficultyTarget = {
 	minClues: number
+	minNumbers: number
 }
 
 const DIFFICULTY_TARGETS: Record<'easy' | 'medium' | 'hard', DifficultyTarget> = {
-	easy: { minClues: 6 },
-	medium: { minClues: 5 },
-	hard: { minClues: 4 },
+	easy: { minClues: 6, minNumbers: 3 },
+	medium: { minClues: 5, minNumbers: 2 },
+	hard: { minClues: 4, minNumbers: 1 },
 }
 
 /**
@@ -727,6 +728,19 @@ function countClues(grid: Grid): number {
 	for (let row = 0; row < GRID_SIZE; row++) {
 		for (let col = 0; col < GRID_SIZE; col++) {
 			if (grid[row]![col]!.locked) count++
+		}
+	}
+	return count
+}
+
+/**
+ * Count the number of cells that have a number clue.
+ */
+function countNumbers(grid: Grid): number {
+	let count = 0
+	for (let row = 0; row < GRID_SIZE; row++) {
+		for (let col = 0; col < GRID_SIZE; col++) {
+			if (grid[row]![col]!.number !== null) count++
 		}
 	}
 	return count
@@ -781,7 +795,10 @@ function generateClues(
 
 	// Phase 1: Remove numbers from cells (keep color, drop number).
 	// This reduces visual clutter while keeping the color as a hint.
+	// Stop early if we've reached the minimum number of number clues.
 	for (const { row, col } of shuffle(positions)) {
+		if (countNumbers(puzzle) <= targets.minNumbers) break
+
 		const cell = puzzle[row]![col]!
 		if (!cell.locked || cell.number === null) continue
 
@@ -795,11 +812,15 @@ function generateClues(
 
 	// Phase 2: Remove entire cells (make empty).
 	// Try to remove cells to reach the difficulty target.
+	// Also ensure removing a numbered cell doesn't drop below minNumbers.
 	for (const { row, col } of shuffle(positions)) {
 		if (countClues(puzzle) <= targets.minClues) break
 
 		const cell = puzzle[row]![col]!
 		if (!cell.locked) continue
+
+		// Don't remove a numbered cell if it would drop below the minimum
+		if (cell.number !== null && countNumbers(puzzle) <= targets.minNumbers) continue
 
 		const saved = { ...cell }
 
@@ -814,7 +835,10 @@ function generateClues(
 
 	// Phase 3: Final cleanup — try removing numbers from remaining locked cells
 	// that still have them, in case earlier removals made them redundant.
+	// Respect the minimum number count for the difficulty level.
 	for (const { row, col } of shuffle(positions)) {
+		if (countNumbers(puzzle) <= targets.minNumbers) break
+
 		const cell = puzzle[row]![col]!
 		if (!cell.locked || cell.number === null) continue
 
