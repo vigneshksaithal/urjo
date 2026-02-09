@@ -16,9 +16,9 @@
 			xmlns="http://www.w3.org/2000/svg"
 			class="drop-shadow-lg"
 		>
-			<circle cx="20" cy="20" r="15" fill="#E17560" />
-			<circle cx="60" cy="20" r="15" fill="#5B9BD5" />
-			<circle cx="20" cy="60" r="15" fill="#5B9BD5" />
+			<circle cx="20" cy="20" r="15" fill="#E54E3E" />
+		<circle cx="60" cy="20" r="15" fill="#3997D7" />
+		<circle cx="20" cy="60" r="15" fill="#3997D7" />
 			<defs>
 				<clipPath id="bottomLeftHalf">
 					<polygon points="45,45 45,75 75,75" />
@@ -27,8 +27,8 @@
 					<polygon points="45,45 75,45 75,75" />
 				</clipPath>
 			</defs>
-			<circle cx="60" cy="60" r="15" fill="#8B4A3E" clip-path="url(#bottomLeftHalf)" />
-			<circle cx="60" cy="60" r="15" fill="#3D5A6F" clip-path="url(#topRightHalf)" />
+		<circle cx="60" cy="60" r="15" fill="#7B2D25" clip-path="url(#bottomLeftHalf)" />
+		<circle cx="60" cy="60" r="15" fill="#28516E" clip-path="url(#topRightHalf)" />
 		</svg>
 	</div>
 

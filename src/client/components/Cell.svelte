@@ -59,11 +59,11 @@
 	{#if color === null}
 		<div class="absolute inset-0 overflow-hidden rounded-full">
 			<div
-				class="absolute inset-0 bg-[#8B4A3E]"
+				class="absolute inset-0 bg-[#7B2D25]"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%)"
 			></div>
 			<div
-				class="absolute inset-0 bg-[#3D5A6F]"
+				class="absolute inset-0 bg-[#28516E]"
 				style="clip-path: polygon(0 0, 100% 0, 100% 100%)"
 			></div>
 		</div>
@@ -71,12 +71,12 @@
 
 	<!-- Filled red -->
 	{#if color === 'red'}
-		<div class="absolute inset-0 bg-[#E17560] rounded-full"></div>
+		<div class="absolute inset-0 bg-[#E54E3E] rounded-full"></div>
 	{/if}
 
 	<!-- Filled blue -->
 	{#if color === 'blue'}
-		<div class="absolute inset-0 bg-[#5B9BD5] rounded-full"></div>
+		<div class="absolute inset-0 bg-[#3997D7] rounded-full"></div>
 	{/if}
 
 	<!-- Number overlay -->

@@ -3,8 +3,8 @@
 /* Tailwind 4 Configuration */
 @theme {
 	/* Custom colors for Urjo game */
-	--color-urjo-coral: #e17560;
-	--color-urjo-blue: #5b9bd5;
+	--color-urjo-coral: #E54E3E;
+	--color-urjo-blue: #3997D7;
 
 	/* Play button animation */
 	--animate-bounce-soft: bounce-soft 2s ease-in-out infinite;

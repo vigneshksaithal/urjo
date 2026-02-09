@@ -8,6 +8,6 @@
 		y={[0.25, 1]}
 		duration={3000}
 		infinite={false}
-		colorArray={['#ef4444', '#3b82f6', '#fbbf24', '#10b981']}
+		colorArray={['#E54E3E', '#3997D7', '#fbbf24', '#10b981']}
 	/>
 </div>
