@@ -1,13 +1,12 @@
 <script lang="ts">
 	import type { Grid, CellColor, GameState, NextChallengeResponse } from '../shared/types'
-	import WelcomeView from './views/WelcomeView.svelte'
 	import GameView from './views/GameView.svelte'
 	import TutorialView from './views/TutorialView.svelte'
 	import { deserializeGrid, serializeGrid } from './lib/utils'
 
-	type View = 'welcome' | 'tutorial' | 'game' | 'loading' | 'error'
+	type View = 'tutorial' | 'game' | 'loading' | 'error'
 
-	let currentView = $state<View>('welcome')
+	let currentView = $state<View>('loading')
 	let grid = $state<Grid>([])
 	let isCompleted = $state(false)
 	let errorMessage = $state('')
@@ -17,9 +16,16 @@
 	let tutorialCompleted = $state(false)
 
 	/**
-	 * Handle "Play" button from welcome screen.
+	 * Auto-load game on mount.
 	 */
-	async function handlePlay() {
+	$effect(() => {
+		loadGame()
+	})
+
+	/**
+	 * Load game state from server.
+	 */
+	async function loadGame() {
 		currentView = 'loading'
 
 		try {
@@ -128,20 +134,32 @@
 </script>
 
 <div class="h-full w-full overflow-hidden bg-[#1a1a1a]">
-	{#if currentView === 'welcome'}
-		<WelcomeView onPlay={handlePlay} />
-	{:else if currentView === 'loading'}
-		<div class="h-full w-full flex items-center justify-center">
-			<p class="text-xl text-gray-300">Loading...</p>
+	{#if currentView === 'loading'}
+		<div class="h-full w-full flex flex-col items-center justify-center gap-6 p-8">
+			<!-- Urjo Title -->
+			<h1 class="text-5xl font-bold text-white">Urjo</h1>
+			
+			<!-- Skeleton Grid -->
+			<div class="grid grid-cols-4 gap-2 w-full max-w-[340px]">
+				{#each Array(16) as _, i}
+					<div 
+						class="w-full aspect-square rounded-full bg-gradient-to-br from-[#E54E3E]/30 to-[#3997D7]/30 animate-pulse-skeleton"
+						style="animation-delay: {i * 50}ms"
+					></div>
+				{/each}
+			</div>
+			
+			<!-- Loading Text -->
+			<p class="text-sm text-gray-400">Loading your puzzle...</p>
 		</div>
 	{:else if currentView === 'error'}
 		<div class="h-full w-full flex flex-col items-center justify-center p-8">
 			<p class="text-xl text-red-400 mb-4">Error: {errorMessage}</p>
 			<button
-				onclick={() => (currentView = 'welcome')}
+				onclick={loadGame}
 				class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
 			>
-				Back
+				Retry
 			</button>
 		</div>
 	{:else if currentView === 'tutorial'}
