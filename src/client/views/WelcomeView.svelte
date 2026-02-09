@@ -61,6 +61,4 @@
 			Play
 		</span>
 	</button>
-
-	<p class="text-gray-500 text-xs mt-4">Tap to start</p>
 </div>
