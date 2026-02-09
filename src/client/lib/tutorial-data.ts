@@ -45,7 +45,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 	{
 		// Step 1: Teach column balance
 		// Col 0 = R, R, B, ? → already 2 red → must be blue
-		instruction: 'Each line requires 2 red and 2 blue spots. Select blue.',
+		instruction: 'Tap to change colors. Each line needs 2 red and 2 blue spots. Tap the spot to make it blue.',
 		highlightType: 'column',
 		highlightIndex: 0,
 		targetCells: [{ row: 3, col: 0, expectedColor: 'blue' }],
@@ -56,7 +56,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 		// Step 2: Teach row balance
 		// Row 2 = B, ?, ?, B → already 2 blue → remaining must be red
 		instruction:
-			'This line already contains 2 blue spots. Color the remaining spots red.',
+			'This line already has 2 blue spots. Tap the remaining spots to make them red.',
 		highlightType: 'row',
 		highlightIndex: 2,
 		targetCells: [
@@ -72,7 +72,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 		//   (0,0)=R ✓, (0,1)=B ✗, (1,1)=?, (2,0)=B ✗, (2,1)=R ✓ (diagonal!)
 		// Same-color count = 2, needs 3 → (1,1) must be red
 		instruction:
-			'Red number 3 needs 3 red spots around it. Diagonals count too!',
+			'Red number 3 needs 3 red spots around it. Diagonals count too! Tap to make it red.',
 		highlightType: 'row',
 		highlightIndex: 1,
 		targetCells: [{ row: 1, col: 1, expectedColor: 'red' }],
@@ -82,7 +82,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 	{
 		// Step 4: Row balance for row 1
 		// Row 1 = R, R, ?, ? → already 2 red → remaining must be blue
-		instruction: 'Required: 2 red and 2 blue spots.',
+		instruction: 'Required: 2 red and 2 blue spots. Tap to make these blue.',
 		highlightType: 'row',
 		highlightIndex: 1,
 		targetCells: [
@@ -96,7 +96,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 		// Step 5: Column balance for column 3
 		// Col 3 = ?, B, B, ? → already 2 blue → remaining must be red
 		instruction:
-			'This line already contains 2 blue spots. Color the remaining spots red.',
+			'This line already has 2 blue spots. Tap the remaining spots to make them red.',
 		highlightType: 'column',
 		highlightIndex: 3,
 		targetCells: [
@@ -109,7 +109,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 	{
 		// Step 6: Row balance for row 0
 		// Row 0 = R, B, ?, R → already 2 red → (0,2) must be blue
-		instruction: 'Required: 2 red and 2 blue spots.',
+		instruction: 'Required: 2 red and 2 blue spots. Tap to make it blue.',
 		highlightType: 'row',
 		highlightIndex: 0,
 		targetCells: [{ row: 0, col: 2, expectedColor: 'blue' }],
@@ -121,7 +121,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 		// Col 1 = B, R, R, ? → already 2 red → (3,1) must be blue
 		// Also: row 3 must differ from adjacent row 2
 		instruction:
-			'Adjacent lines must be different. This line already has 2 red spots.',
+			'Adjacent lines must be different. This line already has 2 red spots. Tap to make it blue.',
 		highlightType: 'column',
 		highlightIndex: 1,
 		targetCells: [{ row: 3, col: 1, expectedColor: 'blue' }],
@@ -131,7 +131,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
 	{
 		// Step 8: Complete the puzzle
 		// Row 3 = B, B, ?, R → needs 1 more red → (3,2) = red
-		instruction: 'Complete the remaining spots.',
+		instruction: 'Complete the remaining spots. Tap to finish!',
 		highlightType: 'row',
 		highlightIndex: 3,
 		targetCells: [{ row: 3, col: 2, expectedColor: 'red' }],

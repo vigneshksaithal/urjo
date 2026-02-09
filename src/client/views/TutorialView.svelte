@@ -8,6 +8,7 @@
 	import type { TutorialStep } from '../lib/tutorial-data'
 	import GameBoard from '../components/GameBoard.svelte'
 	import ConfettiEffect from '../components/ConfettiEffect.svelte'
+	import ArrowDownLeft from 'lucide-svelte/icons/arrow-down-left'
 
 	type Props = {
 		onComplete: () => void
@@ -105,10 +106,11 @@
 		}
 	}
 
-	function getHandStyle(step: TutorialStep): string {
+	function getArrowStyle(step: TutorialStep): string {
 		const cellPercent = 25
-		const top = step.handRow * cellPercent + cellPercent * 0.6
-		const left = step.handCol * cellPercent + cellPercent * 0.3
+		// Position arrow outside and above the target cell, pointing towards it
+		const top = step.handRow * cellPercent - 8 // 8% above the cell
+		const left = step.handCol * cellPercent + cellPercent * 1.1 // Slightly to the right
 		return `top: ${top}%; left: ${left}%;`
 	}
 
@@ -147,33 +149,20 @@
 				></div>
 			{/if}
 
-			<!-- Hand icon -->
-			{#if currentStep && !tutorialDone}
-				<div
-					class="absolute pointer-events-none z-20 w-12 h-12"
-					style={getHandStyle(currentStep)}
-				>
-					<svg
-						viewBox="0 0 64 64"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-						class="w-full h-full drop-shadow-lg"
-					>
-						<path
-							d="M32 4C30 4 28 6 28 8V28L16 24C14 23.3 12 24 11 26C10 28 11 30 13 31L28 36V48C28 52 30 56 34 56H42C46 56 50 52 50 48V24C50 12 44 4 32 4Z"
-							fill="white"
-							stroke="#333"
-							stroke-width="2"
-						/>
-						<path
-							d="M36 8V28M42 12V28M28 28V8"
-							stroke="#333"
-							stroke-width="1.5"
-							stroke-linecap="round"
-						/>
-					</svg>
-				</div>
-			{/if}
+		<!-- Arrow pointer: positioned outside, pointing towards cell to tap -->
+		{#if currentStep && !tutorialDone}
+			<div
+				class="absolute pointer-events-none z-20"
+				style={getArrowStyle(currentStep)}
+			>
+				<ArrowDownLeft 
+					size={40}
+					color="white"
+					strokeWidth={3}
+					class="drop-shadow-lg animate-bounce"
+				/>
+			</div>
+		{/if}
 
 			<!-- Completion overlay -->
 			{#if tutorialDone}
