@@ -145,27 +145,41 @@ describe('number constraints', () => {
 
 // ─── countSameColorNeighbors ─────────────────────────────────────────────────
 
-describe('countSameColorNeighbors', () => {
-	it('returns 0 for a corner cell with no same-color neighbors', () => {
+describe('countSameColorNeighbors (8-directional)', () => {
+	it('counts diagonal neighbor for a corner cell', () => {
 		const grid = gridFromColors([
 			['red', 'blue', 'red', 'blue'],
 			['blue', 'red', 'blue', 'red'],
 			['red', 'blue', 'red', 'blue'],
 			['blue', 'red', 'blue', 'red'],
 		])
-		// (0,0) is red, neighbors: right=blue, below=blue → 0
-		expect(countSameColorNeighbors(grid, 0, 0)).toBe(0)
+		// (0,0) is red; 8-dir neighbors: right=blue, below=blue, diagonal(1,1)=red → 1
+		expect(countSameColorNeighbors(grid, 0, 0)).toBe(1)
 	})
 
-	it('returns correct count for an interior cell', () => {
+	it('counts all 8 directions for an interior cell', () => {
 		const grid = gridFromColors([
 			['red', 'red', 'blue', 'blue'],
 			['red', 'red', 'blue', 'blue'],
 			['blue', 'blue', 'red', 'red'],
 			['blue', 'blue', 'red', 'red'],
 		])
-		// (1,1) is red; neighbors: up=red, down=blue, left=red, right=blue → 2
-		expect(countSameColorNeighbors(grid, 1, 1)).toBe(2)
+		// (1,1) is red; 8-dir neighbors:
+		//   (0,0)=R, (0,1)=R, (0,2)=B,
+		//   (1,0)=R,          (1,2)=B,
+		//   (2,0)=B, (2,1)=B, (2,2)=R → 4 red
+		expect(countSameColorNeighbors(grid, 1, 1)).toBe(4)
+	})
+
+	it('returns 0 for a corner cell surrounded by opposite color', () => {
+		const grid = gridFromColors([
+			['red', 'blue', 'red', 'blue'],
+			['blue', 'blue', 'red', 'blue'],
+			['red', 'blue', 'red', 'blue'],
+			['blue', 'red', 'blue', 'red'],
+		])
+		// (0,0) is red; 8-dir neighbors: (0,1)=blue, (1,0)=blue, (1,1)=blue → 0
+		expect(countSameColorNeighbors(grid, 0, 0)).toBe(0)
 	})
 
 	it('returns 0 for null-colored cell', () => {
@@ -176,6 +190,19 @@ describe('countSameColorNeighbors', () => {
 			['blue', 'blue', 'red', 'red'],
 		])
 		expect(countSameColorNeighbors(grid, 0, 0)).toBe(0)
+	})
+
+	it('counts edge cell neighbors correctly (5 possible neighbors)', () => {
+		const grid = gridFromColors([
+			['red', 'red', 'red', 'blue'],
+			['red', 'red', 'blue', 'blue'],
+			['blue', 'blue', 'red', 'red'],
+			['blue', 'blue', 'red', 'red'],
+		])
+		// (0,1) is red; 8-dir neighbors:
+		//   (0,0)=R,          (0,2)=R,
+		//   (1,0)=R, (1,1)=R, (1,2)=B → 4 red (out of 5 possible)
+		expect(countSameColorNeighbors(grid, 0, 1)).toBe(4)
 	})
 })
 

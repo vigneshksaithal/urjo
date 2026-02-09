@@ -20,28 +20,28 @@
 				How to Play
 			</h2>
 
-			<ul class="space-y-3 text-sm text-gray-700 dark:text-gray-300">
-				<li class="flex items-start gap-2">
-					<span class="text-lg">🎯</span>
-					<span>Fill each row with exactly 2 red and 2 blue circles</span>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">📊</span>
-					<span>Fill each column with exactly 2 red and 2 blue circles</span>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">🔄</span>
-					<span>Adjacent rows must be different</span>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">👆</span>
-					<span>Tap to cycle colors: empty → red → blue → empty</span>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">⬆️</span>
-					<span>Swipe up for blue, swipe down for red</span>
-				</li>
-			</ul>
+		<ul class="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+			<li class="flex items-start gap-2">
+				<span class="text-lg">🎯</span>
+				<span>Fill each row and column with exactly 2 red and 2 blue circles</span>
+			</li>
+			<li class="flex items-start gap-2">
+				<span class="text-lg">🔢</span>
+				<span>Numbers show how many surrounding spots (including diagonals) share the same color</span>
+			</li>
+			<li class="flex items-start gap-2">
+				<span class="text-lg">🔄</span>
+				<span>Adjacent rows and columns must be different</span>
+			</li>
+			<li class="flex items-start gap-2">
+				<span class="text-lg">👆</span>
+				<span>Tap to cycle colors: empty → red → blue → empty</span>
+			</li>
+			<li class="flex items-start gap-2">
+				<span class="text-lg">⬆️</span>
+				<span>Swipe up for blue, swipe down for red</span>
+			</li>
+		</ul>
 
 			<button
 				onclick={onClose}

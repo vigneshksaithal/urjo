@@ -4,8 +4,8 @@
  *
  * Rules:
  * 1. Each row and column has exactly 2 red and 2 blue cells.
- * 2. Numbers on a cell indicate how many orthogonal neighbors share
- *    that cell's color. Numbers are ALWAYS colored (never colorless).
+ * 2. Numbers on a cell indicate how many surrounding neighbors (including
+ *    diagonals) share that cell's color. Numbers are ALWAYS colored (never colorless).
  * 3. No two adjacent rows are identical; no two adjacent columns are identical.
  *
  * Valid clue types:
@@ -18,6 +18,13 @@ import type { Cell, Grid, SerializedPuzzle, CellColor } from '../../shared/types
 
 const GRID_SIZE = 4
 const MAX_GENERATION_ATTEMPTS = 200
+
+/** All 8 surrounding directions (orthogonal + diagonal). */
+const ALL_DIRECTIONS: ReadonlyArray<[number, number]> = [
+	[-1, -1], [-1, 0], [-1, 1],
+	[ 0, -1],          [ 0, 1],
+	[ 1, -1], [ 1, 0], [ 1, 1],
+]
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -53,7 +60,8 @@ function deepCopyGrid(grid: Grid): Grid {
 // ─── Constraint Checkers ─────────────────────────────────────────────────────
 
 /**
- * Count orthogonal neighbors of same color (up, down, left, right only).
+ * Count all surrounding neighbors (including diagonals) of same color.
+ * Checks all 8 directions: up, down, left, right, and 4 diagonals.
  */
 export function countSameColorNeighbors(grid: Grid, row: number, col: number): number {
 	const cell = getCell(grid, row, col)
@@ -61,15 +69,9 @@ export function countSameColorNeighbors(grid: Grid, row: number, col: number): n
 
 	const color = cell.color
 	let count = 0
-	const neighbors: Array<[number, number]> = [
-		[row - 1, col],
-		[row + 1, col],
-		[row, col - 1],
-		[row, col + 1],
-	]
 
-	for (const [nr, nc] of neighbors) {
-		const neighbor = getCell(grid, nr, nc)
+	for (const [dr, dc] of ALL_DIRECTIONS) {
+		const neighbor = getCell(grid, row + dr, col + dc)
 		if (neighbor && neighbor.color === color) {
 			count++
 		}
@@ -327,16 +329,14 @@ function couldBeValid(grid: Grid, row: number, col: number): boolean {
 		}
 	}
 
-	// Check number constraints for this cell and its neighbors.
-	// Numbers always have a color in valid Urjo puzzles, so we only
-	// check cells where both color and number are present.
-	const cellsToCheck: Array<[number, number]> = [
-		[row, col],
-		[row - 1, col],
-		[row + 1, col],
-		[row, col - 1],
-		[row, col + 1],
-	]
+	// Check number constraints for this cell and all 8 surrounding neighbors.
+	// Any neighboring cell (including diagonals) with a number could be
+	// affected by the color we just placed. Numbers always have a color
+	// in valid Urjo puzzles, so we only check cells where both are present.
+	const cellsToCheck: Array<[number, number]> = [[row, col]]
+	for (const [dr, dc] of ALL_DIRECTIONS) {
+		cellsToCheck.push([row + dr, col + dc])
+	}
 
 	for (const [r, c] of cellsToCheck) {
 		const checkCell = getCell(grid, r, c)
@@ -344,14 +344,8 @@ function couldBeValid(grid: Grid, row: number, col: number): boolean {
 
 		let sameCount = 0
 		let unfilledCount = 0
-		const dirs: Array<[number, number]> = [
-			[r - 1, c],
-			[r + 1, c],
-			[r, c - 1],
-			[r, c + 1],
-		]
-		for (const [dr, dc] of dirs) {
-			const neighbor = getCell(grid, dr, dc)
+		for (const [dr, dc] of ALL_DIRECTIONS) {
+			const neighbor = getCell(grid, r + dr, c + dc)
 			if (!neighbor) continue
 			if (neighbor.color === null) {
 				unfilledCount++
@@ -500,28 +494,23 @@ function propagateConstraints(grid: Grid): 'invalid' | 'progress' | 'stable' {
 
 		// ── Rule 2: Number constraint forcing ──
 		// Numbers always have a color in valid Urjo puzzles.
-		// If a numbered cell's same-color neighbor count is satisfied, remaining
-		// neighbors must be the opposite color. If all unfilled neighbors are
-		// needed to reach the count, they must all be the same color.
+		// If a numbered cell's same-color neighbor count (all 8 directions)
+		// is satisfied, remaining neighbors must be the opposite color.
+		// If all unfilled neighbors are needed to reach the count, they
+		// must all be the same color.
 		for (let row = 0; row < GRID_SIZE; row++) {
 			for (let col = 0; col < GRID_SIZE; col++) {
 				const cell = grid[row]![col]!
 				// Only process cells with both a color and a number
 				if (cell.number === null || cell.color === null) continue
 
-				const dirs: Array<[number, number]> = [
-					[row - 1, col],
-					[row + 1, col],
-					[row, col - 1],
-					[row, col + 1],
-				]
 				let sameCount = 0
 				const unfilled: Array<[number, number]> = []
 
-				for (const [r, c] of dirs) {
-					const n = getCell(grid, r, c)
+				for (const [dr, dc] of ALL_DIRECTIONS) {
+					const n = getCell(grid, row + dr, col + dc)
 					if (!n) continue
-					if (n.color === null) unfilled.push([r, c])
+					if (n.color === null) unfilled.push([row + dr, col + dc])
 					else if (n.color === cell.color) sameCount++
 				}
 
