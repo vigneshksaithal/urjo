@@ -10,7 +10,7 @@
 	let { grid, onCellChange }: Props = $props()
 </script>
 
-<div class="grid grid-cols-4 gap-2 w-full max-w-[340px] mx-auto">
+<div class="grid grid-cols-4 gap-0 w-full max-w-[340px] mx-auto">
 	{#each grid as row, rowIndex}
 		{#each row as cell, colIndex}
 			<Cell
