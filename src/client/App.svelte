@@ -4,30 +4,41 @@
 	import TutorialView from './views/TutorialView.svelte'
 	import { deserializeGrid, serializeGrid } from './lib/utils'
 
-	type View = 'tutorial' | 'game' | 'loading' | 'error'
+	type View = 'game' | 'tutorial' | 'error'
 
-	let currentView = $state<View>('loading')
-	let grid = $state<Grid>([])
+	const PLACEHOLDER_COLORS = 'brbbrbbrbrbbrbrbbrbbrbbrbrbbrbrbbrbbrbbrbbrb'
+	const PLACEHOLDER_NUMBERS = '----------------'
+
+	let currentView = $state<View>('game')
+	let grid = $state<Grid>(createPlaceholderGrid())
 	let isCompleted = $state(false)
 	let errorMessage = $state('')
-	let puzzleColors = $state('')
-	let puzzleNumbers = $state('')
+	let puzzleColors = $state(PLACEHOLDER_COLORS)
+	let puzzleNumbers = $state(PLACEHOLDER_NUMBERS)
 	let puzzleSolution = $state('')
 	let tutorialCompleted = $state(false)
 
-	/**
-	 * Auto-load game on mount.
-	 */
+	function createPlaceholderGrid(): Grid {
+		const result: Grid = []
+		let index = 0
+		for (let row = 0; row < 4; row++) {
+			const rowCells = []
+			for (let col = 0; col < 4; col++) {
+				const colorChar = PLACEHOLDER_COLORS[index]
+				const color: CellColor = colorChar === 'r' ? 'red' : colorChar === 'b' ? 'blue' : null
+				rowCells.push({ color, number: null, locked: false })
+				index++
+			}
+			result.push(rowCells)
+		}
+		return result
+	}
+
 	$effect(() => {
 		loadGame()
 	})
 
-	/**
-	 * Load game state from server.
-	 */
 	async function loadGame() {
-		currentView = 'loading'
-
 		try {
 			const response = await fetch('/api/game/state')
 			if (!response.ok) throw new Error('Failed to load game')
@@ -44,8 +55,6 @@
 
 			if (!data.tutorialCompleted) {
 				currentView = 'tutorial'
-			} else {
-				currentView = 'game'
 			}
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Failed to load game'
@@ -83,8 +92,6 @@
 	 * Handle "Next Challenge" button.
 	 */
 	async function handleNextChallenge() {
-		currentView = 'loading'
-
 		try {
 			const response = await fetch('/api/game/next-challenge', { method: 'POST' })
 			if (!response.ok) throw new Error('Failed to get next challenge')
@@ -96,7 +103,6 @@
 			puzzleSolution = data.puzzle.solution
 			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
 			isCompleted = false
-			currentView = 'game'
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Failed to load next challenge'
 			currentView = 'error'
@@ -134,25 +140,7 @@
 </script>
 
 <div class="h-full w-full overflow-hidden bg-[#1a1a1a]">
-	{#if currentView === 'loading'}
-		<div class="h-full w-full flex flex-col items-center justify-center gap-6 p-8">
-			<!-- Urjo Title -->
-			<h1 class="text-5xl font-bold text-white">Urjo</h1>
-			
-			<!-- Skeleton Grid -->
-			<div class="grid grid-cols-4 gap-2 w-full max-w-[340px]">
-				{#each Array(16) as _, i}
-					<div 
-						class="w-full aspect-square rounded-full bg-gradient-to-br from-[#E54E3E]/30 to-[#3997D7]/30 animate-pulse-skeleton"
-						style="animation-delay: {i * 50}ms"
-					></div>
-				{/each}
-			</div>
-			
-			<!-- Loading Text -->
-			<p class="text-sm text-gray-400">Loading your puzzle...</p>
-		</div>
-	{:else if currentView === 'error'}
+	{#if currentView === 'error'}
 		<div class="h-full w-full flex flex-col items-center justify-center p-8">
 			<p class="text-xl text-red-400 mb-4">Error: {errorMessage}</p>
 			<button
