@@ -9,6 +9,7 @@ export type Cell = {
 	color: CellColor
 	number: number | null
 	locked: boolean
+	isLoading?: boolean
 }
 
 export type Grid = Cell[][]

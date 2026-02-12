@@ -5,13 +5,22 @@
 		color: CellColor
 		number: number | null
 		locked: boolean
+		rowIndex?: number
+		colIndex?: number
+		isLoading: boolean
 		onChange: (color: CellColor) => void
 	}
 
-	let { color, number, locked, onChange }: Props = $props()
+	let { color, number, locked, rowIndex, colIndex, isLoading = false, onChange }: Props = $props()
 
 	let pointerStartY = $state(0)
 	const SWIPE_THRESHOLD = 20
+
+	const animationDelay = $derived(
+		rowIndex !== undefined && colIndex !== undefined
+			? `${(rowIndex + colIndex) * 50}ms`
+			: '0ms'
+	)
 
 	function handlePointerDown(e: PointerEvent) {
 		if (locked) return
@@ -55,8 +64,22 @@
 		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
 	"
 >
-	<!-- Empty cell: diagonal split with dark colors -->
-	{#if color === null}
+	<!-- Loading state: animated empty cell with diagonal split -->
+	{#if isLoading && color === null}
+		<div class="absolute inset-0 overflow-hidden rounded-full">
+			<div
+				class="absolute inset-0 bg-[#E54E3E] animate-loading-red"
+				style="clip-path: polygon(0 0, 0 100%, 100% 100%); animation-delay: {animationDelay}"
+			></div>
+			<div
+				class="absolute inset-0 bg-[#3997D7] animate-loading-blue"
+				style="clip-path: polygon(0 0, 100% 0, 100% 100%); animation-delay: {animationDelay}"
+			></div>
+		</div>
+	{/if}
+
+	<!-- Empty cell: diagonal split with dark colors (non-loading) -->
+	{#if !isLoading && color === null}
 		<div class="absolute inset-0 overflow-hidden rounded-full">
 			<div
 				class="absolute inset-0 bg-[#7B2D25]"
@@ -69,14 +92,30 @@
 		</div>
 	{/if}
 
-	<!-- Filled red -->
-	{#if color === 'red'}
-		<div class="absolute inset-0 bg-[#E54E3E] rounded-full"></div>
+	<!-- Loading state: animated red cell -->
+	{#if isLoading && (color === 'red' || color === null)}
+		<div
+			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue"
+			style="animation-delay: {animationDelay}"
+		></div>
 	{/if}
 
-	<!-- Filled blue -->
-	{#if color === 'blue'}
-		<div class="absolute inset-0 bg-[#3997D7] rounded-full"></div>
+	<!-- Loading state: animated blue cell -->
+	{#if isLoading && color === 'blue'}
+		<div
+			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red"
+			style="animation-delay: {animationDelay}"
+		></div>
+	{/if}
+
+	<!-- Non-loading: filled red -->
+	{#if !isLoading && color === 'red'}
+		<div class="absolute inset-0 bg-[#E54E3E] rounded-full transition-opacity duration-500" class:opacity-0={isLoading}></div>
+	{/if}
+
+	<!-- Non-loading: filled blue -->
+	{#if !isLoading && color === 'blue'}
+		<div class="absolute inset-0 bg-[#3997D7] rounded-full transition-opacity duration-500" class:opacity-0={isLoading}></div>
 	{/if}
 
 	<!-- Number overlay -->
@@ -90,3 +129,31 @@
 		</span>
 	{/if}
 </div>
+
+<style>
+	@keyframes loadingRedBlue {
+		0%, 100% {
+			background-color: #E54E3E;
+		}
+		50% {
+			background-color: #3997D7;
+		}
+	}
+
+	@keyframes loadingBlueRed {
+		0%, 100% {
+			background-color: #3997D7;
+		}
+		50% {
+			background-color: #E54E3E;
+		}
+	}
+
+	.animate-loading-red {
+		animation: loadingRedBlue 600ms ease-in-out infinite;
+	}
+
+	.animate-loading-blue {
+		animation: loadingBlueRed 600ms ease-in-out infinite;
+	}
+</style>

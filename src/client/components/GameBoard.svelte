@@ -17,6 +17,9 @@
 				color={cell.color}
 				number={cell.number}
 				locked={cell.locked}
+				rowIndex={rowIndex}
+				colIndex={colIndex}
+				isLoading={cell.isLoading ?? false}
 				onChange={(color) => onCellChange(rowIndex, colIndex, color)}
 			/>
 		{/each}

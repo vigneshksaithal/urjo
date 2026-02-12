@@ -26,7 +26,7 @@
 			for (let col = 0; col < 4; col++) {
 				const colorChar = PLACEHOLDER_COLORS[index]
 				const color: CellColor = colorChar === 'r' ? 'red' : colorChar === 'b' ? 'blue' : null
-				rowCells.push({ color, number: null, locked: false })
+				rowCells.push({ color, number: null, locked: false, isLoading: true })
 				index++
 			}
 			result.push(rowCells)
@@ -51,6 +51,7 @@
 			tutorialCompleted = data.tutorialCompleted
 
 			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
+				.map(row => row.map(cell => ({ ...cell, isLoading: false })))
 			isCompleted = false
 
 			if (!data.tutorialCompleted) {
@@ -102,6 +103,7 @@
 			puzzleNumbers = data.puzzle.numbers
 			puzzleSolution = data.puzzle.solution
 			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
+				.map(row => row.map(cell => ({ ...cell, isLoading: false })))
 			isCompleted = false
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Failed to load next challenge'
