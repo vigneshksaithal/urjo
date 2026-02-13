@@ -46,6 +46,11 @@
 
 	<!-- Main game area -->
 	<main class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative">
+		<!-- Upvote request -->
+		<p class="text-sm text-gray-500 text-center">
+			Enjoying Urjo? Upvote if you like it!
+		</p>
+
 		<!-- Game board -->
 		<GameBoard {grid} {onCellChange} />
 
