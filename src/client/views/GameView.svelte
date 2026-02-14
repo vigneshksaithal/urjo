@@ -5,6 +5,7 @@
 
 	type Props = {
 		grid: Grid
+		gridSize: number
 		onCellChange: (row: number, col: number, color: CellColor) => void
 		isCompleted: boolean
 		onNextChallenge: () => void
@@ -14,6 +15,7 @@
 
 	let {
 		grid,
+		gridSize,
 		onCellChange,
 		isCompleted,
 		onNextChallenge,
@@ -52,7 +54,7 @@
 		</p>
 
 		<!-- Game board -->
-		<GameBoard {grid} {onCellChange} />
+		<GameBoard {grid} {gridSize} {onCellChange} />
 
 		<!-- Completion overlay -->
 		{#if isCompleted}

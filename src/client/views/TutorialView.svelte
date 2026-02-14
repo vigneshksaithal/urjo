@@ -139,7 +139,7 @@
 	<main class="flex-1 min-h-0 flex flex-col items-center justify-center">
 		<div class="relative w-full max-w-[340px] mx-auto">
 			<!-- The game board -->
-			<GameBoard {grid} onCellChange={handleCellChange} />
+			<GameBoard {grid} gridSize={GRID_SIZE} onCellChange={handleCellChange} />
 
 			<!-- Highlight overlay -->
 			{#if currentStep && !tutorialDone}

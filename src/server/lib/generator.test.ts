@@ -18,7 +18,7 @@ function gridFromColors(colors: CellColor[][]): Grid {
 }
 
 function deserializePuzzle(puzzle: ReturnType<typeof generatePuzzle>): Grid {
-	return deserializeGrid(puzzle.colors, puzzle.numbers, puzzle.colors)
+	return deserializeGrid(puzzle.colors, puzzle.numbers, puzzle.gridSize, puzzle.colors)
 }
 
 describe('generatePuzzle', () => {
@@ -36,24 +36,24 @@ describe('generatePuzzle', () => {
 	it('solution satisfies balance constraint (2 red, 2 blue per row/col)', () => {
 		for (let i = 0; i < 5; i++) {
 			const puzzle = generatePuzzle('medium')
-			const solutionGrid = deserializeGrid(puzzle.solution, '----------------')
-			expect(isBalanced(solutionGrid)).toBe(true)
+			const solutionGrid = deserializeGrid(puzzle.solution, '----------------', 4)
+			expect(isBalanced(solutionGrid, 4)).toBe(true)
 		}
 	})
 
 	it('solution has no adjacent identical rows', () => {
 		for (let i = 0; i < 5; i++) {
 			const puzzle = generatePuzzle('medium')
-			const solutionGrid = deserializeGrid(puzzle.solution, '----------------')
-			expect(hasAdjacentIdenticalRows(solutionGrid)).toBe(false)
+			const solutionGrid = deserializeGrid(puzzle.solution, '----------------', 4)
+			expect(hasAdjacentIdenticalRows(solutionGrid, 4)).toBe(false)
 		}
 	})
 
 	it('solution has no adjacent identical columns', () => {
 		for (let i = 0; i < 5; i++) {
 			const puzzle = generatePuzzle('medium')
-			const solutionGrid = deserializeGrid(puzzle.solution, '----------------')
-			expect(hasAdjacentIdenticalColumns(solutionGrid)).toBe(false)
+			const solutionGrid = deserializeGrid(puzzle.solution, '----------------', 4)
+			expect(hasAdjacentIdenticalColumns(solutionGrid, 4)).toBe(false)
 		}
 	})
 })
@@ -115,13 +115,13 @@ describe('number constraints', () => {
 	it('numbers match actual same-color neighbor counts in solution', () => {
 		for (let i = 0; i < 5; i++) {
 			const puzzle = generatePuzzle('medium')
-			const solutionGrid = deserializeGrid(puzzle.solution, puzzle.numbers)
+			const solutionGrid = deserializeGrid(puzzle.solution, puzzle.numbers, 4)
 
 			for (let r = 0; r < 4; r++) {
 				for (let c = 0; c < 4; c++) {
 					const cell = solutionGrid[r]![c]!
 					if (cell.number !== null) {
-						const actual = countSameColorNeighbors(solutionGrid, r, c)
+						const actual = countSameColorNeighbors(solutionGrid, r, c, 4)
 						expect(actual).toBe(cell.number)
 					}
 				}
@@ -138,7 +138,7 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['red', 'blue', 'red', 'blue'],
 			['blue', 'red', 'blue', 'red'],
 		])
-		expect(countSameColorNeighbors(grid, 0, 0)).toBe(1)
+		expect(countSameColorNeighbors(grid, 0, 0, 4)).toBe(1)
 	})
 
 	it('counts all 8 directions for an interior cell', () => {
@@ -148,7 +148,7 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['blue', 'blue', 'red', 'red'],
 			['blue', 'blue', 'red', 'red'],
 		])
-		expect(countSameColorNeighbors(grid, 1, 1)).toBe(4)
+		expect(countSameColorNeighbors(grid, 1, 1, 4)).toBe(4)
 	})
 
 	it('returns 0 for a corner cell surrounded by opposite color', () => {
@@ -158,7 +158,7 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['red', 'blue', 'red', 'blue'],
 			['blue', 'red', 'blue', 'red'],
 		])
-		expect(countSameColorNeighbors(grid, 0, 0)).toBe(0)
+		expect(countSameColorNeighbors(grid, 0, 0, 4)).toBe(0)
 	})
 
 	it('returns 0 for null-colored cell', () => {
@@ -168,7 +168,7 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['blue', 'blue', 'red', 'red'],
 			['blue', 'blue', 'red', 'red'],
 		])
-		expect(countSameColorNeighbors(grid, 0, 0)).toBe(0)
+		expect(countSameColorNeighbors(grid, 0, 0, 4)).toBe(0)
 	})
 
 	it('counts edge cell neighbors correctly (5 possible neighbors)', () => {
@@ -178,7 +178,7 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['blue', 'blue', 'red', 'red'],
 			['blue', 'blue', 'red', 'red'],
 		])
-		expect(countSameColorNeighbors(grid, 0, 1)).toBe(4)
+		expect(countSameColorNeighbors(grid, 0, 1, 4)).toBe(4)
 	})
 })
 
@@ -190,14 +190,14 @@ describe('serialization', () => {
 			['red', 'blue', null, 'blue'],
 			['blue', 'red', 'blue', null],
 		])
-		expect(serializeGrid(grid)).toBe('rbrbbrbrrb.bbrb.')
+		expect(serializeGrid(grid, 4)).toBe('rbrbbrbrrb.bbrb.')
 	})
 
 	it('round-trips through serialize/deserialize', () => {
 		const puzzle = generatePuzzle('medium')
-		const grid = deserializeGrid(puzzle.colors, puzzle.numbers, puzzle.colors)
-		const reColors = serializeGrid(grid)
-		const reNumbers = serializeNumbers(grid)
+		const grid = deserializeGrid(puzzle.colors, puzzle.numbers, 4, puzzle.colors)
+		const reColors = serializeGrid(grid, 4)
+		const reNumbers = serializeNumbers(grid, 4)
 		expect(reColors).toBe(puzzle.colors)
 		expect(reNumbers).toBe(puzzle.numbers)
 	})

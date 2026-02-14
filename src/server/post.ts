@@ -7,8 +7,9 @@ export const createPost = async (customTitle?: string): Promise<{ id: string }> 
 		throw new Error('subredditName is required')
 	}
 
-	// Generate puzzle with easy difficulty for shared post puzzle
-	const puzzle = generatePuzzle('easy')
+	// Generate puzzle with easy 4x4 difficulty for shared post puzzle
+	// Individual users get adaptive difficulty via their own puzzle override
+	const puzzle = generatePuzzle('easy', 4)
 
 	// Create post with custom title or default
 	const title = customTitle || 'Urjo Puzzle - Can you solve it?'
@@ -23,6 +24,7 @@ export const createPost = async (customTitle?: string): Promise<{ id: string }> 
 		numbers: puzzle.numbers,
 		solution: puzzle.solution,
 		difficulty: puzzle.difficulty,
+		gridSize: puzzle.gridSize.toString(),
 		created: new Date().toISOString(),
 	})
 

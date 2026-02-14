@@ -11,12 +11,14 @@
 
 	let currentView = $state<View>('game')
 	let grid = $state<Grid>(createPlaceholderGrid())
+	let gridSize = $state(4)
 	let isCompleted = $state(false)
 	let errorMessage = $state('')
 	let puzzleColors = $state(PLACEHOLDER_COLORS)
 	let puzzleNumbers = $state(PLACEHOLDER_NUMBERS)
 	let puzzleSolution = $state('')
 	let tutorialCompleted = $state(false)
+	let startTime = $state(0)
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = []
@@ -49,10 +51,12 @@
 			puzzleNumbers = data.puzzle.numbers
 			puzzleSolution = data.puzzle.solution
 			tutorialCompleted = data.tutorialCompleted
+			gridSize = data.puzzle.gridSize
 
-			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
+			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors, data.puzzle.gridSize)
 				.map(row => row.map(cell => ({ ...cell, isLoading: false })))
 			isCompleted = false
+			startTime = Date.now()
 
 			if (!data.tutorialCompleted) {
 				currentView = 'tutorial'
@@ -86,6 +90,23 @@
 		const boardString = serializeGrid(grid)
 		if (boardString === puzzleSolution) {
 			isCompleted = true
+			const timeTaken = Math.round((Date.now() - startTime) / 1000)
+			reportCompletion(timeTaken)
+		}
+	}
+
+	/**
+	 * Report puzzle completion to server (non-critical).
+	 */
+	async function reportCompletion(timeTaken: number) {
+		try {
+			await fetch('/api/game/complete', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ timeTaken }),
+			})
+		} catch {
+			// Non-critical, continue anyway
 		}
 	}
 
@@ -102,9 +123,11 @@
 			puzzleColors = data.puzzle.colors
 			puzzleNumbers = data.puzzle.numbers
 			puzzleSolution = data.puzzle.solution
-			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors)
+			gridSize = data.puzzle.gridSize
+			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors, data.puzzle.gridSize)
 				.map(row => row.map(cell => ({ ...cell, isLoading: false })))
 			isCompleted = false
+			startTime = Date.now()
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Failed to load next challenge'
 			currentView = 'error'
@@ -115,8 +138,9 @@
 	 * Handle "Restart" button (purely client-side).
 	 */
 	function handleRestart() {
-		grid = deserializeGrid(puzzleColors, puzzleNumbers, puzzleColors)
+		grid = deserializeGrid(puzzleColors, puzzleNumbers, puzzleColors, gridSize)
 		isCompleted = false
+		startTime = Date.now()
 	}
 
 	/**
@@ -160,6 +184,7 @@
 	{:else if currentView === 'game'}
 		<GameView
 			{grid}
+			{gridSize}
 			{isCompleted}
 			onCellChange={handleCellChange}
 			onNextChallenge={handleNextChallenge}
