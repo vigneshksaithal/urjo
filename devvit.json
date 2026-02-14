@@ -39,5 +39,9 @@
   },
   "dev": {
     "subreddit": "urjo"
+  },
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build"
   }
 }

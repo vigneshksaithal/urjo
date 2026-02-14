@@ -1,32 +1,25 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect } from 'vitest'
 import {
 	generatePuzzle,
 	countSameColorNeighbors,
 	isBalanced,
 	hasAdjacentIdenticalRows,
 	hasAdjacentIdenticalColumns,
-	numberConstraintsSatisfied,
 	serializeGrid,
 	serializeNumbers,
 	deserializeGrid,
 } from './generator'
 import type { Grid, CellColor } from '../../shared/types'
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Build a grid from a 4x4 color array (for quick test setup). */
 function gridFromColors(colors: CellColor[][]): Grid {
 	return colors.map((row) =>
 		row.map((color) => ({ color, number: null, locked: false }))
 	)
 }
 
-/** Deserialize a puzzle and check if it represents a valid initial state. */
 function deserializePuzzle(puzzle: ReturnType<typeof generatePuzzle>): Grid {
 	return deserializeGrid(puzzle.colors, puzzle.numbers, puzzle.colors)
 }
-
-// ─── Solution Generation ─────────────────────────────────────────────────────
 
 describe('generatePuzzle', () => {
 	it('generates a puzzle for each difficulty level', () => {
@@ -65,8 +58,6 @@ describe('generatePuzzle', () => {
 	})
 })
 
-// ─── Clue Type Validity ──────────────────────────────────────────────────────
-
 describe('clue type validity', () => {
 	it('never produces number-only clues (number without color)', () => {
 		for (let i = 0; i < 10; i++) {
@@ -77,7 +68,6 @@ describe('clue type validity', () => {
 				for (let r = 0; r < 4; r++) {
 					for (let c = 0; c < 4; c++) {
 						const cell = grid[r]![c]!
-						// If a cell has a number, it MUST also have a color
 						if (cell.number !== null) {
 							expect(cell.color).not.toBeNull()
 						}
@@ -121,13 +111,10 @@ describe('clue type validity', () => {
 	})
 })
 
-// ─── Number Constraints ──────────────────────────────────────────────────────
-
 describe('number constraints', () => {
 	it('numbers match actual same-color neighbor counts in solution', () => {
 		for (let i = 0; i < 5; i++) {
 			const puzzle = generatePuzzle('medium')
-			// Rebuild the solution grid with puzzle numbers applied
 			const solutionGrid = deserializeGrid(puzzle.solution, puzzle.numbers)
 
 			for (let r = 0; r < 4; r++) {
@@ -143,8 +130,6 @@ describe('number constraints', () => {
 	})
 })
 
-// ─── countSameColorNeighbors ─────────────────────────────────────────────────
-
 describe('countSameColorNeighbors (8-directional)', () => {
 	it('counts diagonal neighbor for a corner cell', () => {
 		const grid = gridFromColors([
@@ -153,7 +138,6 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['red', 'blue', 'red', 'blue'],
 			['blue', 'red', 'blue', 'red'],
 		])
-		// (0,0) is red; 8-dir neighbors: right=blue, below=blue, diagonal(1,1)=red → 1
 		expect(countSameColorNeighbors(grid, 0, 0)).toBe(1)
 	})
 
@@ -164,10 +148,6 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['blue', 'blue', 'red', 'red'],
 			['blue', 'blue', 'red', 'red'],
 		])
-		// (1,1) is red; 8-dir neighbors:
-		//   (0,0)=R, (0,1)=R, (0,2)=B,
-		//   (1,0)=R,          (1,2)=B,
-		//   (2,0)=B, (2,1)=B, (2,2)=R → 4 red
 		expect(countSameColorNeighbors(grid, 1, 1)).toBe(4)
 	})
 
@@ -178,7 +158,6 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['red', 'blue', 'red', 'blue'],
 			['blue', 'red', 'blue', 'red'],
 		])
-		// (0,0) is red; 8-dir neighbors: (0,1)=blue, (1,0)=blue, (1,1)=blue → 0
 		expect(countSameColorNeighbors(grid, 0, 0)).toBe(0)
 	})
 
@@ -199,14 +178,9 @@ describe('countSameColorNeighbors (8-directional)', () => {
 			['blue', 'blue', 'red', 'red'],
 			['blue', 'blue', 'red', 'red'],
 		])
-		// (0,1) is red; 8-dir neighbors:
-		//   (0,0)=R,          (0,2)=R,
-		//   (1,0)=R, (1,1)=R, (1,2)=B → 4 red (out of 5 possible)
 		expect(countSameColorNeighbors(grid, 0, 1)).toBe(4)
 	})
 })
-
-// ─── Serialization ───────────────────────────────────────────────────────────
 
 describe('serialization', () => {
 	it('serializeGrid produces correct string', () => {
@@ -216,10 +190,6 @@ describe('serialization', () => {
 			['red', 'blue', null, 'blue'],
 			['blue', 'red', 'blue', null],
 		])
-		// Row 0: r b r b → "rbrb"
-		// Row 1: b r b r → "brbr"
-		// Row 2: r b . b → "rb.b"
-		// Row 3: b r b . → "brb."
 		expect(serializeGrid(grid)).toBe('rbrbbrbrrb.bbrb.')
 	})
 
@@ -233,8 +203,6 @@ describe('serialization', () => {
 	})
 })
 
-// ─── Difficulty Scaling ──────────────────────────────────────────────────────
-
 describe('difficulty scaling', () => {
 	it('easy puzzles have more clues than hard puzzles on average', () => {
 		let easyClues = 0
@@ -245,7 +213,6 @@ describe('difficulty scaling', () => {
 			const easy = generatePuzzle('easy')
 			const hard = generatePuzzle('hard')
 
-			// Count non-empty cells in puzzle
 			easyClues += easy.colors.split('').filter((c) => c !== '.').length
 			hardClues += hard.colors.split('').filter((c) => c !== '.').length
 		}
@@ -266,8 +233,6 @@ describe('difficulty scaling', () => {
 	})
 })
 
-// ─── Puzzle Diversity ────────────────────────────────────────────────────────
-
 describe('puzzle diversity', () => {
 	it('generates different puzzles on successive calls', () => {
 		const solutions = new Set<string>()
@@ -275,7 +240,6 @@ describe('puzzle diversity', () => {
 			const puzzle = generatePuzzle('medium')
 			solutions.add(puzzle.solution)
 		}
-		// With a 4x4 grid, we should get at least a few different solutions
 		expect(solutions.size).toBeGreaterThan(1)
 	})
 })
