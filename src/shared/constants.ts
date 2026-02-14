@@ -17,12 +17,12 @@ export type DifficultyLevel = {
  * expectedTime is used for performance scoring -- tunable after playtesting.
  */
 export const DIFFICULTY_LADDER: readonly DifficultyLevel[] = [
-	{ level: 1, gridSize: 4, difficulty: 'easy', expectedTime: 60 },
-	{ level: 2, gridSize: 4, difficulty: 'medium', expectedTime: 90 },
-	{ level: 3, gridSize: 4, difficulty: 'hard', expectedTime: 120 },
-	{ level: 4, gridSize: 6, difficulty: 'easy', expectedTime: 180 },
-	{ level: 5, gridSize: 6, difficulty: 'medium', expectedTime: 240 },
-	{ level: 6, gridSize: 6, difficulty: 'hard', expectedTime: 300 },
+	{ level: 1, gridSize: 4, difficulty: 'easy', expectedTime: 10 },
+	{ level: 2, gridSize: 4, difficulty: 'medium', expectedTime: 20 },
+	{ level: 3, gridSize: 4, difficulty: 'hard', expectedTime: 30 },
+	{ level: 4, gridSize: 6, difficulty: 'easy', expectedTime: 60 },
+	{ level: 5, gridSize: 6, difficulty: 'medium', expectedTime: 90 },
+	{ level: 6, gridSize: 6, difficulty: 'hard', expectedTime: 120 },
 ] as const
 
 /** Default skill level for new users */
@@ -42,6 +42,15 @@ export const PROMOTE_THRESHOLD = 0.7
 
 /** Average performance score threshold to demote (level down) */
 export const DEMOTE_THRESHOLD = 0.3
+
+/** Consecutive skips without a solve before forcing an immediate level demotion */
+export const CONSECUTIVE_SKIP_THRESHOLD = 2
+
+/** Base penalty score for skipping a puzzle (worse than worst completion of 0.0) */
+export const SKIP_BASE_PENALTY = -0.2
+
+/** Additional penalty for quick skips (added on top of base penalty) */
+export const SKIP_MAX_EXTRA_PENALTY = -0.3
 
 /**
  * Get the difficulty config for a given skill level.

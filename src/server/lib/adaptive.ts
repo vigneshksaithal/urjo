@@ -17,6 +17,9 @@ import {
 	HISTORY_SIZE,
 	PROMOTE_THRESHOLD,
 	DEMOTE_THRESHOLD,
+	SKIP_BASE_PENALTY,
+	SKIP_MAX_EXTRA_PENALTY,
+	CONSECUTIVE_SKIP_THRESHOLD,
 	getLevelConfig,
 } from '../../shared/constants'
 
@@ -37,14 +40,39 @@ export const calculatePerformanceScore = (timeTaken: number, level: number): num
 }
 
 /**
+ * Calculate penalty score for a skipped puzzle.
+ * Returns a value from -0.5 to -0.2 (always worse than any completion).
+ *
+ * Quick skips (user barely looked at the puzzle) receive a harsher penalty
+ * than slow skips (user tried for a while before giving up).
+ *
+ * Formula: SKIP_BASE_PENALTY + (SKIP_MAX_EXTRA_PENALTY * quicknessFactor)
+ * where quicknessFactor = clamp(1 - timeSpent / (expectedTime * 0.5), 0, 1)
+ *
+ * - Skip instantly (0s) → -0.5
+ * - Skip at 25% of expected time → -0.35
+ * - Skip at 50%+ of expected time → -0.2
+ */
+export const calculateSkipScore = (timeSpent: number, level: number): number => {
+	const config = getLevelConfig(level)
+	const expectedTime = config.expectedTime
+	const quicknessFactor = Math.max(0, Math.min(1, 1 - timeSpent / (expectedTime * 0.5)))
+	return SKIP_BASE_PENALTY + SKIP_MAX_EXTRA_PENALTY * quicknessFactor
+}
+
+/**
  * Calculate the average performance score from a list of game records.
+ * Skipped records use the skip penalty formula; completions use the standard formula.
  * Returns 0.5 (neutral) if no records exist.
  */
 export const calculateAverageScore = (history: GameRecord[]): number => {
 	if (history.length === 0) return 0.5
 
 	const total = history.reduce((sum, record) => {
-		return sum + calculatePerformanceScore(record.timeTaken, record.level)
+		const score = record.skipped
+			? calculateSkipScore(record.timeTaken, record.level)
+			: calculatePerformanceScore(record.timeTaken, record.level)
+		return sum + score
 	}, 0)
 
 	return total / history.length
@@ -75,6 +103,14 @@ export const determineSkillLevel = (currentLevel: number, history: GameRecord[])
 }
 
 /**
+ * Check if consecutive skips should force an immediate level demotion.
+ * Returns true if the consecutive skip count meets or exceeds the threshold.
+ */
+export const shouldForceDemotion = (consecutiveSkips: number): boolean => {
+	return consecutiveSkips >= CONSECUTIVE_SKIP_THRESHOLD
+}
+
+/**
  * Add a game record to history, keeping only the last HISTORY_SIZE records.
  * Returns the updated history array.
  */
@@ -102,7 +138,9 @@ export const parseHistory = (json: string | null | undefined): GameRecord[] => {
 				item !== null &&
 				typeof (item as GameRecord).level === 'number' &&
 				typeof (item as GameRecord).timeTaken === 'number' &&
-				typeof (item as GameRecord).timestamp === 'number'
+				typeof (item as GameRecord).timestamp === 'number' &&
+				(typeof (item as GameRecord).skipped === 'boolean' ||
+					typeof (item as GameRecord).skipped === 'undefined')
 		)
 	} catch {
 		return []

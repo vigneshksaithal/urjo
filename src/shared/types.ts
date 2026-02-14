@@ -48,4 +48,5 @@ export type GameRecord = {
 	level: number
 	timeTaken: number
 	timestamp: number
+	skipped?: boolean
 }

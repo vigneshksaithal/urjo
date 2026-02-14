@@ -12,13 +12,14 @@ import type {
 	CompleteResponse,
 	GameRecord,
 } from '../../shared/types'
-import { DEFAULT_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
+import { DEFAULT_SKILL_LEVEL, MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
 import { generatePuzzle } from '../lib/generator'
 import {
 	calculatePerformanceScore,
 	determineSkillLevel,
 	addGameRecord,
 	parseHistory,
+	shouldForceDemotion,
 } from '../lib/adaptive'
 
 export const gameRouter = new Hono()
@@ -177,6 +178,9 @@ gameRouter.post('/api/game/complete', async (c) => {
 		await redis.set(`user:${userId}:skillLevel`, newSkillLevel.toString())
 		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
 
+		// Reset consecutive skip counter on any completion
+		await redis.set(`user:${userId}:consecutiveSkips`, '0')
+
 		const response: CompleteResponse = {
 			performanceScore,
 			newSkillLevel,
@@ -199,8 +203,51 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
 	try {
-		const skillLevel = await getSkillLevel(userId)
-		const newPuzzle = generatePuzzleForLevel(skillLevel)
+		// Parse optional timeSpent from request body (seconds on the skipped puzzle)
+		let timeSpent = 0
+		try {
+			const body = await c.req.json<{ timeSpent?: number }>()
+			if (typeof body.timeSpent === 'number' && body.timeSpent >= 0) {
+				timeSpent = body.timeSpent
+			}
+		} catch {
+			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
+		}
+
+		let currentLevel = await getSkillLevel(userId)
+		const history = await getHistory(userId)
+
+		// Record the skip in history
+		const skipRecord: GameRecord = {
+			level: currentLevel,
+			timeTaken: timeSpent,
+			timestamp: Date.now(),
+			skipped: true,
+		}
+		const updatedHistory = addGameRecord(history, skipRecord)
+
+		// Track consecutive skips
+		const skipCountKey = `user:${userId}:consecutiveSkips`
+		const prevSkips = await redis.get(skipCountKey)
+		const consecutiveSkips = (prevSkips ? parseInt(prevSkips, 10) : 0) + 1
+		await redis.set(skipCountKey, consecutiveSkips.toString())
+
+		// Check for forced demotion via consecutive skips
+		let newLevel: number
+		if (shouldForceDemotion(consecutiveSkips)) {
+			// Force immediate demotion and reset counter
+			newLevel = Math.max(MIN_SKILL_LEVEL, currentLevel - 1)
+			await redis.set(skipCountKey, '0')
+		} else {
+			// Normal determination via history averaging
+			newLevel = determineSkillLevel(currentLevel, updatedHistory)
+		}
+
+		// Persist updated history and skill level
+		await redis.set(`user:${userId}:skillLevel`, newLevel.toString())
+		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
+
+		const newPuzzle = generatePuzzleForLevel(newLevel)
 
 		await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
 			colors: newPuzzle.colors,
@@ -212,7 +259,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 
 		const response: NextChallengeResponse = {
 			puzzle: newPuzzle,
-			skillLevel,
+			skillLevel: newLevel,
 		}
 
 		return c.json(response)
