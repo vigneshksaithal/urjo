@@ -11,7 +11,7 @@
     "devvit": {
       "type": "local",
       "command": [
-        "bunx",
+        "npx",
         "-y",
         "@devvit/mcp"
       ]
