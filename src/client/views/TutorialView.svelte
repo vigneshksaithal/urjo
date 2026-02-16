@@ -125,14 +125,14 @@
 	<!-- Instruction text at top with white border box -->
 	<div class="flex-none min-h-[60px] flex items-center justify-center px-2 mb-2">
 		{#if tutorialDone}
-			<div class="border-2 border-white rounded-lg px-4 py-3 bg-[#1a1a1a]/80 backdrop-blur-sm">
-				<p class="text-gray-100 font-mono text-sm text-center leading-relaxed">
+			<div class="border-2 border-theme-border rounded-lg px-4 py-3 bg-theme-bg-secondary backdrop-blur-sm">
+				<p class="text-theme-text-primary font-mono text-sm text-center leading-relaxed">
 					Tutorial complete. Continue below.
 				</p>
 			</div>
 		{:else if currentStep}
-			<div class="border-2 border-white rounded-lg px-4 py-3 bg-[#1a1a1a]/80 backdrop-blur-sm">
-				<p class="text-gray-100 font-mono text-sm text-center leading-relaxed">
+			<div class="border-2 border-theme-border rounded-lg px-4 py-3 bg-theme-bg-secondary backdrop-blur-sm">
+				<p class="text-theme-text-primary font-mono text-sm text-center leading-relaxed">
 					{currentStep.instruction}
 				</p>
 			</div>
@@ -148,7 +148,7 @@
 			<!-- Highlight overlay -->
 			{#if currentStep && !tutorialDone}
 				<div
-					class="absolute pointer-events-none border-2 border-white/70 rounded-xl z-10"
+					class="absolute pointer-events-none border-2 border-theme-text-primary/70 rounded-xl z-10"
 					style={getHighlightStyle(currentStep)}
 				></div>
 			{/if}
@@ -161,7 +161,7 @@
 			>
 				<ArrowDownLeft 
 					size={40}
-					color="white"
+					color="var(--theme-text-primary)"
 					strokeWidth={3}
 					class="drop-shadow-lg animate-bounce"
 				/>
@@ -170,19 +170,19 @@
 
 			<!-- Completion overlay -->
 			{#if tutorialDone}
-				<div class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/70 backdrop-blur-sm">
+				<div class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-theme-overlay backdrop-blur-sm">
 					<div class="flex flex-col items-center gap-3">
 						<button
 							onclick={onComplete}
-							class="px-8 py-2.5 bg-[#f5f5dc] text-gray-900 font-bold rounded-lg
-								text-base hover:bg-[#e8e6d0] active:scale-95 transition-all shadow-lg"
+							class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
+								text-base hover:opacity-90 active:scale-95 transition-all shadow-lg"
 						>
 							{isReplay ? 'Back to Game' : 'Next Challenge'}
 						</button>
 						<button
 							onclick={handleRestart}
-							class="px-6 py-1.5 border border-white/50 text-white/80 rounded-lg
-								text-sm hover:bg-white/10 active:scale-95 transition-all"
+							class="px-6 py-1.5 border border-theme-border text-theme-text-secondary rounded-lg
+								text-sm hover:bg-theme-hover active:scale-95 transition-all"
 						>
 							Restart Tutorial
 						</button>
@@ -199,7 +199,7 @@
 				{#each TUTORIAL_STEPS as _, i (i)}
 					<div
 						class="w-2 h-2 rounded-full transition-colors
-							{i === currentStepIndex ? 'bg-white' : i < currentStepIndex ? 'bg-white/50' : 'bg-white/20'}"
+							{i === currentStepIndex ? 'bg-theme-text-primary' : i < currentStepIndex ? 'bg-theme-text-primary/50' : 'bg-theme-text-primary/20'}"
 					></div>
 				{/each}
 			</div>

@@ -210,13 +210,13 @@
 	}
 </script>
 
-<div class="h-full w-full overflow-hidden bg-[#1a1a1a]">
+<div class="h-full w-full overflow-hidden bg-theme-bg-primary">
 	{#if currentView === 'error'}
 		<div class="h-full w-full flex flex-col items-center justify-center p-8">
 			<p class="text-xl text-red-400 mb-4">Error: {errorMessage}</p>
 			<button
 				onclick={loadGame}
-				class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+				class="px-6 py-2 bg-theme-text-primary text-theme-bg-primary rounded-lg hover:opacity-90"
 			>
 				Retry
 			</button>

@@ -18,6 +18,9 @@
 	--color-theme-text-muted: var(--theme-text-muted);
 	--color-theme-border: var(--theme-border);
 	--color-theme-hover: var(--theme-hover);
+	--color-theme-overlay: var(--theme-overlay);
+	--color-theme-empty-red: var(--theme-empty-red);
+	--color-theme-empty-blue: var(--theme-empty-blue);
 }
 
 /* Light mode (default) */
@@ -30,6 +33,9 @@
 	--theme-text-muted: #888888;
 	--theme-border: #e0e0e0;
 	--theme-hover: #f0f0f0;
+	--theme-overlay: rgba(0, 0, 0, 0.5);
+	--theme-empty-red: #F5A99C;
+	--theme-empty-blue: #9BCAEB;
 }
 
 /* Dark mode */
@@ -43,6 +49,9 @@
 		--theme-text-muted: #888888;
 		--theme-border: rgba(255, 255, 255, 0.2);
 		--theme-hover: rgba(255, 255, 255, 0.1);
+		--theme-overlay: rgba(0, 0, 0, 0.7);
+		--theme-empty-red: #8B3A2B;
+		--theme-empty-blue: #2A5A7A;
 	}
 }
 

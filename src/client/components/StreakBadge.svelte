@@ -15,16 +15,16 @@
 
 <div class="flex flex-col items-center">
 	<div
-		class="px-3 py-1 rounded-full bg-white/10 backdrop-blur-sm border border-white/20
-			transition-all duration-300 hover:bg-white/20"
+		class="px-3 py-1 rounded-full bg-theme-hover backdrop-blur-sm border border-theme-border
+			transition-all duration-300 hover:bg-theme-hover"
 		class:animate-pulse={hasStreak}
 	>
-		<span class="text-xs font-bold text-white whitespace-nowrap">
+		<span class="text-xs font-bold text-theme-text-primary whitespace-nowrap">
 			{displayText}
 		</span>
 	</div>
 	{#if streak.longestStreak > 0 && streak.longestStreak > streak.currentStreak}
-		<span class="text-[10px] text-gray-500 mt-0.5">
+		<span class="text-[10px] text-theme-text-muted mt-0.5">
 			Best: {streak.longestStreak}
 		</span>
 	{/if}

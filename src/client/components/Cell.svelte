@@ -78,15 +78,15 @@
 		</div>
 	{/if}
 
-	<!-- Empty cell: diagonal split with dark colors (non-loading) -->
+	<!-- Empty cell: diagonal split with lighter red and blue -->
 	{#if !isLoading && color === null}
 		<div class="absolute inset-0 overflow-hidden rounded-full">
 			<div
-				class="absolute inset-0 bg-[#7B2D25]"
+				class="absolute inset-0 bg-theme-empty-red"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%)"
 			></div>
 			<div
-				class="absolute inset-0 bg-[#28516E]"
+				class="absolute inset-0 bg-theme-empty-blue"
 				style="clip-path: polygon(0 0, 100% 0, 100% 100%)"
 			></div>
 		</div>

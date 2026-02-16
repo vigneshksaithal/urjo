@@ -10,17 +10,17 @@
 {#if isOpen}
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
 		<!-- Backdrop -->
-		<button type="button" class="absolute inset-0 bg-black/70" onclick={onClose} aria-label="Close modal"></button>
+		<button type="button" class="absolute inset-0 bg-theme-overlay" onclick={onClose} aria-label="Close modal"></button>
 
 		<!-- Modal -->
 		<div
-			class="relative bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md shadow-xl"
+			class="relative bg-theme-bg-modal rounded-lg p-6 max-w-md shadow-xl border border-theme-border"
 		>
-			<h2 class="text-2xl font-bold mb-4 text-gray-800 dark:text-white">
+			<h2 class="text-2xl font-bold mb-4 text-theme-text-primary">
 				How to Play
 			</h2>
 
-		<ul class="space-y-3 text-sm text-gray-700 dark:text-gray-300">
+		<ul class="space-y-3 text-sm text-theme-text-secondary">
 			<li class="flex items-start gap-2">
 				<span class="text-lg">🎯</span>
 				<span>Fill each row and column with exactly 2 red and 2 blue circles</span>
@@ -45,7 +45,7 @@
 
 			<button
 				onclick={onClose}
-				class="mt-6 w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 active:scale-95 transition-all dark:bg-blue-500 dark:hover:bg-blue-600"
+				class="mt-6 w-full bg-theme-text-primary text-theme-bg-primary py-2 rounded-lg hover:opacity-90 active:scale-95 transition-all"
 			>
 				Got it!
 			</button>
