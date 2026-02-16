@@ -8,6 +8,42 @@
 
 	/* Skeleton loading animation */
 	--animate-pulse-skeleton: pulse-skeleton 2s ease-in-out infinite;
+
+	/* Theme variables */
+	--color-theme-bg-primary: var(--theme-bg-primary);
+	--color-theme-bg-secondary: var(--theme-bg-secondary);
+	--color-theme-bg-modal: var(--theme-bg-modal);
+	--color-theme-text-primary: var(--theme-text-primary);
+	--color-theme-text-secondary: var(--theme-text-secondary);
+	--color-theme-text-muted: var(--theme-text-muted);
+	--color-theme-border: var(--theme-border);
+	--color-theme-hover: var(--theme-hover);
+}
+
+/* Light mode (default) */
+:root {
+	--theme-bg-primary: #ffffff;
+	--theme-bg-secondary: #f5f5f5;
+	--theme-bg-modal: #ffffff;
+	--theme-text-primary: #1a1a1a;
+	--theme-text-secondary: #666666;
+	--theme-text-muted: #888888;
+	--theme-border: #e0e0e0;
+	--theme-hover: #f0f0f0;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+	:root {
+		--theme-bg-primary: #1a1a1a;
+		--theme-bg-secondary: #2a2a2a;
+		--theme-bg-modal: #1a1a1a;
+		--theme-text-primary: #ffffff;
+		--theme-text-secondary: #cccccc;
+		--theme-text-muted: #888888;
+		--theme-border: rgba(255, 255, 255, 0.2);
+		--theme-hover: rgba(255, 255, 255, 0.1);
+	}
 }
 
 @keyframes pulse-skeleton {
