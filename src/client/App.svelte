@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Grid, CellColor, GameState, NextChallengeResponse } from '../shared/types'
+	import type { Grid, CellColor, GameState, NextChallengeResponse, StreakData, ShareResponse } from '../shared/types'
 	import GameView from './views/GameView.svelte'
 	import TutorialView from './views/TutorialView.svelte'
 	import { deserializeGrid, serializeGrid } from './lib/utils'
@@ -19,6 +19,9 @@
 	let puzzleSolution = $state('')
 	let tutorialCompleted = $state(false)
 	let startTime = $state(0)
+	let streakData = $state<StreakData>({ currentStreak: 0, longestStreak: 0, lastPlayedDate: null })
+	let timeTaken = $state(0)
+	let hasShared = $state(false)
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = []
@@ -53,9 +56,15 @@
 			tutorialCompleted = data.tutorialCompleted
 			gridSize = data.puzzle.gridSize
 
+			// Update streak data
+			if (data.streak) {
+				streakData = data.streak
+			}
+
 			grid = deserializeGrid(data.puzzle.colors, data.puzzle.numbers, data.puzzle.colors, data.puzzle.gridSize)
 				.map(row => row.map(cell => ({ ...cell, isLoading: false })))
 			isCompleted = false
+			hasShared = false
 			startTime = Date.now()
 
 			if (!data.tutorialCompleted) {
@@ -90,7 +99,7 @@
 		const boardString = serializeGrid(grid)
 		if (boardString === puzzleSolution) {
 			isCompleted = true
-			const timeTaken = Math.round((Date.now() - startTime) / 1000)
+			timeTaken = Math.round((Date.now() - startTime) / 1000)
 			reportCompletion(timeTaken)
 		}
 	}
@@ -98,15 +107,46 @@
 	/**
 	 * Report puzzle completion to server (non-critical).
 	 */
-	async function reportCompletion(timeTaken: number) {
+	async function reportCompletion(time: number) {
 		try {
-			await fetch('/api/game/complete', {
+			const response = await fetch('/api/game/complete', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ timeTaken }),
+				body: JSON.stringify({ timeTaken: time }),
 			})
+
+			if (response.ok) {
+				const data = await response.json()
+				if (data.streak) {
+					streakData = data.streak
+				}
+			}
 		} catch {
 			// Non-critical, continue anyway
+		}
+	}
+
+	/**
+	 * Handle share to comments.
+	 */
+	async function handleShare() {
+		if (hasShared) return
+
+		try {
+			const response = await fetch('/api/game/share', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ timeTaken, streak: streakData.currentStreak }),
+			})
+
+			if (response.ok) {
+				const data: ShareResponse = await response.json()
+				if (data.shared) {
+					hasShared = true
+				}
+			}
+		} catch {
+			// Non-critical error
 		}
 	}
 
@@ -191,10 +231,14 @@
 			{grid}
 			{gridSize}
 			{isCompleted}
+			{streakData}
+			{timeTaken}
+			{hasShared}
 			onCellChange={handleCellChange}
 			onNextChallenge={handleNextChallenge}
 			onRestart={handleRestart}
 			onHowToPlay={handleHowToPlay}
+			onShare={handleShare}
 		/>
 	{/if}
 </div>

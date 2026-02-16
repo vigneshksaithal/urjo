@@ -1,7 +1,11 @@
 <script lang="ts">
-	import type { CellColor, Grid } from '../../shared/types'
+	import type { CellColor, Grid, StreakData, LeaderboardData } from '../../shared/types'
 	import ConfettiEffect from '../components/ConfettiEffect.svelte'
 	import GameBoard from '../components/GameBoard.svelte'
+	import StreakBadge from '../components/StreakBadge.svelte'
+	import LeaderboardModal from '../components/LeaderboardModal.svelte'
+	import Trophy from 'lucide-svelte/icons/trophy'
+	import Share2 from 'lucide-svelte/icons/share-2'
 
 	type Props = {
 		grid: Grid
@@ -11,6 +15,10 @@
 		onNextChallenge: () => void
 		onRestart: () => void
 		onHowToPlay: () => void
+		streakData: StreakData
+		timeTaken: number
+		hasShared: boolean
+		onShare: () => void
 	}
 
 	let {
@@ -21,28 +29,64 @@
 		onNextChallenge,
 		onRestart,
 		onHowToPlay,
+		streakData,
+		timeTaken,
+		hasShared,
+		onShare,
 	}: Props = $props()
+
+	let showLeaderboard = $state(false)
+	let leaderboardPreview = $state<LeaderboardData | null>(null)
+
+	// Fetch mini leaderboard preview when completed
+	$effect(() => {
+		if (isCompleted && !leaderboardPreview) {
+			fetchLeaderboardPreview()
+		}
+	})
+
+	async function fetchLeaderboardPreview() {
+		try {
+			const response = await fetch('/api/game/leaderboard?type=speed')
+			if (response.ok) {
+				leaderboardPreview = await response.json()
+			}
+		} catch {
+			// Non-critical
+		}
+	}
 </script>
 
 <div class="h-full w-full flex flex-col p-4 overflow-hidden">
 	<!-- Header -->
-	<header class="flex-none h-10 flex items-center justify-between px-2">
+	<header class="flex-none h-10 flex items-center justify-between px-2 gap-2">
 		<button
 			onclick={onHowToPlay}
-			class="text-sm font-medium text-blue-400 hover:underline"
+			class="text-sm font-medium text-blue-400 hover:underline flex-shrink-0"
 		>
 			How to Play
 		</button>
-		<h1 class="text-xl font-bold text-white">Urjo</h1>
+		
+		<div class="flex items-center gap-2 flex-1 justify-center">
+			<StreakBadge streak={streakData} />
+			<button
+				onclick={() => showLeaderboard = true}
+				class="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+				aria-label="View leaderboard"
+			>
+				<Trophy class="w-5 h-5 text-yellow-400" />
+			</button>
+		</div>
+		
 		{#if !isCompleted}
 			<button
 				onclick={onNextChallenge}
-				class="text-sm font-medium text-blue-400 hover:underline"
+				class="text-sm font-medium text-blue-400 hover:underline flex-shrink-0"
 			>
 				New Puzzle
 			</button>
 		{:else}
-			<div class="w-20"></div>
+			<div class="w-20 flex-shrink-0"></div>
 		{/if}
 	</header>
 
@@ -58,18 +102,73 @@
 
 		<!-- Completion overlay -->
 		{#if isCompleted}
-			<div class="absolute inset-0 flex flex-col items-center justify-center z-20">
-				<div class="flex flex-col items-center gap-3">
-					<p class="text-lg font-bold text-white font-mono">
-						Puzzle complete!
-					</p>
+			<div class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4">
+				<div class="flex flex-col items-center gap-3 max-w-sm w-full">
+					<!-- Primary CTA -->
 					<button
 						onclick={onNextChallenge}
 						class="px-8 py-2.5 bg-white text-black font-bold rounded-lg
-							text-base hover:bg-gray-100 active:scale-95 transition-all"
+							text-base hover:bg-gray-100 active:scale-95 transition-all w-full"
 					>
 						Next Challenge
 					</button>
+
+					<!-- Streak display -->
+					{#if streakData.currentStreak > 0}
+						<div class="text-center">
+							<p class="text-2xl font-bold text-white">
+								🔥 {streakData.currentStreak} Day Streak!
+							</p>
+						</div>
+					{/if}
+
+					<!-- Mini leaderboard preview -->
+					{#if leaderboardPreview && leaderboardPreview.entries.length > 0}
+						<div class="w-full bg-white/5 rounded-lg p-3 border border-white/10">
+							<div class="flex items-center justify-between mb-2">
+								<h3 class="text-sm font-bold text-white flex items-center gap-1">
+									<Trophy class="w-4 h-4 text-yellow-400" />
+									Top 3 Today
+								</h3>
+								<button
+									onclick={() => showLeaderboard = true}
+									class="text-xs text-blue-400 hover:underline"
+								>
+									View All
+								</button>
+							</div>
+							<div class="space-y-1">
+								{#each leaderboardPreview.entries.slice(0, 3) as entry}
+									<div class="flex items-center justify-between text-xs">
+										<span class="text-gray-300">
+											{entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : '🥉'}
+											{entry.username}
+										</span>
+										<span class="text-yellow-400 font-bold">{entry.score}s</span>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- Share button -->
+					<button
+						onclick={onShare}
+						disabled={hasShared}
+						class="px-6 py-2 border border-white/30 text-white rounded-lg
+							text-sm hover:bg-white/10 active:scale-95 transition-all
+							disabled:opacity-50 disabled:cursor-not-allowed w-full
+							flex items-center justify-center gap-2"
+					>
+						{#if hasShared}
+							<span>✅ Shared!</span>
+						{:else}
+							<Share2 class="w-4 h-4" />
+							<span>Share to Comments</span>
+						{/if}
+					</button>
+
+					<!-- Restart button -->
 					<button
 						onclick={onRestart}
 						class="px-6 py-1.5 border border-white/50 text-white/80 rounded-lg
@@ -96,3 +195,9 @@
 {#if isCompleted}
 	<ConfettiEffect />
 {/if}
+
+<!-- Leaderboard modal -->
+<LeaderboardModal
+	isOpen={showLeaderboard}
+	onClose={() => showLeaderboard = false}
+/>

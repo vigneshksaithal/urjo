@@ -26,6 +26,7 @@ export type GameState = {
 	puzzle: SerializedPuzzle
 	tutorialCompleted: boolean
 	skillLevel: number
+	streak?: StreakData
 }
 
 export type NextChallengeResponse = {
@@ -41,6 +42,7 @@ export type CompleteResponse = {
 	performanceScore: number
 	newSkillLevel: number
 	previousSkillLevel: number
+	streak?: StreakData
 }
 
 /** A single game record stored in user history */
@@ -49,4 +51,39 @@ export type GameRecord = {
 	timeTaken: number
 	timestamp: number
 	skipped?: boolean
+}
+
+/** User streak data */
+export type StreakData = {
+	currentStreak: number
+	longestStreak: number
+	lastPlayedDate: string | null
+}
+
+/** Leaderboard entry */
+export type LeaderboardEntry = {
+	rank: number
+	userId: string
+	username: string
+	score: number
+}
+
+/** Leaderboard response */
+export type LeaderboardData = {
+	type: 'streak' | 'speed'
+	entries: LeaderboardEntry[]
+	userRank?: number
+}
+
+/** Share score request */
+export type ShareRequest = {
+	timeTaken: number
+	streak: number
+}
+
+/** Share score response */
+export type ShareResponse = {
+	success: boolean
+	shared?: boolean
+	alreadyShared?: boolean
 }

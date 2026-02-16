@@ -4,13 +4,18 @@
  */
 
 import { Hono } from 'hono'
-import { context, redis } from '@devvit/web/server'
+import { context, redis, reddit } from '@devvit/web/server'
 import type {
 	GameState,
 	NextChallengeResponse,
 	CompleteRequest,
 	CompleteResponse,
 	GameRecord,
+	StreakData,
+	LeaderboardData,
+	LeaderboardEntry,
+	ShareRequest,
+	ShareResponse,
 } from '../../shared/types'
 import { DEFAULT_SKILL_LEVEL, MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
 import { generatePuzzle } from '../lib/generator'
@@ -88,6 +93,83 @@ async function getCurrentPuzzle(
 	}
 }
 
+/**
+ * Get the user's current streak data from Redis.
+ */
+async function getStreakData(userId: string): Promise<StreakData> {
+	const [currentStr, longestStr, lastDate] = await Promise.all([
+		redis.get(`user:${userId}:streak:current`),
+		redis.get(`user:${userId}:streak:longest`),
+		redis.get(`user:${userId}:streak:lastDate`),
+	])
+
+	return {
+		currentStreak: currentStr ? parseInt(currentStr, 10) : 0,
+		longestStreak: longestStr ? parseInt(longestStr, 10) : 0,
+		lastPlayedDate: lastDate ?? null,
+	}
+}
+
+/**
+ * Get today's date in UTC as YYYY-MM-DD.
+ */
+function getTodayUTC(): string {
+	const now = new Date()
+	const isoString = now.toISOString()
+	const datePart = isoString.split('T')[0]
+	return datePart ?? ''
+}
+
+/**
+ * Calculate the day difference between two YYYY-MM-DD date strings.
+ */
+function getDayDifference(date1: string, date2: string): number {
+	const d1 = new Date(date1)
+	const d2 = new Date(date2)
+	const diffTime = Math.abs(d2.getTime() - d1.getTime())
+	return Math.floor(diffTime / (1000 * 60 * 60 * 24))
+}
+
+/**
+ * Update the user's streak based on completion.
+ * Uses 1-day grace period (48 hours).
+ */
+async function updateStreak(userId: string): Promise<StreakData> {
+	const today = getTodayUTC()
+	const streakData = await getStreakData(userId)
+
+	// If already played today, return current data
+	if (streakData.lastPlayedDate === today) {
+		return streakData
+	}
+
+	let newStreak = 1
+
+	if (streakData.lastPlayedDate) {
+		const dayDiff = getDayDifference(streakData.lastPlayedDate, today)
+		
+		// Continue streak if played yesterday (1 day) or day before (2 days = 48hr grace)
+		if (dayDiff === 1 || dayDiff === 2) {
+			newStreak = streakData.currentStreak + 1
+		}
+	}
+
+	const newLongest = Math.max(newStreak, streakData.longestStreak)
+
+	// Update Redis
+	await Promise.all([
+		redis.set(`user:${userId}:streak:current`, newStreak.toString()),
+		redis.set(`user:${userId}:streak:longest`, newLongest.toString()),
+		redis.set(`user:${userId}:streak:lastDate`, today),
+	])
+
+	return {
+		currentStreak: newStreak,
+		longestStreak: newLongest,
+		lastPlayedDate: today,
+	}
+}
+
 // ─── GET /api/game/state ─────────────────────────────────────────────────────
 
 gameRouter.get('/api/game/state', async (c) => {
@@ -123,6 +205,9 @@ gameRouter.get('/api/game/state', async (c) => {
 		// Get tutorial status
 		const tutorialCompleted = (await redis.get(`user:${userId}:tutorialCompleted`)) === 'true'
 
+		// Get streak data
+		const streak = await getStreakData(userId)
+
 		const gameState: GameState = {
 			puzzle: {
 				colors: puzzle.colors,
@@ -133,12 +218,29 @@ gameRouter.get('/api/game/state', async (c) => {
 			},
 			tutorialCompleted,
 			skillLevel,
+			streak,
 		}
 
 		return c.json(gameState)
 	} catch (error) {
 		console.error('Error fetching game state:', error)
 		return c.json({ error: 'Failed to fetch game state' }, 500)
+	}
+})
+
+// ─── GET /api/game/streak ────────────────────────────────────────────────────
+
+gameRouter.get('/api/game/streak', async (c) => {
+	const { userId } = context
+
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const streak = await getStreakData(userId)
+		return c.json(streak)
+	} catch (error) {
+		console.error('Error fetching streak:', error)
+		return c.json({ error: 'Failed to fetch streak' }, 500)
 	}
 })
 
@@ -174,6 +276,16 @@ gameRouter.post('/api/game/complete', async (c) => {
 		// Determine new skill level
 		const newSkillLevel = determineSkillLevel(currentLevel, updatedHistory)
 
+		// Update streak
+		const streak = await updateStreak(userId)
+
+		// Update leaderboards
+		const today = getTodayUTC()
+		await Promise.all([
+			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
+			redis.zAdd(`leaderboard:speed:${today}`, { score: timeTaken, member: userId }),
+		])
+
 		// Persist to Redis
 		await redis.set(`user:${userId}:skillLevel`, newSkillLevel.toString())
 		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
@@ -185,6 +297,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 			performanceScore,
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
+			streak,
 		}
 
 		return c.json(response)
@@ -266,6 +379,124 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 	} catch (error) {
 		console.error('Error generating next challenge:', error)
 		return c.json({ error: 'Failed to generate next challenge' }, 500)
+	}
+})
+
+// ─── GET /api/game/leaderboard ───────────────────────────────────────────────
+
+gameRouter.get('/api/game/leaderboard', async (c) => {
+	const { userId } = context
+	const type = (c.req.query('type') || 'streak') as 'streak' | 'speed'
+
+	try {
+		let entries: LeaderboardEntry[] = []
+		let userRank: number | undefined
+
+		if (type === 'streak') {
+			// Fetch top 10 from streak leaderboard (highest scores first)
+			const topUsers = await redis.zRange('leaderboard:streak', 0, 9, { reverse: true, by: 'rank' })
+			
+			// Get usernames for top users
+			for (let i = 0; i < topUsers.length; i++) {
+				const item = topUsers[i]
+				if (!item) continue
+				
+				const memberId = item.member
+				const score = item.score
+				const username = await redis.get(`user:${memberId}:username`) || `Player #${memberId.slice(-4)}`
+				
+				entries.push({
+					rank: i + 1,
+					userId: memberId,
+					username,
+					score,
+				})
+
+				if (userId && memberId === userId) {
+					userRank = i + 1
+				}
+			}
+		} else if (type === 'speed') {
+			// Fetch top 10 from today's speed leaderboard (lowest scores first)
+			const today = getTodayUTC()
+			const topUsers = await redis.zRange(`leaderboard:speed:${today}`, 0, 9, { by: 'rank' })
+			
+			// Get usernames for top users
+			for (let i = 0; i < topUsers.length; i++) {
+				const item = topUsers[i]
+				if (!item) continue
+				
+				const memberId = item.member
+				const score = item.score
+				const username = await redis.get(`user:${memberId}:username`) || `Player #${memberId.slice(-4)}`
+				
+				entries.push({
+					rank: i + 1,
+					userId: memberId,
+					username,
+					score,
+				})
+
+				if (userId && memberId === userId) {
+					userRank = i + 1
+				}
+			}
+		}
+
+		const leaderboard: LeaderboardData = {
+			type,
+			entries,
+			...(userRank !== undefined && { userRank }),
+		}
+
+		return c.json(leaderboard)
+	} catch (error) {
+		console.error('Error fetching leaderboard:', error)
+		return c.json({ error: 'Failed to fetch leaderboard' }, 500)
+	}
+})
+
+// ─── POST /api/game/share ────────────────────────────────────────────────────
+
+gameRouter.post('/api/game/share', async (c) => {
+	const { postId, userId } = context
+
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const body: ShareRequest = await c.req.json()
+		const { timeTaken, streak } = body
+
+		// Check if already shared for this post
+		const sharedKey = `user:${userId}:shared:${postId}`
+		const alreadyShared = await redis.get(sharedKey)
+
+		if (alreadyShared === 'true') {
+			return c.json({ success: false, alreadyShared: true })
+		}
+
+		// Compose comment text
+		const commentText = `🎯 I solved today's Urjo puzzle in ${timeTaken}s! 🔥 ${streak} day streak | Play at r/urjo`
+
+		// Submit comment to Reddit as the user (scope: "user" in devvit.json enables this)
+		await reddit.submitComment({
+			id: postId,
+			text: commentText,
+		})
+
+		// Mark as shared
+		await redis.set(sharedKey, 'true')
+
+		const response: ShareResponse = {
+			success: true,
+			shared: true,
+		}
+
+		return c.json(response)
+	} catch (error) {
+		console.error('Error sharing score:', error)
+		return c.json({ error: 'Failed to share score' }, 500)
 	}
 })
 
