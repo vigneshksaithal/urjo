@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- **UI Redesign**: Complete visual overhaul matching new design system
+  - **Color Constants**: Centralized `URJO_COLORS` in `shared/constants.ts` for consistent theming
+  - **Canvas Confetti**: Red/blue themed celebration animation using `canvas-confetti` library
+  - **Completion Overlay**: Solid backdrop (70% black) with cream-colored primary button
+  - **Table-based Leaderboard**: Professional table layout with borders and proper spacing
+  - **Username Display**: Shows "You" for current user, fetches real Reddit usernames for others
+  - **Leaderboard Footer**: "Next Challenge" button closes modal and starts new puzzle
+  - **Tutorial Styling**: White-bordered instruction boxes with improved contrast
 - **Daily Streak System**: Track consecutive days played with 48-hour grace period
 - **Streak Badge**: Displays current streak with fire emoji and pulse animation in game header
 - **Longest Streak Tracking**: Stores and displays all-time longest streak
@@ -34,6 +42,14 @@
 - **Cell locked derivation**: `locked` status now derived from initial puzzle colors, not number presence
 
 ### Changed
+- **Confetti Library**: Replaced `svelte-confetti` with `canvas-confetti` for better control and theming
+- **Completion Overlay Styling**: Added solid dark backdrop, larger streak text with drop shadow, cream-colored primary button
+- **Mini Leaderboard**: Increased background opacity and added backdrop blur for better readability
+- **Share Button**: Strengthened border visibility (2px white border)
+- **Leaderboard Layout**: Converted from card-based to professional table layout with column headers
+- **Username Fetching**: Implemented Reddit API username fetching with 24-hour Redis caching
+- **Leaderboard User Display**: Current user shows "You" (green highlight), others show real Reddit usernames
+- **Tutorial Instructions**: Added white-bordered boxes around instruction text with improved contrast
 - **Devvit permissions**: Updated `devvit.json` to use new `scope: "user"` format instead of deprecated `asUser` array
 - **GameState type**: Added `streak`, `longestStreak`, `lastPlayedDate` fields
 - **CompleteResponse type**: Extended to include streak data

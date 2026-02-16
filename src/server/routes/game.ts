@@ -32,6 +32,40 @@ export const gameRouter = new Hono()
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
+ * Fetch Reddit username for a user ID.
+ * Caches results in Redis for 24 hours.
+ * Returns "You" for current user, actual username for others, "Anon" as fallback.
+ */
+async function fetchUsername(targetUserId: string, currentUserId?: string): Promise<string> {
+	// Return "You" for the current user
+	if (currentUserId && targetUserId === currentUserId) {
+		return 'You'
+	}
+
+	// Check cache first
+	const cacheKey = `user:${targetUserId}:username`
+	const cached = await redis.get(cacheKey)
+	if (cached) return cached
+
+	// Fetch from Reddit API
+	try {
+		const user = await reddit.getUserById(targetUserId as `t2_${string}`)
+		if (!user) return 'Anon'
+		
+		const username = user.username
+		
+		// Cache for 24 hours (using expire)
+		await redis.set(cacheKey, username)
+		await redis.expire(cacheKey, 86400)
+		
+		return username
+	} catch (error) {
+		console.error(`Failed to fetch username for ${targetUserId}:`, error)
+		return 'Anon'
+	}
+}
+
+/**
  * Get the user's current skill level from Redis.
  */
 async function getSkillLevel(userId: string): Promise<number> {
@@ -396,51 +430,49 @@ gameRouter.get('/api/game/leaderboard', async (c) => {
 			// Fetch top 10 from streak leaderboard (highest scores first)
 			const topUsers = await redis.zRange('leaderboard:streak', 0, 9, { reverse: true, by: 'rank' })
 			
-			// Get usernames for top users
-			for (let i = 0; i < topUsers.length; i++) {
-				const item = topUsers[i]
-				if (!item) continue
-				
+			// Get usernames for top users (fetch in parallel)
+			const entriesPromises = topUsers.map(async (item, i) => {
 				const memberId = item.member
 				const score = item.score
-				const username = await redis.get(`user:${memberId}:username`) || `Player #${memberId.slice(-4)}`
+				const username = await fetchUsername(memberId, userId)
 				
-				entries.push({
+				if (userId && memberId === userId) {
+					userRank = i + 1
+				}
+
+				return {
 					rank: i + 1,
 					userId: memberId,
 					username,
 					score,
-				})
-
-				if (userId && memberId === userId) {
-					userRank = i + 1
 				}
-			}
+			})
+			
+			entries = await Promise.all(entriesPromises)
 		} else if (type === 'speed') {
 			// Fetch top 10 from today's speed leaderboard (lowest scores first)
 			const today = getTodayUTC()
 			const topUsers = await redis.zRange(`leaderboard:speed:${today}`, 0, 9, { by: 'rank' })
 			
-			// Get usernames for top users
-			for (let i = 0; i < topUsers.length; i++) {
-				const item = topUsers[i]
-				if (!item) continue
-				
+			// Get usernames for top users (fetch in parallel)
+			const entriesPromises = topUsers.map(async (item, i) => {
 				const memberId = item.member
 				const score = item.score
-				const username = await redis.get(`user:${memberId}:username`) || `Player #${memberId.slice(-4)}`
+				const username = await fetchUsername(memberId, userId)
 				
-				entries.push({
+				if (userId && memberId === userId) {
+					userRank = i + 1
+				}
+
+				return {
 					rank: i + 1,
 					userId: memberId,
 					username,
 					score,
-				})
-
-				if (userId && memberId === userId) {
-					userRank = i + 1
 				}
-			}
+			})
+			
+			entries = await Promise.all(entriesPromises)
 		}
 
 		const leaderboard: LeaderboardData = {

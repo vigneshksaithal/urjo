@@ -60,3 +60,28 @@ export const getLevelConfig = (level: number): DifficultyLevel => {
 	const clamped = Math.max(MIN_SKILL_LEVEL, Math.min(MAX_SKILL_LEVEL, level))
 	return DIFFICULTY_LADDER[clamped - 1]!
 }
+
+/**
+ * Urjo Game Color Constants
+ * Centralized color palette for consistent theming across the app
+ */
+export const URJO_COLORS = {
+	/** Primary game colors */
+	RED: '#E54E3E',
+	BLUE: '#5199CA',
+
+	/** Background colors */
+	BACKGROUND: '#1a1a1a',
+	OVERLAY_BG: '#f5f5dc', // Cream/beige for primary buttons
+
+	/** Text colors */
+	TEXT_PRIMARY: '#ffffff',
+	TEXT_SECONDARY: '#d1d5db',
+	TEXT_TERTIARY: '#9ca3af',
+
+	/** Accent colors */
+	YELLOW: '#fbbf24', // Leaderboard scores
+	GREEN: '#10b981', // Success states
+} as const
+
+export type UrjoColor = (typeof URJO_COLORS)[keyof typeof URJO_COLORS]

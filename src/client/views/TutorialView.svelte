@@ -122,16 +122,20 @@
 </script>
 
 <div class="h-full w-full flex flex-col p-4 overflow-hidden">
-	<!-- Instruction text at top -->
+	<!-- Instruction text at top with white border box -->
 	<div class="flex-none min-h-[60px] flex items-center justify-center px-2 mb-2">
 		{#if tutorialDone}
-			<p class="text-white font-mono text-sm text-center leading-relaxed">
-				Tutorial complete. Continue below.
-			</p>
+			<div class="border-2 border-white rounded-lg px-4 py-3 bg-[#1a1a1a]/80 backdrop-blur-sm">
+				<p class="text-gray-100 font-mono text-sm text-center leading-relaxed">
+					Tutorial complete. Continue below.
+				</p>
+			</div>
 		{:else if currentStep}
-			<p class="text-white font-mono text-sm text-center leading-relaxed">
-				{currentStep.instruction}
-			</p>
+			<div class="border-2 border-white rounded-lg px-4 py-3 bg-[#1a1a1a]/80 backdrop-blur-sm">
+				<p class="text-gray-100 font-mono text-sm text-center leading-relaxed">
+					{currentStep.instruction}
+				</p>
+			</div>
 		{/if}
 	</div>
 
@@ -166,12 +170,12 @@
 
 			<!-- Completion overlay -->
 			{#if tutorialDone}
-				<div class="absolute inset-0 flex flex-col items-center justify-center z-20">
+				<div class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/70 backdrop-blur-sm">
 					<div class="flex flex-col items-center gap-3">
 						<button
 							onclick={onComplete}
-							class="px-8 py-2.5 bg-white text-black font-bold rounded-lg
-								text-base hover:bg-gray-100 active:scale-95 transition-all"
+							class="px-8 py-2.5 bg-[#f5f5dc] text-gray-900 font-bold rounded-lg
+								text-base hover:bg-[#e8e6d0] active:scale-95 transition-all shadow-lg"
 						>
 							{isReplay ? 'Back to Game' : 'Next Challenge'}
 						</button>

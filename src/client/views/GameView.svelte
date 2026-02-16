@@ -102,13 +102,13 @@
 
 		<!-- Completion overlay -->
 		{#if isCompleted}
-			<div class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4">
+			<div class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-black/70 backdrop-blur-sm">
 				<div class="flex flex-col items-center gap-3 max-w-sm w-full">
 					<!-- Primary CTA -->
 					<button
 						onclick={onNextChallenge}
-						class="px-8 py-2.5 bg-white text-black font-bold rounded-lg
-							text-base hover:bg-gray-100 active:scale-95 transition-all w-full"
+						class="px-8 py-2.5 bg-[#f5f5dc] text-gray-900 font-bold rounded-lg
+							text-base hover:bg-[#e8e6d0] active:scale-95 transition-all w-full shadow-lg"
 					>
 						Next Challenge
 					</button>
@@ -116,7 +116,7 @@
 					<!-- Streak display -->
 					{#if streakData.currentStreak > 0}
 						<div class="text-center">
-							<p class="text-2xl font-bold text-white">
+							<p class="text-3xl font-bold text-white drop-shadow-lg">
 								🔥 {streakData.currentStreak} Day Streak!
 							</p>
 						</div>
@@ -124,7 +124,7 @@
 
 					<!-- Mini leaderboard preview -->
 					{#if leaderboardPreview && leaderboardPreview.entries.length > 0}
-						<div class="w-full bg-white/5 rounded-lg p-3 border border-white/10">
+						<div class="w-full bg-black/50 backdrop-blur-md rounded-lg p-3 border border-white/20">
 							<div class="flex items-center justify-between mb-2">
 								<h3 class="text-sm font-bold text-white flex items-center gap-1">
 									<Trophy class="w-4 h-4 text-yellow-400" />
@@ -155,7 +155,7 @@
 					<button
 						onclick={onShare}
 						disabled={hasShared}
-						class="px-6 py-2 border border-white/30 text-white rounded-lg
+						class="px-6 py-2 border-2 border-white text-white rounded-lg
 							text-sm hover:bg-white/10 active:scale-95 transition-all
 							disabled:opacity-50 disabled:cursor-not-allowed w-full
 							flex items-center justify-center gap-2"
@@ -200,4 +200,8 @@
 <LeaderboardModal
 	isOpen={showLeaderboard}
 	onClose={() => showLeaderboard = false}
+	onNextChallenge={() => {
+		showLeaderboard = false
+		onNextChallenge()
+	}}
 />

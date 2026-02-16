@@ -8,9 +8,10 @@
 	type Props = {
 		isOpen: boolean
 		onClose: () => void
+		onNextChallenge: () => void
 	}
 
-	let { isOpen, onClose }: Props = $props()
+	let { isOpen, onClose, onNextChallenge }: Props = $props()
 
 	let activeTab = $state<'streak' | 'speed'>('streak')
 	let leaderboardData = $state<LeaderboardData | null>(null)
@@ -45,13 +46,6 @@
 	function handleTabChange(tab: 'streak' | 'speed') {
 		activeTab = tab
 		fetchLeaderboard()
-	}
-
-	function getMedalEmoji(rank: number): string {
-		if (rank === 1) return '🥇'
-		if (rank === 2) return '🥈'
-		if (rank === 3) return '🥉'
-		return `${rank}.`
 	}
 
 	function formatScore(score: number, type: 'streak' | 'speed'): string {
@@ -117,7 +111,7 @@
 			</div>
 
 			<!-- Content -->
-			<div class="flex-1 overflow-y-auto p-4">
+			<div class="flex-1 overflow-y-auto">
 				{#if isLoading}
 					<div class="flex items-center justify-center py-8">
 						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
@@ -127,31 +121,52 @@
 						<p>{error}</p>
 					</div>
 				{:else if leaderboardData && leaderboardData.entries.length > 0}
-					<div class="space-y-2">
-						{#each leaderboardData.entries as entry}
-							<div
-								class="flex items-center justify-between p-3 rounded-lg transition-colors
-									{leaderboardData.userRank === entry.rank ? 'bg-blue-500/20 border border-blue-400/50' : 'bg-white/5 hover:bg-white/10'}"
-							>
-								<div class="flex items-center gap-3 flex-1 min-w-0">
-									<span class="text-lg font-bold text-white w-8 flex-shrink-0">
-										{getMedalEmoji(entry.rank)}
-									</span>
-									<span class="text-sm text-white font-medium truncate">
+					<!-- Table layout -->
+					<table class="w-full border-collapse">
+						<thead>
+							<tr class="border-b border-white/10 text-left text-xs text-gray-400">
+								<th class="px-4 py-2 font-medium">Rank</th>
+								<th class="px-4 py-2 font-medium">Player</th>
+								<th class="px-4 py-2 font-medium text-right">
+									{activeTab === 'streak' ? 'Streak' : 'Time'}
+								</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each leaderboardData.entries as entry}
+								<tr
+									class="border-b border-white/10 transition-colors
+										{leaderboardData.userRank === entry.rank ? 'bg-green-500/20 text-green-400' : 'hover:bg-white/5'}"
+								>
+									<td class="px-4 py-3 text-sm">
+										{entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : `${entry.rank}.`}
+									</td>
+									<td class="px-4 py-3 text-sm font-medium">
 										{entry.username}
-									</span>
-								</div>
-								<span class="text-sm font-bold text-yellow-400 flex-shrink-0">
-									{formatScore(entry.score, activeTab)}
-								</span>
-							</div>
-						{/each}
-					</div>
+									</td>
+									<td class="px-4 py-3 text-sm font-bold text-yellow-400 text-right">
+										{formatScore(entry.score, activeTab)}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				{:else}
 					<div class="text-center py-8 text-gray-400">
 						<p>No entries yet. Be the first!</p>
 					</div>
 				{/if}
+			</div>
+
+			<!-- Footer with Next Challenge button -->
+			<div class="border-t border-white/10 p-4 flex gap-2">
+				<button
+					onclick={onNextChallenge}
+					class="flex-1 px-6 py-2.5 bg-[#f5f5dc] text-gray-900 font-bold rounded-lg
+						hover:bg-[#e8e6d0] active:scale-95 transition-all"
+				>
+					Next Challenge
+				</button>
 			</div>
 		</div>
 	</div>
