@@ -23,7 +23,7 @@ You are a senior Svelte/TypeScript developer building a game for Reddit's Devvit
 | **Platform** | Devvit | 0.12.7 | Reddit integration |
 | **Testing** | Vitest | latest | Unit tests |
 | **Build** | Vite | latest | Bundler |
-| **Package** | pnpm | latest | Dependencies |
+| **Package** | bun | latest | Dependencies |
 
 ### Hard Constraints (CANNOT VIOLATE)
 
@@ -45,10 +45,10 @@ You are a senior Svelte/TypeScript developer building a game for Reddit's Devvit
 
 ```bash
 # 1. Install dependencies
-pnpm install
+bun install
 
 # 2. Start development server
-pnpm dev
+bun dev
 
 # 3. Open the playtest URL shown in terminal
 # Example: https://www.reddit.com/r/YourTestSubreddit?playtest=your-app
@@ -58,18 +58,18 @@ pnpm dev
 
 ```bash
 # Terminal 1: Run dev server (keeps running)
-pnpm dev
+bun dev
 
 # Terminal 2: Run tests in watch mode
-pnpm test --watch
+bun test --watch
 
 # Before committing
-pnpm type-check && pnpm fix && pnpm test
+bun type-check && bun test
 ```
 
 ### Verify It Works
 
-1. Run `pnpm dev`
+1. Run `bun dev`
 2. Open the playtest URL in browser
 3. You should see: The game board
 4. Edit `src/client/App.svelte`
@@ -79,11 +79,11 @@ pnpm type-check && pnpm fix && pnpm test
 
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
-| `pnpm dev` | Start dev server | Always during development |
-| `pnpm build` | Production build | Before deploying |
-| `pnpm test` | Run all tests | Before committing |
-| `pnpm type-check` | TypeScript validation | Before committing |
-| `pnpm fix` | Format + lint | Before committing |
+| `bun dev` | Start dev server | Always during development |
+| `bun build` | Production build | Before deploying |
+| `bun test` | Run all tests | Before committing |
+| `bun test src/path/file.test.ts` | Run single test file | During development |
+| `bun type-check` | TypeScript validation | Before committing |
 
 ---
 
@@ -400,18 +400,16 @@ it('generates easy puzzle with 40+ given cells', () => {
 Run all local checks:
 
 ```bash
-pnpm type-check  # TypeScript compilation
-pnpm test        # Unit tests
-pnpm fix         # Linting + formatting
+bun type-check  # TypeScript compilation
+bun test        # Unit tests
 ```
 
-**All three must pass before proceeding.**
+**Both must pass before proceeding.**
 
 | Check | What It Catches |
 |-------|-----------------|
 | `type-check` | Type errors, missing imports, wrong parameters |
 | `test` | Logic errors, regressions, edge cases |
-| `fix` | Code style, formatting, common mistakes |
 
 ⚠️ **This is necessary but NOT sufficient.** Local tests don't verify:
 
@@ -447,7 +445,7 @@ After playtest passes:
 
 ```bash
 # Ensure everything passes one more time
-pnpm type-check && pnpm fix && pnpm test
+bun type-check && bun test
 
 # Stage and commit
 git add .
@@ -471,9 +469,8 @@ A feature is complete when ALL boxes are checked:
 
 **Local Checks:**
 
-- [ ] TypeScript compiles (`pnpm type-check`)
-- [ ] All tests pass (`pnpm test`)
-- [ ] Linting passes (`pnpm fix`)
+- [ ] TypeScript compiles (`bun type-check`)
+- [ ] All tests pass (`bun test`)
 - [ ] No `console.log` statements remain
 
 **Playtest Checks:**
@@ -515,7 +512,7 @@ refactor/extract-validation-logic
 - Imperative verb: "add" not "added"
 - Max 72 characters in subject line
 - Reference issue: `Closes #42` or `Fixes #42`
-- Run `pnpm type-check` before every commit
+- Run `bun type-check` before every commit
 
 ```text
 examples:
@@ -719,7 +716,7 @@ context.postId          // "t3_xyz789" or undefined
 
 ```bash
 # 1. Check dev server is running
-pnpm dev
+bun dev
 
 # 2. Hard refresh in browser
 Cmd+Shift+R (Mac) or Ctrl+Shift+R (Windows)
@@ -746,7 +743,7 @@ After completing any feature:
 3. **Run final checks:**
 
    ```bash
-   pnpm type-check && pnpm fix && pnpm test
+   bun type-check && bun test
    ```
 
 4. **Commit with proper message:**

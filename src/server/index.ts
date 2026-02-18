@@ -9,6 +9,7 @@ import { Hono } from 'hono'
 
 import { createPost } from './post'
 import { gameRouter } from './routes/game'
+import { economyRouter } from './routes/economy'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 
@@ -69,6 +70,7 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
 
 // Register game API routes
 app.route('/', gameRouter)
+app.route('/', economyRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 serve({ fetch: app.fetch, port: getServerPort(), createServer })

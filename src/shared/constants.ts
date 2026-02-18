@@ -85,3 +85,66 @@ export const URJO_COLORS = {
 } as const
 
 export type UrjoColor = (typeof URJO_COLORS)[keyof typeof URJO_COLORS]
+
+// ─── Economy Constants ─────────────────────────────────────────────────────────
+
+/** Base coins earned per puzzle completion */
+export const COIN_BASE = 10
+
+/** Additional coins per streak day */
+export const COIN_STREAK_MULTIPLIER = 2
+
+/** Bonus coins for solving under par time */
+export const COIN_SPEED_BONUS = 5
+
+/** Bonus coins for first solve of the day */
+export const COIN_DAILY_BONUS = 5
+
+/** Multiplier for par time calculation (expectedTime * 2) */
+export const PAR_TIME_MULTIPLIER = 2
+
+/** Title definitions - purchasable cosmetic titles */
+export const TITLES: readonly import('./types').TitleDef[] = [
+	{ id: 'puzzler', emoji: '🧩', label: 'Puzzler', cost: 0 },
+	{ id: 'streak_lord', emoji: '🔥', label: 'Streak Lord', cost: 100 },
+	{
+		id: 'speed_demon',
+		emoji: '⚡',
+		label: 'Speed Demon',
+		cost: 150,
+		condition: { type: 'minSpeedSolves', value: 10 },
+	},
+	{
+		id: 'big_brain',
+		emoji: '🧠',
+		label: 'Big Brain',
+		cost: 200,
+		condition: { type: 'minSkillLevel', value: 5 },
+	},
+	{
+		id: 'urjo_king',
+		emoji: '👑',
+		label: 'Urjo King',
+		cost: 500,
+		condition: { type: 'minSolves', value: 50 },
+	},
+	{
+		id: 'diamond_mind',
+		emoji: '💎',
+		label: 'Diamond Mind',
+		cost: 1000,
+		condition: { type: 'minLongestStreak', value: 30 },
+	},
+	{
+		id: 'chromatic',
+		emoji: '🌈',
+		label: 'Chromatic',
+		cost: 300,
+		condition: { type: 'minSolves', value: 100 },
+	},
+] as const
+
+/** Get title by ID */
+export const getTitleById = (id: string): import('./types').TitleDef | undefined => {
+	return TITLES.find((t) => t.id === id)
+}

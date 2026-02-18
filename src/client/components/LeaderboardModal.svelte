@@ -14,7 +14,7 @@
 
 	let { isOpen, onClose, onNextChallenge }: Props = $props()
 
-	let activeTab = $state<'streak' | 'speed'>('streak')
+	let activeTab = $state<'streak' | 'speed' | 'coins'>('streak')
 	let leaderboardData = $state<LeaderboardData | null>(null)
 	let isLoading = $state(false)
 	let error = $state<string | null>(null)
@@ -31,7 +31,14 @@
 		error = null
 
 		try {
-			const response = await fetch(`/api/game/leaderboard?type=${activeTab}`)
+			let url: string
+			if (activeTab === 'coins') {
+				url = '/api/leaderboard/coins'
+			} else {
+				url = `/api/game/leaderboard?type=${activeTab}`
+			}
+			
+			const response = await fetch(url)
 			if (!response.ok) throw new Error('Failed to fetch leaderboard')
 			
 			const data: LeaderboardData = await response.json()
@@ -44,16 +51,18 @@
 		}
 	}
 
-	function handleTabChange(tab: 'streak' | 'speed') {
+	function handleTabChange(tab: 'streak' | 'speed' | 'coins') {
 		activeTab = tab
 		fetchLeaderboard()
 	}
 
-	function formatScore(score: number, type: 'streak' | 'speed'): string {
+	function formatScore(score: number, type: 'streak' | 'speed' | 'coins'): string {
 		if (type === 'streak') {
 			return `${score} day${score === 1 ? '' : 's'}`
-		} else {
+		} else if (type === 'speed') {
 			return `${score}s`
+		} else {
+			return `${score.toLocaleString()} 🪙`
 		}
 	}
 </script>
@@ -107,7 +116,15 @@
 						{activeTab === 'speed' ? 'text-theme-text-primary bg-theme-hover border-b-2 border-blue-400' : 'text-theme-text-muted hover:text-theme-text-primary'}"
 				>
 					<Zap class="w-4 h-4" />
-					<span>Speed (Today)</span>
+					<span>Speed</span>
+				</button>
+				<button
+					onclick={() => handleTabChange('coins')}
+					class="flex-1 flex items-center justify-center gap-2 px-4 py-3 font-medium transition-colors
+						{activeTab === 'coins' ? 'text-theme-text-primary bg-theme-hover border-b-2 border-yellow-400' : 'text-theme-text-muted hover:text-theme-text-primary'}"
+				>
+					<span class="text-sm">🪙</span>
+					<span>Coins</span>
 				</button>
 			</div>
 
@@ -129,7 +146,7 @@
 								<th class="px-4 py-2 font-medium">Rank</th>
 								<th class="px-4 py-2 font-medium">Player</th>
 								<th class="px-4 py-2 font-medium text-right">
-									{activeTab === 'streak' ? 'Streak' : 'Time'}
+									{activeTab === 'streak' ? 'Streak' : activeTab === 'speed' ? 'Time' : 'Coins'}
 								</th>
 							</tr>
 						</thead>

@@ -4,8 +4,17 @@
 	import GameBoard from '../components/GameBoard.svelte'
 	import StreakBadge from '../components/StreakBadge.svelte'
 	import LeaderboardModal from '../components/LeaderboardModal.svelte'
+	import CoinDisplay from '../components/CoinDisplay.svelte'
 	import Trophy from 'lucide-svelte/icons/trophy'
 	import Share2 from 'lucide-svelte/icons/share-2'
+
+	type CoinReward = {
+		base: number
+		streakBonus: number
+		speedBonus: number
+		dailyBonus: number
+		total: number
+	}
 
 	type Props = {
 		grid: Grid
@@ -16,9 +25,11 @@
 		onRestart: () => void
 		onHowToPlay: () => void
 		streakData: StreakData
-		timeTaken: number
 		hasShared: boolean
 		onShare: () => void
+		coinReward?: CoinReward
+		coins?: number
+		onOpenShop?: () => void
 	}
 
 	let {
@@ -30,9 +41,11 @@
 		onRestart,
 		onHowToPlay,
 		streakData,
-		timeTaken,
 		hasShared,
 		onShare,
+		coinReward,
+		coins,
+		onOpenShop,
 	}: Props = $props()
 
 	let showLeaderboard = $state(false)
@@ -69,6 +82,9 @@
 		
 		<div class="flex items-center gap-2 flex-1 justify-center">
 			<StreakBadge streak={streakData} />
+			{#if coins !== undefined && onOpenShop}
+				<CoinDisplay coins={coins} onClick={onOpenShop} />
+			{/if}
 			<button
 				onclick={() => showLeaderboard = true}
 				class="p-1.5 rounded-lg hover:bg-theme-hover transition-colors"
@@ -119,6 +135,24 @@
 							<p class="text-3xl font-bold text-theme-text-primary drop-shadow-lg">
 								🔥 {streakData.currentStreak} Day Streak!
 							</p>
+						</div>
+					{/if}
+
+					<!-- Coin reward display -->
+					{#if coinReward && coinReward.total > 0}
+						<div class="flex flex-col items-center gap-1 animate-bounce-in">
+							<span class="text-2xl font-bold text-yellow-400">+{coinReward.total} 🪙</span>
+							<div class="flex gap-2 text-xs text-gray-400">
+								{#if coinReward.streakBonus > 0}
+									<span>🔥 +{coinReward.streakBonus}</span>
+								{/if}
+								{#if coinReward.speedBonus > 0}
+									<span>⚡ +{coinReward.speedBonus}</span>
+								{/if}
+								{#if coinReward.dailyBonus > 0}
+									<span>📅 +{coinReward.dailyBonus}</span>
+								{/if}
+							</div>
 						</div>
 					{/if}
 

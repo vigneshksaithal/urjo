@@ -2,7 +2,26 @@
 	import type { Grid, CellColor, GameState, NextChallengeResponse, StreakData, ShareResponse } from '../shared/types'
 	import GameView from './views/GameView.svelte'
 	import TutorialView from './views/TutorialView.svelte'
+	import ShopModal from './components/ShopModal.svelte'
 	import { deserializeGrid, serializeGrid } from './lib/utils'
+
+	type CoinReward = {
+		base: number
+		streakBonus: number
+		speedBonus: number
+		dailyBonus: number
+		total: number
+	}
+
+	type EconomyResponse = {
+		coins: number
+		totalCoins: number
+		totalSolves: number
+		speedSolves: number
+		equippedTitle: string
+		ownedTitles: string[]
+		dailyFirstSolve: string | null
+	}
 
 	type View = 'game' | 'tutorial' | 'error'
 
@@ -22,6 +41,10 @@
 	let streakData = $state<StreakData>({ currentStreak: 0, longestStreak: 0, lastPlayedDate: null })
 	let timeTaken = $state(0)
 	let hasShared = $state(false)
+	let showShop = $state(false)
+	let coins = $state(0)
+	let totalCoins = $state(0)
+	let coinReward: CoinReward | undefined = $state(undefined)
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = []
@@ -66,13 +89,30 @@
 			isCompleted = false
 			hasShared = false
 			startTime = Date.now()
+			coinReward = undefined
 
 			if (!data.tutorialCompleted) {
 				currentView = 'tutorial'
 			}
+
+			// Load economy data
+			loadEconomy()
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Failed to load game'
 			currentView = 'error'
+		}
+	}
+
+	async function loadEconomy() {
+		try {
+			const response = await fetch('/api/economy')
+			if (response.ok) {
+				const data: EconomyResponse = await response.json()
+				coins = data.coins
+				totalCoins = data.totalCoins
+			}
+		} catch {
+			// Non-critical, use defaults
 		}
 	}
 
@@ -119,6 +159,11 @@
 				const data = await response.json()
 				if (data.streak) {
 					streakData = data.streak
+				}
+				if (data.coinReward) {
+					coinReward = data.coinReward
+					coins += data.coinReward.total
+					totalCoins += data.coinReward.total
 				}
 			}
 		} catch {
@@ -227,18 +272,29 @@
 			isReplay={tutorialCompleted}
 		/>
 	{:else if currentView === 'game'}
-		<GameView
-			{grid}
-			{gridSize}
-			{isCompleted}
-			{streakData}
-			{timeTaken}
-			{hasShared}
-			onCellChange={handleCellChange}
-			onNextChallenge={handleNextChallenge}
-			onRestart={handleRestart}
-			onHowToPlay={handleHowToPlay}
-			onShare={handleShare}
-		/>
+		{@const gameProps = {
+			grid,
+			gridSize,
+			isCompleted,
+			streakData,
+			hasShared,
+			coins,
+			onCellChange: handleCellChange,
+			onNextChallenge: handleNextChallenge,
+			onRestart: handleRestart,
+			onHowToPlay: handleHowToPlay,
+			onShare: handleShare,
+			onOpenShop: () => showShop = true
+		}}
+		{#if coinReward}
+			<GameView {...gameProps} coinReward={coinReward} />
+		{:else}
+			<GameView {...gameProps} />
+		{/if}
 	{/if}
 </div>
+
+<ShopModal
+	isOpen={showShop}
+	onClose={() => showShop = false}
+/>

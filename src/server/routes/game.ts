@@ -313,8 +313,48 @@ gameRouter.post('/api/game/complete', async (c) => {
 		// Update streak
 		const streak = await updateStreak(userId)
 
-		// Update leaderboards
+		// ─── Coin Rewards ───────────────────────────────────────────────────
 		const today = getTodayUTC()
+
+		// Get current economy data
+		const economyKey = `user:${userId}:economy`
+		const economyData = await redis.hGetAll(economyKey)
+
+		// Check if first solve of the day
+		const lastDailySolve = economyData?.dailyFirstSolve ?? null
+		const isDailyFirst = lastDailySolve !== today
+
+		// Calculate coin reward
+		const { calculateCoinReward } = await import('../lib/economy')
+		const coinReward = calculateCoinReward(timeTaken, currentLevel, streak.currentStreak, isDailyFirst)
+
+		// Update economy
+		const currentCoins = parseInt(economyData?.coins ?? '0', 10)
+		const currentTotalCoins = parseInt(economyData?.totalCoins ?? '0', 10)
+		const currentTotalSolves = parseInt(economyData?.totalSolves ?? '0', 10)
+		const speedSolves = parseInt(economyData?.speedSolves ?? '0', 10)
+
+		const newCoins = currentCoins + coinReward.total
+		const newTotalCoins = currentTotalCoins + coinReward.total
+		const newTotalSolves = currentTotalSolves + 1
+		const newSpeedSolves = speedSolves + (coinReward.speedBonus > 0 ? 1 : 0)
+
+		// Save economy updates
+		await Promise.all([
+			redis.hSet(economyKey, {
+				coins: newCoins.toString(),
+				totalCoins: newTotalCoins.toString(),
+				totalSolves: newTotalSolves.toString(),
+				speedSolves: newSpeedSolves.toString(),
+				ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
+				equippedTitle: economyData?.equippedTitle ?? 'puzzler',
+				dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
+			}),
+			redis.zAdd('leaderboard:coins', { score: newTotalCoins, member: userId }),
+		])
+		// ─── End Coin Rewards ─────────────────────────────────────────────
+
+		// Update leaderboards
 		await Promise.all([
 			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
 			redis.zAdd(`leaderboard:speed:${today}`, { score: timeTaken, member: userId }),
@@ -332,6 +372,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
 			streak,
+			coinReward,
 		}
 
 		return c.json(response)
