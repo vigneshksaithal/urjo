@@ -66,7 +66,7 @@
 >
 	<!-- Loading state: animated empty cell with diagonal split -->
 	{#if isLoading && color === null}
-		<div class="absolute inset-0 overflow-hidden rounded-full">
+		<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
 			<div
 				class="absolute inset-0 bg-[#E54E3E] animate-loading-red"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%); animation-delay: {animationDelay}"
@@ -80,7 +80,7 @@
 
 	<!-- Empty cell: diagonal split with lighter red and blue -->
 	{#if !isLoading && color === null}
-		<div class="absolute inset-0 overflow-hidden rounded-full">
+		<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
 			<div
 				class="absolute inset-0 bg-theme-empty-red"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%)"
@@ -95,7 +95,7 @@
 	<!-- Loading state: animated red cell -->
 	{#if isLoading && (color === 'red' || color === null)}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue"
+			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
@@ -103,19 +103,19 @@
 	<!-- Loading state: animated blue cell -->
 	{#if isLoading && color === 'blue'}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red"
+			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
 
 	<!-- Non-loading: filled red -->
 	{#if !isLoading && color === 'red'}
-		<div class="absolute inset-0 bg-[#E54E3E] rounded-full transition-opacity duration-500" class:opacity-0={isLoading}></div>
+		<div class="absolute inset-0 bg-[#E54E3E] rounded-full transition-opacity duration-500 pointer-events-none" class:opacity-0={isLoading}></div>
 	{/if}
 
 	<!-- Non-loading: filled blue -->
 	{#if !isLoading && color === 'blue'}
-		<div class="absolute inset-0 bg-[#3997D7] rounded-full transition-opacity duration-500" class:opacity-0={isLoading}></div>
+		<div class="absolute inset-0 bg-[#3997D7] rounded-full transition-opacity duration-500 pointer-events-none" class:opacity-0={isLoading}></div>
 	{/if}
 
 	<!-- Number overlay -->
