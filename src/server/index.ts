@@ -1,8 +1,10 @@
 import {
   context,
   createServer,
-  getServerPort
+  getServerPort,
+  redis
 } from '@devvit/web/server'
+import type { TaskResponse } from '@devvit/web/server'
 import { serve } from '@hono/node-server'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
@@ -39,31 +41,29 @@ const createPostHandler = async (c: Context) => {
 app.post('/internal/on-app-install', createPostHandler)
 app.post('/internal/menu/post-create', createPostHandler)
 
-// Scheduler endpoint for daily puzzle posts
+// Scheduler endpoint for twice-daily puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
   try {
-    const date = new Date()
-    const formattedDate = date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
-    const title = `Daily Urjo Puzzle - ${formattedDate}`
+    // Redis is automatically isolated per subreddit installation
+    // Increment counter atomically to get the next puzzle number
+    const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
+    const title = `Urjo Puzzle #${puzzleNumber}`
     
-    await createPost(title)
+    console.log(`[Scheduler] Creating post: ${title}`)
     
-    return c.json({ status: 'ok' })
+    const post = await createPost(title)
+    
+    console.log(`[Scheduler] Post created successfully: ${post.id}`)
+    
+    return c.json<TaskResponse>({ status: 'ok' })
   } catch (error) {
-    const errorMessage = error instanceof Error
-      ? error.message
+    const errorMessage = error instanceof Error 
+      ? error.message 
       : 'Failed to create scheduled post'
-    console.error('Scheduler error:', errorMessage)
-    return c.json(
-      {
-        status: 'error',
-        message: errorMessage
-      },
-      HTTP_STATUS_BAD_REQUEST
+    console.error('[Scheduler] Error:', errorMessage)
+    return c.json<TaskResponse>(
+      { status: 'error', message: errorMessage },
+      500
     )
   }
 })

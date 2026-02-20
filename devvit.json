@@ -40,7 +40,7 @@
     "tasks": {
       "daily-puzzle": {
         "endpoint": "/internal/scheduler/daily-puzzle",
-        "cron": "0 14 * * *"
+        "cron": "0 14,20 * * *"
       }
     }
   },

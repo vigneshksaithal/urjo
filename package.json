@@ -24,7 +24,7 @@
     "@tailwindcss/vite": "^4.2.0",
     "canvas-confetti": "^1.9.4",
     "devvit": "0.12.13",
-    "hono": "^4.11.10",
+    "hono": "^4.12.0",
     "lucide-svelte": "^0.574.0",
     "tailwindcss": "^4.2.0"
   },
@@ -33,8 +33,8 @@
     "@types/canvas-confetti": "^1.9.0",
     "concurrently": "^9.2.1",
     "dotenv-cli": "^11.0.0",
-    "svelte": "^5.51.3",
-    "svelte-check": "^4.4.0",
+    "svelte": "^5.53.0",
+    "svelte-check": "^4.4.1",
     "typescript": "^5.9.3",
     "vite": "8.0.0-beta.14",
     "vitest": "^4.0.18"

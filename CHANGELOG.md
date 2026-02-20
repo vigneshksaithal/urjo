@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- **Twice-daily scheduler**: Game posts twice daily at 14:00 UTC and 20:00 UTC
+  - Sequential puzzle numbering per subreddit (Redis auto-isolated)
+  - Title format: "Urjo Puzzle #N" (no date)
 - **UI Redesign**: Complete visual overhaul matching new design system
   - **Color Constants**: Centralized `URJO_COLORS` in `shared/constants.ts` for consistent theming
   - **Canvas Confetti**: Red/blue themed celebration animation using `canvas-confetti` library
