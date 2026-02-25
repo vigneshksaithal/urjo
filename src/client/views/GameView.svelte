@@ -1,36 +1,41 @@
 <script lang="ts">
-	import type { CellColor, Grid, StreakData, LeaderboardData } from '../../shared/types'
-	import ConfettiEffect from '../components/ConfettiEffect.svelte'
-	import GameBoard from '../components/GameBoard.svelte'
-	import StreakBadge from '../components/StreakBadge.svelte'
-	import LeaderboardModal from '../components/LeaderboardModal.svelte'
-	import CoinDisplay from '../components/CoinDisplay.svelte'
-	import Trophy from 'lucide-svelte/icons/trophy'
-	import Share2 from 'lucide-svelte/icons/share-2'
+	import type {
+		CellColor,
+		Grid,
+		StreakData,
+		LeaderboardData,
+	} from "../../shared/types";
+	import ConfettiEffect from "../components/ConfettiEffect.svelte";
+	import GameBoard from "../components/GameBoard.svelte";
+	import StreakBadge from "../components/StreakBadge.svelte";
+	import LeaderboardModal from "../components/LeaderboardModal.svelte";
+	import CoinDisplay from "../components/CoinDisplay.svelte";
+	import Trophy from "lucide-svelte/icons/trophy";
+	import Share2 from "lucide-svelte/icons/share-2";
 
 	type CoinReward = {
-		base: number
-		streakBonus: number
-		speedBonus: number
-		dailyBonus: number
-		total: number
-	}
+		base: number;
+		streakBonus: number;
+		speedBonus: number;
+		dailyBonus: number;
+		total: number;
+	};
 
 	type Props = {
-		grid: Grid
-		gridSize: number
-		onCellChange: (row: number, col: number, color: CellColor) => void
-		isCompleted: boolean
-		onNextChallenge: () => void
-		onRestart: () => void
-		onHowToPlay: () => void
-		streakData: StreakData
-		hasShared: boolean
-		onShare: () => void
-		coinReward?: CoinReward
-		coins?: number
-		onOpenShop?: () => void
-	}
+		grid: Grid;
+		gridSize: number;
+		onCellChange: (row: number, col: number, color: CellColor) => void;
+		isCompleted: boolean;
+		onNextChallenge: () => void;
+		onRestart: () => void;
+		onHowToPlay: () => void;
+		streakData: StreakData;
+		hasShared: boolean;
+		onShare: () => void;
+		coinReward?: CoinReward;
+		coins?: number;
+		onOpenShop?: () => void;
+	};
 
 	let {
 		grid,
@@ -46,23 +51,23 @@
 		coinReward,
 		coins,
 		onOpenShop,
-	}: Props = $props()
+	}: Props = $props();
 
-	let showLeaderboard = $state(false)
-	let leaderboardPreview = $state<LeaderboardData | null>(null)
+	let showLeaderboard = $state(false);
+	let leaderboardPreview = $state<LeaderboardData | null>(null);
 
 	// Fetch mini leaderboard preview when completed
 	$effect(() => {
 		if (isCompleted && !leaderboardPreview) {
-			fetchLeaderboardPreview()
+			fetchLeaderboardPreview();
 		}
-	})
+	});
 
 	async function fetchLeaderboardPreview() {
 		try {
-			const response = await fetch('/api/game/leaderboard?type=speed')
+			const response = await fetch("/api/game/leaderboard?type=speed");
 			if (response.ok) {
-				leaderboardPreview = await response.json()
+				leaderboardPreview = await response.json();
 			}
 		} catch {
 			// Non-critical
@@ -79,21 +84,21 @@
 		>
 			How to Play
 		</button>
-		
+
 		<div class="flex items-center gap-2 flex-1 justify-center">
 			<StreakBadge streak={streakData} />
 			{#if coins !== undefined && onOpenShop}
-				<CoinDisplay coins={coins} onClick={onOpenShop} />
+				<CoinDisplay {coins} onClick={onOpenShop} />
 			{/if}
 			<button
-				onclick={() => showLeaderboard = true}
+				onclick={() => (showLeaderboard = true)}
 				class="p-1.5 rounded-lg hover:bg-theme-hover transition-colors"
 				aria-label="View leaderboard"
 			>
 				<Trophy class="w-5 h-5 text-yellow-400" />
 			</button>
 		</div>
-		
+
 		{#if !isCompleted}
 			<button
 				onclick={onNextChallenge}
@@ -107,10 +112,12 @@
 	</header>
 
 	<!-- Main game area -->
-	<main class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative">
+	<main
+		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative"
+	>
 		<!-- Upvote request -->
 		<p class="text-sm text-theme-text-muted text-center">
-			Enjoying Urjo? Upvote if you like it!
+			⬆️ Upvote to support the game — it helps us make more puzzles!
 		</p>
 
 		<!-- Game board -->
@@ -118,7 +125,9 @@
 
 		<!-- Completion overlay -->
 		{#if isCompleted}
-			<div class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-theme-overlay backdrop-blur-sm">
+			<div
+				class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-theme-overlay backdrop-blur-sm"
+			>
 				<div class="flex flex-col items-center gap-3 max-w-sm w-full">
 					<!-- Primary CTA -->
 					<button
@@ -132,7 +141,9 @@
 					<!-- Streak display -->
 					{#if streakData.currentStreak > 0}
 						<div class="text-center">
-							<p class="text-3xl font-bold text-theme-text-primary drop-shadow-lg">
+							<p
+								class="text-3xl font-bold text-theme-text-primary drop-shadow-lg"
+							>
 								🔥 {streakData.currentStreak} Day Streak!
 							</p>
 						</div>
@@ -140,8 +151,12 @@
 
 					<!-- Coin reward display -->
 					{#if coinReward && coinReward.total > 0}
-						<div class="flex flex-col items-center gap-1 animate-bounce-in">
-							<span class="text-2xl font-bold text-yellow-400">+{coinReward.total} 🪙</span>
+						<div
+							class="flex flex-col items-center gap-1 animate-bounce-in"
+						>
+							<span class="text-2xl font-bold text-yellow-400"
+								>+{coinReward.total} 🪙</span
+							>
 							<div class="flex gap-2 text-xs text-gray-400">
 								{#if coinReward.streakBonus > 0}
 									<span>🔥 +{coinReward.streakBonus}</span>
@@ -158,14 +173,18 @@
 
 					<!-- Mini leaderboard preview -->
 					{#if leaderboardPreview && leaderboardPreview.entries.length > 0}
-						<div class="w-full bg-theme-bg-secondary backdrop-blur-md rounded-lg p-3 border border-theme-border">
+						<div
+							class="w-full bg-theme-bg-secondary backdrop-blur-md rounded-lg p-3 border border-theme-border"
+						>
 							<div class="flex items-center justify-between mb-2">
-								<h3 class="text-sm font-bold text-theme-text-primary flex items-center gap-1">
+								<h3
+									class="text-sm font-bold text-theme-text-primary flex items-center gap-1"
+								>
 									<Trophy class="w-4 h-4 text-yellow-400" />
 									Top 3 Today
 								</h3>
 								<button
-									onclick={() => showLeaderboard = true}
+									onclick={() => (showLeaderboard = true)}
 									class="text-xs text-urjo-blue hover:underline"
 								>
 									View All
@@ -173,12 +192,20 @@
 							</div>
 							<div class="space-y-1">
 								{#each leaderboardPreview.entries.slice(0, 3) as entry}
-									<div class="flex items-center justify-between text-xs">
+									<div
+										class="flex items-center justify-between text-xs"
+									>
 										<span class="text-theme-text-secondary">
-											{entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : '🥉'}
+											{entry.rank === 1
+												? "🥇"
+												: entry.rank === 2
+													? "🥈"
+													: "🥉"}
 											{entry.username}
 										</span>
-										<span class="text-yellow-400 font-bold">{entry.score}s</span>
+										<span class="text-yellow-400 font-bold"
+											>{entry.score}s</span
+										>
 									</div>
 								{/each}
 							</div>
@@ -202,6 +229,11 @@
 						{/if}
 					</button>
 
+					<!-- Upvote prompt -->
+					<p class="text-xs text-theme-text-muted text-center">
+						⬆️ Your upvote helps us keep building — thank you!
+					</p>
+
 					<!-- Restart button -->
 					<button
 						onclick={onRestart}
@@ -210,6 +242,11 @@
 					>
 						Restart
 					</button>
+
+					<!-- Cross-promo -->
+					<p class="text-xs text-theme-text-muted text-center">
+						🧩 Play daily puzzles at r/urjo
+					</p>
 				</div>
 			</div>
 		{/if}
@@ -233,9 +270,9 @@
 <!-- Leaderboard modal -->
 <LeaderboardModal
 	isOpen={showLeaderboard}
-	onClose={() => showLeaderboard = false}
+	onClose={() => (showLeaderboard = false)}
 	onNextChallenge={() => {
-		showLeaderboard = false
-		onNextChallenge()
+		showLeaderboard = false;
+		onNextChallenge();
 	}}
 />

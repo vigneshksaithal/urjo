@@ -2,7 +2,8 @@ import {
   context,
   createServer,
   getServerPort,
-  redis
+  redis,
+  reddit
 } from '@devvit/web/server'
 import type { TaskResponse } from '@devvit/web/server'
 import { serve } from '@hono/node-server'
@@ -41,24 +42,81 @@ const createPostHandler = async (c: Context) => {
 app.post('/internal/on-app-install', createPostHandler)
 app.post('/internal/menu/post-create', createPostHandler)
 
+/**
+ * Build a stats comment for the daily puzzle post.
+ * Pulls streak leader, today's speed leader, and total games from Redis.
+ */
+async function buildStatsComment(puzzleNumber: number): Promise<string> {
+  // Streak leader
+  const streakTop = await redis.zRange('leaderboard:streak', 0, 0, { reverse: true, by: 'rank' })
+  let streakLine = ''
+  if (streakTop.length > 0 && streakTop[0]) {
+    const entry = streakTop[0]
+    try {
+      const user = await reddit.getUserById(entry.member as `t2_${string}`)
+      if (user) {
+        streakLine = `🔥 **Streak Leader:** u/${user.username} (${entry.score} days)`
+      }
+    } catch { /* skip */ }
+  }
+
+  // Yesterday's speed leader
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0] ?? ''
+  const speedTop = await redis.zRange(`leaderboard:speed:${yesterday}`, 0, 0, { by: 'rank' })
+  let speedLine = ''
+  if (speedTop.length > 0 && speedTop[0]) {
+    const entry = speedTop[0]
+    try {
+      const user = await reddit.getUserById(entry.member as `t2_${string}`)
+      if (user) {
+        speedLine = `⚡ **Yesterday's Fastest:** u/${user.username} (${entry.score}s)`
+      }
+    } catch { /* skip */ }
+  }
+
+  const totalGames = await redis.get('stats:totalGames')
+
+  const lines = [
+    `**Puzzle #${puzzleNumber}** is live! Tap to play 👆`,
+    '',
+    ...(streakLine ? [streakLine] : []),
+    ...(speedLine ? [speedLine] : []),
+    ...(totalGames ? [`🎮 **${totalGames}** puzzles played so far`] : []),
+    '',
+    '⬆️ **Upvote to support the game** — every upvote helps us keep building!',
+    '',
+    'Good luck! 🍀',
+  ]
+
+  return lines.join('\n')
+}
+
 // Scheduler endpoint for twice-daily puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
   try {
-    // Redis is automatically isolated per subreddit installation
-    // Increment counter atomically to get the next puzzle number
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
-    const title = `Urjo Puzzle #${puzzleNumber}`
-    
+    const title = `🧩 Urjo Puzzle #${puzzleNumber} — Can you solve it?`
+
     console.log(`[Scheduler] Creating post: ${title}`)
-    
+
     const post = await createPost(title)
-    
+
+    // Build a stats comment from yesterday's data
+    try {
+      const statsComment = await buildStatsComment(puzzleNumber)
+      if (statsComment) {
+        await reddit.submitComment({ id: post.id as `t3_${string}`, text: statsComment })
+      }
+    } catch (commentErr) {
+      console.error('[Scheduler] Stats comment failed (non-critical):', commentErr)
+    }
+
     console.log(`[Scheduler] Post created successfully: ${post.id}`)
-    
+
     return c.json<TaskResponse>({ status: 'ok' })
   } catch (error) {
-    const errorMessage = error instanceof Error 
-      ? error.message 
+    const errorMessage = error instanceof Error
+      ? error.message
       : 'Failed to create scheduled post'
     console.error('[Scheduler] Error:', errorMessage)
     return c.json<TaskResponse>(
