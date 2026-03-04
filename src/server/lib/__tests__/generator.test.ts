@@ -8,8 +8,8 @@ import {
 	serializeGrid,
 	serializeNumbers,
 	deserializeGrid,
-} from './generator'
-import type { Grid, CellColor } from '../../shared/types'
+} from '../generator'
+import type { Grid, CellColor } from '../../../shared/types'
 
 function gridFromColors(colors: CellColor[][]): Grid {
 	return colors.map((row) =>

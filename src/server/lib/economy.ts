@@ -3,7 +3,7 @@
  * Coin calculation, user economy management, title validation
  */
 
-import { redis } from '@devvit/web/server'
+import { redis, reddit } from '@devvit/web/server'
 import type { UserEconomy, CoinReward, ShopItem, TitleDef, StreakData } from '../../shared/types'
 import {
 	COIN_BASE,
@@ -18,18 +18,16 @@ import {
 
 const ECONOMY_KEY_PREFIX = 'user'
 
-function getEconomyKey(userId: string): string {
-	return `${ECONOMY_KEY_PREFIX}:${userId}:economy`
-}
+const getEconomyKey = (userId: string): string =>
+	`${ECONOMY_KEY_PREFIX}:${userId}:economy`
 
-export function getTodayUTC(): string {
-	return new Date().toISOString().split('T')[0] ?? ''
-}
+export const getTodayUTC = (): string =>
+	new Date().toISOString().split('T')[0] ?? ''
 
 /**
  * Get user's economy data from Redis hash
  */
-export async function getUserEconomy(userId: string): Promise<UserEconomy> {
+export const getUserEconomy = async (userId: string): Promise<UserEconomy> => {
 	const key = getEconomyKey(userId)
 	const data = await redis.hGetAll(key)
 
@@ -47,7 +45,7 @@ export async function getUserEconomy(userId: string): Promise<UserEconomy> {
 /**
  * Save user economy data to Redis hash
  */
-export async function saveUserEconomy(userId: string, economy: Partial<UserEconomy>): Promise<void> {
+export const saveUserEconomy = async (userId: string, economy: Partial<UserEconomy>): Promise<void> => {
 	const key = getEconomyKey(userId)
 	const updates: Record<string, string> = {}
 
@@ -67,12 +65,12 @@ export async function saveUserEconomy(userId: string, economy: Partial<UserEcono
 /**
  * Calculate coin reward for puzzle completion
  */
-export function calculateCoinReward(
+export const calculateCoinReward = (
 	timeTaken: number,
 	level: number,
 	currentStreak: number,
 	isDailyFirst: boolean
-): CoinReward {
+): CoinReward => {
 	const config = getLevelConfig(level)
 	const parTime = config.expectedTime * PAR_TIME_MULTIPLIER
 	const speedBonus = timeTaken <= parTime ? COIN_SPEED_BONUS : 0
@@ -92,12 +90,12 @@ export function calculateCoinReward(
 /**
  * Check if user meets a title's condition
  */
-export async function checkTitleCondition(
+export const checkTitleCondition = async (
 	title: TitleDef,
 	userId: string,
 	skillLevel: number,
 	streakData: StreakData
-): Promise<boolean> {
+): Promise<boolean> => {
 	if (!title.condition) return true
 
 	switch (title.condition.type) {
@@ -121,11 +119,11 @@ export async function checkTitleCondition(
 /**
  * Get all shop items with ownership and unlock status
  */
-export async function getShopItems(
+export const getShopItems = async (
 	userId: string,
 	skillLevel: number,
 	streakData: StreakData
-): Promise<ShopItem[]> {
+): Promise<ShopItem[]> => {
 	const economy = await getUserEconomy(userId)
 
 	return TITLES.map((title) => {
@@ -149,12 +147,12 @@ export async function getShopItems(
 /**
  * Synchronous version of condition check (for mapping)
  */
-function checkTitleConditionSync(
+const checkTitleConditionSync = (
 	title: TitleDef,
 	economy: UserEconomy,
 	skillLevel: number,
 	streakData: StreakData
-): boolean {
+): boolean => {
 	if (!title.condition) return true
 
 	switch (title.condition.type) {
@@ -175,10 +173,10 @@ function checkTitleConditionSync(
  * Get user display data (username + title emoji)
  * Uses cached display data from Redis
  */
-export async function getUserDisplay(
+export const getUserDisplay = async (
 	targetUserId: string,
 	currentUserId?: string
-): Promise<{ username: string; titleEmoji: string }> {
+): Promise<{ username: string; titleEmoji: string }> => {
 	// Return "You" for current user
 	if (currentUserId && targetUserId === currentUserId) {
 		return { username: 'You', titleEmoji: '🧩' }
@@ -216,9 +214,8 @@ export async function getUserDisplay(
 /**
  * Fetch username from Reddit API
  */
-async function fetchUsernameFromReddit(targetUserId: string): Promise<string> {
+const fetchUsernameFromReddit = async (targetUserId: string): Promise<string> => {
 	try {
-		const { reddit } = await import('@devvit/web/server')
 		const user = await reddit.getUserById(targetUserId as `t2_${string}`)
 		return user?.username ?? 'Anon'
 	} catch {
@@ -229,7 +226,7 @@ async function fetchUsernameFromReddit(targetUserId: string): Promise<string> {
 /**
  * Get streak data for a user
  */
-export async function getUserStreakData(userId: string): Promise<StreakData> {
+export const getUserStreakData = async (userId: string): Promise<StreakData> => {
 	const [currentStr, longestStr, lastDate] = await Promise.all([
 		redis.get(`user:${userId}:streak:current`),
 		redis.get(`user:${userId}:streak:longest`),

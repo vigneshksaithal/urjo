@@ -1,0 +1,163 @@
+import { createDevvitTest } from '@devvit/test/server/vitest'
+import { redis } from '@devvit/web/server'
+import { expect } from 'vitest'
+import { getUserEconomy, saveUserEconomy, calculateCoinReward, getUserStreakData } from '../economy'
+import {
+    COIN_BASE,
+    COIN_SPEED_BONUS,
+    COIN_DAILY_BONUS,
+    COIN_STREAK_MULTIPLIER,
+} from '../../../shared/constants'
+
+// ─── calculateCoinReward (pure — no Redis needed) ─────────────────────────────
+
+import { describe, it } from 'vitest'
+
+describe('calculateCoinReward', () => {
+    it('total equals base + streakBonus + speedBonus + dailyBonus', () => {
+        const reward = calculateCoinReward(5, 1, 3, true)
+        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus)
+    })
+
+    it('includes COIN_SPEED_BONUS when timeTaken <= parTime (expectedTime * 2)', () => {
+        // level 1: expectedTime=10, parTime=20; timeTaken=20 is at par
+        const reward = calculateCoinReward(20, 1, 0, false)
+        expect(reward.speedBonus).toBe(COIN_SPEED_BONUS)
+    })
+
+    it('does not include COIN_SPEED_BONUS when timeTaken > parTime', () => {
+        // level 1: parTime=20; timeTaken=21 exceeds par
+        const reward = calculateCoinReward(21, 1, 0, false)
+        expect(reward.speedBonus).toBe(0)
+    })
+
+    it('includes COIN_DAILY_BONUS when isDailyFirst is true', () => {
+        const reward = calculateCoinReward(100, 1, 0, true)
+        expect(reward.dailyBonus).toBe(COIN_DAILY_BONUS)
+    })
+
+    it('does not include COIN_DAILY_BONUS when isDailyFirst is false', () => {
+        const reward = calculateCoinReward(100, 1, 0, false)
+        expect(reward.dailyBonus).toBe(0)
+    })
+
+    it('base is always COIN_BASE', () => {
+        const reward = calculateCoinReward(5, 1, 0, false)
+        expect(reward.base).toBe(COIN_BASE)
+    })
+
+    it('streakBonus equals currentStreak * COIN_STREAK_MULTIPLIER', () => {
+        const reward = calculateCoinReward(100, 1, 5, false)
+        expect(reward.streakBonus).toBe(5 * COIN_STREAK_MULTIPLIER)
+    })
+})
+
+// ─── getUserEconomy (Redis-backed) ────────────────────────────────────────────
+
+const test = createDevvitTest({ userId: 't2_testuser' })
+
+test('getUserEconomy returns defaults for new user', async () => {
+    const economy = await getUserEconomy('t2_testuser')
+    expect(economy.coins).toBe(0)
+    expect(economy.totalCoins).toBe(0)
+    expect(economy.totalSolves).toBe(0)
+    expect(economy.speedSolves).toBe(0)
+    expect(economy.equippedTitle).toBe('puzzler')
+    expect(economy.ownedTitles).toEqual(['puzzler'])
+    expect(economy.dailyFirstSolve).toBeNull()
+})
+
+// ─── saveUserEconomy + getUserEconomy round-trip ──────────────────────────────
+
+test('saveUserEconomy persists coins and totalSolves, getUserEconomy reads them back', async () => {
+    await saveUserEconomy('t2_testuser', { coins: 50, totalSolves: 3 })
+    const economy = await getUserEconomy('t2_testuser')
+    expect(economy.coins).toBe(50)
+    expect(economy.totalSolves).toBe(3)
+})
+
+// ─── getUserStreakData (Redis-backed) ─────────────────────────────────────────
+
+test('getUserStreakData returns defaults for new user', async () => {
+    const streak = await getUserStreakData('t2_testuser')
+    expect(streak.currentStreak).toBe(0)
+    expect(streak.longestStreak).toBe(0)
+    expect(streak.lastPlayedDate).toBeNull()
+})
+
+// ─── Property 8: Coin reward algebraic invariant (Task 5.2) ──────────────────
+
+describe('Coin reward algebraic invariant — Property 8', () => {
+    /**
+     * Property 8: Coin reward algebraic invariant
+     * For any valid inputs, total === base + streakBonus + speedBonus + dailyBonus
+     * Validates: Requirements 4.1, 4.2, 4.3
+     */
+    it('total always equals sum of components for all input combinations', () => {
+        const timeTakenValues = [0, 5, 10, 20, 50, 100]
+        const levels = [1, 2, 3, 4, 5, 6]
+        const streakValues = [0, 1, 3, 5, 10]
+        const isDailyFirstValues = [true, false]
+
+        for (const timeTaken of timeTakenValues) {
+            for (const level of levels) {
+                for (const currentStreak of streakValues) {
+                    for (const isDailyFirst of isDailyFirstValues) {
+                        const reward = calculateCoinReward(timeTaken, level, currentStreak, isDailyFirst)
+                        expect(reward.total).toBe(
+                            reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus
+                        )
+                    }
+                }
+            }
+        }
+    })
+})
+
+// ─── Property 9: Economy save/load round-trip (Task 5.3) ─────────────────────
+
+/**
+ * Property 9: Economy save/load round-trip
+ * Saving via saveUserEconomy then loading via getUserEconomy preserves saved field values.
+ * Validates: Requirement 4.5
+ */
+
+const testRoundTrip = createDevvitTest({ userId: 't2_testuser' })
+
+testRoundTrip('round-trip: save {coins: 42} → getUserEconomy returns coins=42', async () => {
+    await saveUserEconomy('t2_testuser', { coins: 42 })
+    const economy = await getUserEconomy('t2_testuser')
+    expect(economy.coins).toBe(42)
+})
+
+const testRoundTrip2 = createDevvitTest({ userId: 't2_testuser' })
+
+testRoundTrip2('round-trip: save {totalSolves: 7, speedSolves: 2} → both fields preserved', async () => {
+    await saveUserEconomy('t2_testuser', { totalSolves: 7, speedSolves: 2 })
+    const economy = await getUserEconomy('t2_testuser')
+    expect(economy.totalSolves).toBe(7)
+    expect(economy.speedSolves).toBe(2)
+})
+
+const testRoundTrip3 = createDevvitTest({ userId: 't2_testuser' })
+
+testRoundTrip3(
+    "round-trip: save {equippedTitle: 'streak_lord', ownedTitles: ['puzzler', 'streak_lord']} → both fields preserved",
+    async () => {
+        await saveUserEconomy('t2_testuser', {
+            equippedTitle: 'streak_lord',
+            ownedTitles: ['puzzler', 'streak_lord'],
+        })
+        const economy = await getUserEconomy('t2_testuser')
+        expect(economy.equippedTitle).toBe('streak_lord')
+        expect(economy.ownedTitles).toEqual(['puzzler', 'streak_lord'])
+    }
+)
+
+const testRoundTrip4 = createDevvitTest({ userId: 't2_testuser' })
+
+testRoundTrip4("round-trip: save {dailyFirstSolve: '2025-01-15'} → field preserved", async () => {
+    await saveUserEconomy('t2_testuser', { dailyFirstSolve: '2025-01-15' })
+    const economy = await getUserEconomy('t2_testuser')
+    expect(economy.dailyFirstSolve).toBe('2025-01-15')
+})

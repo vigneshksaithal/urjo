@@ -239,17 +239,17 @@ economyRouter.get('/api/leaderboard/coins', async (c) => {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-async function getSkillLevel(userId: string): Promise<number> {
+const getSkillLevel = async (userId: string): Promise<number> => {
 	const level = await redis.get(`user:${userId}:skillLevel`)
 	return level ? parseInt(level, 10) : 1
 }
 
-async function checkCondition(
+const checkCondition = async (
 	title: (typeof TITLES)[number],
 	economy: Awaited<ReturnType<typeof getUserEconomy>>,
 	skillLevel: number,
 	streakData: Awaited<ReturnType<typeof getUserStreakData>>
-): Promise<boolean> {
+): Promise<boolean> => {
 	if (!title.condition) return true
 
 	switch (title.condition.type) {
