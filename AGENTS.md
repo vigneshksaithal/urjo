@@ -1,758 +1,228 @@
 # AGENTS.md
 
-## 1. Overview
+## Build & Development Commands
 
-### Your Role
+| Command | Script | Purpose |
+|---------|--------|---------|
+| `bun install` | - | Install dependencies (auto-runs build via postinstall) |
+| `bun run dev` | `concurrently` vite watch + devvit playtest | Start dev server (opens Reddit playtest URL) |
+| `bun run build` | `vite build` | Production build to dist/ |
+| `bun run type-check` | `tsc --build` | TypeScript composite build check (all 3 projects) |
+| `bun run check` | `svelte-check` | Svelte-specific type checking (client only) |
+| `bun run test` | `vitest run` | Run all tests (Vitest + @devvit/test) |
+| `bun run test:watch` | `vitest` | Watch mode for development |
+| `bun run deploy` | `build && devvit upload` | Build and upload to Devvit |
+| `bun run launch` | `build && deploy && devvit publish` | Full release pipeline |
 
-You are a senior Svelte/TypeScript developer building a game for Reddit's Devvit platform. You write clean, readable, maintainable, accessible, performant, mobile-first code.
-
-### Project Summary
-
-<!-- TODO: Add a summary of the project -->
-
-### Tech Stack
-
-| Layer | Technology | Version | Purpose |
-|-------|------------|---------|---------|
-| **Frontend** | Svelte | 5.x (runes) | UI framework |
-| **Frontend** | Tailwind CSS | 4.x | Styling |
-| **Frontend** | TypeScript | 5.x | Type safety |
-| **Frontend** | Lucide Svelte | latest | Icons |
-| **Backend** | Hono | latest | HTTP routing |
-| **Backend** | Redis | (Devvit) | Database |
-| **Platform** | Devvit | 0.12.7 | Reddit integration |
-| **Testing** | Vitest | latest | Unit tests |
-| **Build** | Vite | latest | Bundler |
-| **Package** | bun | latest | Dependencies |
-
-### Hard Constraints (CANNOT VIOLATE)
-
-| # | Rule | Consequence if Violated |
-|---|------|------------------------|
-| 1 | Use Svelte 5 runes syntax ONLY | App won't compile |
-| 2 | Use Tailwind CSS ONLY (no `<style>` blocks) | Inconsistent styling, larger bundle |
-| 3 | Server endpoints: `/api/*` (public) or `/internal/*` (triggers) | Routes won't work |
-| 4 | No `localStorage`/`sessionStorage` in client | Will fail silently |
-| 5 | Named exports only (no `export default`) | Tree-shaking breaks |
-| 6 | Lucide icons: `import IconName from 'lucide-svelte/icons/icon-name'` | Bundle size explodes |
-| 7 | **NO SCROLLING in inline views** — all content must fit viewport | Broken UX, content cut off, unprofessional |
-
----
-
-## 2. Quick Start
-
-### First-Time Setup
-
+**Before committing:**
 ```bash
-# 1. Install dependencies
-bun install
-
-# 2. Start development server
-bun dev
-
-# 3. Open the playtest URL shown in terminal
-# Example: https://www.reddit.com/r/YourTestSubreddit?playtest=your-app
+bun run test && bun run type-check
 ```
 
-### Development Loop
+> **Testing:** Vitest + `@devvit/test` provides in-memory Redis, Reddit API mocks, and per-test
+> isolation. Tests live in `__tests__/` directories colocated with source.
+> TDD workflow: write failing test → minimal implementation → refactor → `bun run test`.
 
-```bash
-# Terminal 1: Run dev server (keeps running)
-bun dev
-
-# Terminal 2: Run tests in watch mode
-bun test --watch
-
-# Before committing
-bun type-check && bun test
-```
-
-### Verify It Works
-
-1. Run `bun dev`
-2. Open the playtest URL in browser
-3. You should see: The game board
-4. Edit `src/client/App.svelte`
-5. Save → Refresh Reddit → See your changes
-
-### Essential Commands
-
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| `bun dev` | Start dev server | Always during development |
-| `bun build` | Production build | Before deploying |
-| `bun test` | Run all tests | Before committing |
-| `bun test src/path/file.test.ts` | Run single test file | During development |
-| `bun type-check` | TypeScript validation | Before committing |
+> **Not yet configured:** No linter (eslint/biome) or formatter (prettier/biome) is installed.
+> Do not add these tools without explicit instruction.
 
 ---
 
-## 3. Architecture
+## Architecture
 
-### System Diagram
+Devvit app running inside Reddit posts as a sandboxed webview.
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                     REDDIT POST (Your Game)                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  CLIENT (src/client/)                                   │    │
-│  │  • Svelte 5 + Tailwind CSS                              │    │
-│  │  • Runs in sandboxed webview                            │    │
-│  │  • NO localStorage, NO external fetch                   │    │
-│  │  • Communicates via /api/* endpoints                    │    │
-│  └────────────────────────┬────────────────────────────────┘    │
-│                           │                                     │
-│                           ▼                                     │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  SERVER (src/server/)                                   │    │
-│  │  • Hono.js router                                       │    │
-│  │  • Serverless (no long-running processes)               │    │
-│  │  • Has: Redis, Reddit API, HTTP fetch                   │    │
-│  │  • 30s max request time, 4MB payload limit              │    │
-│  └────────────────────────┬────────────────────────────────┘    │
-│                           │                                     │
-│                           ▼                                     │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  DEVVIT PLATFORM                                        │    │
-│  │  • Redis: 500MB storage, 1000 cmd/sec                   │    │
-│  │  • Triggers: onPostCreate, onCommentSubmit, etc.        │    │
-│  │  • Scheduler: Cron jobs (max 10 recurring)              │    │
-│  │  • Realtime: 100 msg/sec, 5 channels                    │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+```
+src/
+├── client/           # Svelte 5 + Tailwind CSS 4 (sandboxed webview)
+│   ├── App.svelte    # Root component
+│   ├── app.css       # @import "tailwindcss"
+│   ├── main.ts       # Entry: mount(App, { target })
+│   └── index.html    # Entry HTML
+├── server/           # Hono.js routes (serverless)
+│   ├── __tests__/    # Server tests (Vitest + @devvit/test)
+│   ├── index.ts      # Hono app, route handlers, createServer()
+│   └── post.ts       # Post creation logic
+├── shared/           # Shared TypeScript (project references, no source files yet)
+│   └── tsconfig.json
 ```
 
-### File Structure
+Data flow: `User Action → Svelte → fetch('/api/...') → Hono → Redis/Reddit API → Response → UI`
 
-```text
-project-root/
-├── assets/                   # Static media (<20MB per file)
-│   ├── images/               # PNG/JPEG for splash screens
-│   └── icons/                # SVG icons
-├── dist/                      # Build output (git-ignored)
-│   ├── client/               # HTML/CSS/JS bundle
-│   └── server/               # CommonJS bundle
-├── src/
-│   ├── client/               # Frontend code
-│   │   ├── components/       # Reusable Svelte components
-│   │   ├── views/            # Page-level components
-│   │   ├── lib/              # Client utilities
-│   │   ├── App.svelte        # Root component
-│   │   ├── app.css           # Global styles + Tailwind
-│   │   └── index.html        # Entry HTML
-│   ├── server/               # Backend code
-│   │   ├── routes/           # API route handlers
-│   │   └── index.ts          # Hono app entry
-│   └── shared/               # Shared between client/server
-│       ├── types.ts          # TypeScript interfaces
-│       ├── constants.ts      # Shared constants
-│       └── validator.ts      # Input validation
-├── devvit.json               # Devvit configuration
-├── package.json
-├── AGENTS.md                 # This file
-└── CHANGELOG.md              # Version history
-```
-
-### Data Flow
-
-```text
-User Action → Svelte Component → fetch('/api/...') → Hono Route → Redis/Reddit API → Response → Update UI
-```
+**Key packages:** Svelte 5.x, Tailwind CSS 4.x, Hono, TypeScript 5.x, Vite 8.x-beta, @devvit/web 0.12.x, Bun (package manager)
 
 ---
 
-## 4. Core Concepts
+## Coding Principles
 
-### 4.1 Devvit Platform
+These apply to ALL code — server, client, shared. Every skill inherits these rules.
 
-Devvit is Reddit's developer platform. Your app runs inside Reddit posts as a sandboxed webview.
+### Functional & minimal
+- Pure functions by default: same input → same output, no side effects
+- Prefer `map`, `filter`, `reduce` over imperative loops
+- No mutation of function arguments — return new values
+- Extract logic into small, composable, single-purpose functions (≤30 lines)
+- Write the least code that solves the problem — delete what you can
+- No dead code, no commented-out code, no "just in case" abstractions
+- One function does one thing. If you're naming it `doXAndY`, split it.
 
-| Feature | What It Means | Limitation |
-|---------|---------------|------------|
-| **Free Hosting** | Reddit hosts everything | Serverless only |
-| **Free Database** | Redis included | 500MB per install |
-| **Cross-Platform** | Works on web, iOS, Android | Must be mobile-first |
-| **Instant Distribution** | Appears in Reddit feeds | Subject to Reddit policies |
+### Readability
+- Code should read top-to-bottom like a story — put helpers below their callers
+- Descriptive names over comments: `getUserScore()` not `getVal() // gets user score`
+- Early returns to avoid nesting: guard → bail, then happy path
+- Max one level of callback nesting — extract named functions instead
+- Comments explain *why*, never *what* (the code shows what)
 
-**Key Insight:** Each subreddit installation is isolated. Data doesn't sync across subreddits.
+### Modularity
+- Each file has a single clear responsibility
+- Shared logic lives in `src/shared/`, server helpers in `src/server/lib/`
+- Depend on interfaces/types, not concrete implementations
+- No circular imports — if A imports B, B must not import A
 
-### 4.2 Context Variables
+### Maintainability
+- Explicit over implicit: return types on exports, named constants over magic values
+- Fail fast with descriptive errors — never silently swallow failures
+- Handle all edge cases: null, undefined, empty arrays, missing keys
+- `as const` for literal objects/arrays to preserve type narrowness
 
-Available in every server request via `import { context } from '@devvit/web/server'`:
+---
 
-| Variable | Type | Example | When Available |
-|----------|------|---------|----------------|
-| `userId` | `string` | `"t2_abc123"` | If user logged in |
-| `postId` | `string` | `"t3_xyz789"` | In post context |
-| `subredditId` | `string` | `"t5_2qh1o"` | Always |
-| `subredditName` | `string` | `"gaming"` | Always |
+## Test-Driven Development (TDD)
+
+This project follows strict TDD. Every AI agent and developer must follow these rules.
+
+### The rule: test first, always
+
+1. Before writing any implementation code, check if a corresponding `__tests__/*.test.ts` file exists
+2. If not, write the failing test first (Red)
+3. Then write the minimal code to make it pass (Green)
+4. Then refactor while keeping tests green (Refactor)
+5. Run `bun run test` before committing — zero failures required
+
+### Test stack
+
+- **Vitest** as the test runner
+- **`@devvit/test`** provides per-test isolated Devvit backend (in-memory Redis, Reddit API mocks, Scheduler, Realtime)
+- No manual mock setup needed — `createDevvitTest()` handles everything
+- See `.agents/skills/tdd/SKILL.md` for full patterns and code examples
+
+### What must be tested
+
+| Layer | Must test | Can skip tests |
+|-------|----------|---------------|
+| `src/server/**/*.ts` | All routes, handlers, business logic | — |
+| `src/server/lib/**/*.ts` | All helpers, validators, transforms | — |
+| `src/shared/**/*.ts` | All pure functions | — |
+| `src/client/**/*.ts` | Extracted logic files | `.svelte` files (use autofixer instead) |
+| Config / docs / skills | — | Always skip |
+
+### After every implementation task
+
+Run `bun run test` and confirm zero failures before moving to the next task.
+
+---
+
+## Code Style
+
+### TypeScript
+
+- **`strict: true`** with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noUnusedLocals`, `noUnusedParameters`
+- Array/object index access returns `T | undefined` — always handle it
+- Use `const` by default, `let` only if reassigned, never `var`
+- Prefer `unknown` over `any`, then narrow with `instanceof` or type guards
+- Use `as const` for literal arrays/objects
+- Explicit return types on exported/public functions
+- Arrow function expressions for all functions: `const foo = (): void => {}`
+- Keep functions ≤30 lines, single responsibility
+
+### Naming
+
+| Thing | Convention | Example |
+|-------|-----------|---------|
+| Variables, functions | camelCase | `getUserScore` |
+| Constants | SCREAMING_SNAKE_CASE | `MAX_ATTEMPTS` |
+| Types, interfaces | PascalCase | `GameState` |
+| Svelte components | PascalCase file | `GameBoard.svelte` |
+| Non-component files | kebab-case | `game-logic.ts` |
+| API routes | kebab-case | `/api/game-state` |
+| Redis keys | colon-delimited | `user:{userId}:stats` |
+
+### Imports
 
 ```typescript
-import { context } from '@devvit/web/server'
+// External packages first, then local. Named imports only.
+import { Hono } from 'hono'
+import type { Context } from 'hono'            // type-only imports use `import type`
+import { context, redis, reddit } from '@devvit/web/server'
 
-app.get('/api/whoami', async (c) => {
-  const { userId, postId, subredditName } = context
-  return c.json({ userId, postId, subredditName })
-})
-```
+// Relative imports for local modules
+import { createPost } from './post'
+import './app.css'                              // Side-effect imports last
 
-### 4.3 Redis (Database)
-
-Redis is your database. It's fast, free, and pre-configured. Each installation gets 500MB storage and 1,000 commands/second.
-
-**Quick Example:**
-
-```typescript
-import { redis } from '@devvit/web/server'
-
-// Store and retrieve data
-await redis.hSet('user:123', { name: 'Alice', score: '100' })
-const user = await redis.hGetAll('user:123')
-
-// Leaderboards with sorted sets
-await redis.zAdd('leaderboard', { member: 'alice', score: 100 })
-const top10 = await redis.zRange('leaderboard', 0, 9, { by: 'score', reverse: true })
-```
-
-**Key Naming Pattern:** Use colon-delimited hierarchical keys like `user:{userId}:stats` or `game:{postId}:state`.
-
-**For complete documentation:** See [agent_docs/database.md](agent_docs/database.md) for Redis operations, key naming conventions, and example schemas. Use devvit MCP server for additional help: `devvit_search "redis commands"`.
-
-### 4.4 Reddit API
-
-Access Reddit data for users, posts, comments, and moderation from server-side code.
-
-**Quick Example:**
-
-```typescript
-import { reddit, context } from '@devvit/web/server'
-
-// Get current user and post comments
-const user = await reddit.getCurrentUser()
-await reddit.submitComment({
-  postId: context.postId!,
-  text: 'Great solve! 🎉'
-})
-```
-
-**For complete documentation:** See [agent_docs/reddit.md](agent_docs/reddit.md) for all Reddit API operations and examples. Use devvit MCP server for additional help: `devvit_search "reddit api"`.
-
-### 4.5 MCP Servers (AI Tools)
-
-You have access to documentation via MCP:
-
-| Server | Command | Use For |
-|--------|---------|---------|
-| **Svelte** | `list-sections "topic"` | Find Svelte 5 docs |
-| **Svelte** | `get-documentation "query"` | Get implementation details |
-| **Svelte** | `svelte-autofixer` | Validate before shipping |
-| **Devvit** | `devvit_search "query"` | Find Devvit API docs |
-
-```text
-# Example usage
-devvit_search "how to use redis sorted sets"
-list-sections "svelte 5 runes"
+// Svelte files are the ONE exception to "no default exports"
+import App from './App.svelte'
 ```
 
 ---
 
-## 5. Development Workflow
+## Git Conventions
 
-### Why Devvit Needs a Different Workflow
+**Branches:** `feat/short-description`, `fix/short-description`, `chore/...`, `refactor/...`
 
-Devvit apps run inside Reddit, not standalone browsers. This means:
-
-| Reality | Implication |
-|---------|-------------|
-| Serverless runtime | No long-running processes, no WebSockets |
-| Sandboxed webview | No localStorage, no external fetch from client |
-| 70% mobile users | Mobile testing is mandatory, not optional |
-| Reddit context required | `userId`, `postId` only exist on Reddit |
-| Platform limits | 500MB Redis, 30s timeout, 4MB payload |
-
-**Local testing catches ~80% of issues. You MUST playtest on Reddit before shipping.**
-
----
-
-### 5.1 The Devvit Development Loop
-
-```text
-┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
-│  CHECK  │ → │  PLAN   │ → │  BUILD  │ → │  TEST   │ → │PLAYTEST │ → │  SHIP   │
-└─────────┘   └─────────┘   └─────────┘   └─────────┘   └─────────┘   └─────────┘
-     │             │             │             │             │             │
-     ▼             ▼             ▼             ▼             ▼             ▼
- Can this      Write plan    TDD: test     Local:        On Reddit:    Changelog
- work on       Get approval  then code     type-check    mobile test   Commit
- Devvit?       (3-7 bullets) Small chunks  lint, test    real device   PR
+**Commits:** `type(scope): imperative description` (max 72 chars)
 ```
-
----
-
-### 5.2 Phase 1: CHECK — Can This Work on Devvit?
-
-**Before writing any code or plan, verify the feature is possible.**
-
-Run through this constraint checklist:
-
-| Question | If YES → Action Required |
-|----------|--------------------------|
-| Needs `localStorage` or `sessionStorage`? | ❌ **Impossible** — Must use Redis via server |
-| Needs external API call from client? | ⚠️ Proxy through server endpoint |
-| Needs >500MB storage? | ⚠️ Implement pagination or use external DB |
-| Needs WebSockets or streaming? | ⚠️ Use Devvit Realtime (max 100 msg/sec) |
-| Needs file system writes? | ⚠️ Use `media.upload()` for images |
-| Needs long-running background process? | ⚠️ Use Scheduler (cron jobs) |
-| Needs native Node modules (fs, sharp, ffmpeg)? | ❌ **Impossible** — Use external service |
-| Request takes >30 seconds? | ⚠️ Break into smaller operations |
-| Payload >4MB? | ⚠️ Chunk or compress data |
-
-**If any constraint blocks you, redesign before proceeding to PLAN.**
-
-#### Example: Feature Blocked by Constraint
-
-```markdown
-## Feature: Export puzzle as PDF
-
-### Constraint Check
-- ❌ Needs `pdfkit` which requires `fs` → BLOCKED
-
-### Redesign Options
-1. Generate PDF server-side via external service (e.g., html2pdf API)
-2. Generate shareable image instead using canvas
-3. Export as text format user can copy
-
-### Decision: Option 2 (canvas image export)
-```
-
----
-
-### 5.3 Phase 2: PLAN — Write Approach, Get Approval
-
-Once constraints are verified, write a concise plan:
-
-```markdown
-## Feature: Add Difficulty Selector
-
-### Constraints Verified
-- ✅ Uses Redis hash (within 500MB limit)
-- ✅ No external APIs needed
-- ✅ UI fits mobile viewport
-
-### Approach (3-5 bullets)
-1. Add `DifficultySelector.svelte` component with 4 options
-2. Store selected difficulty in `game:{postId}:config` hash
-3. Modify `generatePuzzle()` to accept difficulty parameter
-4. Update splash screen to show current difficulty
-5. Add tests for each difficulty level
-
-### Files to Modify
-- `src/client/components/DifficultySelector.svelte` (new)
-- `src/server/routes/game.ts` (add endpoint)
-- `src/shared/generator.ts` (add difficulty param)
-
-### Questions
-- Should difficulty be changeable mid-game? (Assuming no)
-```
-
-**Rules:**
-
-- Keep bullets conceptual, not implementation-level
-- Acknowledge which constraints you verified
-- Ask questions if anything is unclear — DO NOT ASSUME
-- Get approval before proceeding to BUILD
-
----
-
-### 5.4 Phase 3: BUILD — TDD in Small Chunks
-
-Follow test-driven development:
-
-```typescript
-// Step 1: Write failing test
-it('generates easy puzzle with 40+ given cells', () => {
-  const puzzle = generatePuzzle('easy')
-  const givenCount = puzzle.split('').filter(c => c !== '0').length
-  expect(givenCount).toBeGreaterThanOrEqual(40)
-})
-
-// Step 2: Run test → Should fail (RED)
-// Step 3: Implement minimum code to pass (GREEN)
-// Step 4: Refactor if needed (REFACTOR)
-// Step 5: Commit and repeat
-```
-
-**BUILD Rules:**
-
-- Write test before implementation
-- Implement the smallest piece that works
-- Keep functions ≤30 lines
-- Commit frequently (even WIP commits are fine)
-- One logical change per commit
-
----
-
-### 5.5 Phase 4: TEST — Local Verification
-
-Run all local checks:
-
-```bash
-bun type-check  # TypeScript compilation
-bun test        # Unit tests
-```
-
-**Both must pass before proceeding.**
-
-| Check | What It Catches |
-|-------|-----------------|
-| `type-check` | Type errors, missing imports, wrong parameters |
-| `test` | Logic errors, regressions, edge cases |
-
-⚠️ **This is necessary but NOT sufficient.** Local tests don't verify:
-
-- Reddit context (`userId`, `postId`)
-- Redis connectivity
-- Mobile webview behavior
-- Dark mode rendering
-- Touch interactions
-
----
-
-### 5.6 Phase 6: SHIP — Changelog and Commit
-
-After playtest passes:
-
-#### 1. Update CHANGELOG.md
-
-```markdown
-## [Unreleased]
-
-### Added
-- Difficulty selector with Easy/Medium/Hard/Expert options
-- Puzzle generation adapts to selected difficulty
-
-### Changed
-- Default difficulty is now Medium (was Hard)
-
-### Fixed
-- Timer no longer continues after puzzle completion
-```
-
-#### 2. Final Commit
-
-```bash
-# Ensure everything passes one more time
-bun type-check && bun test
-
-# Stage and commit
-git add .
-git commit -m "feat(game): add difficulty selector
-
-- Add DifficultySelector component with 4 levels
-- Store difficulty preference in Redis
-- Adjust puzzle generation based on difficulty
-- Tested on iOS, Android, and mobile web
-
-Closes #42"
-```
-
-#### 3. Open PR (if team) or merge
-
----
-
-### 5.8 Definition of Done
-
-A feature is complete when ALL boxes are checked:
-
-**Local Checks:**
-
-- [ ] TypeScript compiles (`bun type-check`)
-- [ ] All tests pass (`bun test`)
-- [ ] No `console.log` statements remain
-
-**Playtest Checks:**
-
-- [ ] Works on desktop web
-- [ ] Works on mobile web (375px)
-- [ ] Works on Reddit iOS app
-- [ ] Works on Reddit Android app
-- [ ] Works in dark mode
-- [ ] Works in light mode
-- [ ] Loads in <3 seconds
-- [ ] No console errors
-
-**Documentation:**
-
-- [ ] CHANGELOG.md updated
-- [ ] AGENTS.md updated (if new patterns)
-
----
-
-### 5.9 Git Conventions
-
-#### Branch Naming
-
-```text
-feat/add-difficulty-selector
-fix/timer-not-stopping
-chore/update-dependencies
-docs/improve-readme
-refactor/extract-validation-logic
-```
-
-#### Commit Messages
-
-**Rules:**
-
-- Start with type: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`
-- Scope in parentheses: `(game)`, `(timer)`, `(ui)`
-- Imperative verb: "add" not "added"
-- Max 72 characters in subject line
-- Reference issue: `Closes #42` or `Fixes #42`
-- Run `bun type-check` before every commit
-
-```text
-examples:
 feat(game): add difficulty selector dropdown
 fix(timer): stop timer when puzzle completed
 chore(deps): update svelte to 5.x
-docs(readme): add installation instructions
 refactor(validation): extract isValidMove function
 ```
 
----
-
-## 6. Code Patterns
-
-### 6.1 Decision Trees
-
-#### Where to Store Data?
-
-```text
-Need to store data?
-│
-├─ Is it <2KB AND needed immediately on page load?
-│   └─ YES → Post Data (in devvit.json splash config)
-│   └─ NO ↓
-│
-├─ Is it user-specific?
-│   └─ YES → Redis: user:{userId}:*
-│   └─ NO ↓
-│
-├─ Is it game/post-specific?
-│   └─ YES → Redis: game:{postId}:*
-│   └─ NO ↓
-│
-└─ Global data → Redis: stats:* or config:*
-```
-
-#### Where to Put New Code?
-
-```text
-Creating something new?
-│
-├─ Is it a Svelte component?
-│   ├─ Used in multiple places? → src/client/components/
-│   ├─ A full page/view? → src/client/views/
-│   └─ One-off? → Inline in parent
-│
-├─ Is it an API endpoint?
-│   └─ src/server/routes/
-│
-├─ Is it a utility function?
-│   ├─ Client-only? → src/client/lib/
-│   ├─ Server-only? → src/server/lib/
-│   └─ Both? → src/shared/
-│
-└─ Is it a type/interface?
-    └─ src/shared/types.ts
-```
-
-### 6.3 DO / DON'T Quick Reference
-
-#### Client-Side
-
-| ❌ DON'T | ✅ DO |
-|----------|-------|
-| `localStorage.setItem()` | `fetch('/api/save', { body: data })` |
-| `fetch('https://external.com')` | Create server endpoint that fetches |
-| `<style>` blocks in components | Tailwind classes |
-| `export default Component` | `export { Component }` |
-| `import * as icons from 'lucide'` | `import {Icon}Icon from '@lucide/svelte/icons/{icon}'` |
-
-#### Server-Side
-
-| ❌ DON'T | ✅ DO |
-|----------|-------|
-| `setInterval()` / long processes | Use scheduler for recurring tasks |
-| `require('fs').writeFile()` | Use Redis or media.upload() |
-| `import sharp from 'sharp'` | Use external service (Cloudinary) |
-| Multiple round-trip Redis calls | Batch with `mGet`, `hGetAll` |
-
-#### General
-
-| ❌ DON'T | ✅ DO |
-|----------|-------|
-| `any` type | `unknown` then narrow |
-| Magic numbers | Named constants: `const MAX_LIVES = 3` |
-| `console.log` in production | Remove or use proper logging |
-| Catch and rethrow same error | Handle meaningfully or let propagate |
-| Nested ternaries | Early returns or switch |
+Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`
 
 ---
 
-## 7. Style Guide
+## MCP Tools
 
-### 7.1 TypeScript
+Two MCP servers are available. Use them proactively — they give better answers than guessing.
 
-| Rule | Example |
-|------|---------|
-| Use `const` by default | `const MAX = 10` |
-| Use `let` only if reassigned | `let count = 0; count++` |
-| Never use `var` | — |
-| Prefer `unknown` over `any` | `catch (e: unknown)` |
-| Use `as const` for literals | `const DIRS = ['N', 'S'] as const` |
-| Explicit return types for public functions | `const fn = (): string => {}` |
+### Svelte MCP (`svelte`)
 
-### 7.2 Naming Conventions
+Use for any Svelte 5 / SvelteKit question, component authoring, or rune usage.
 
-| Type | Convention | Example |
-|------|------------|---------|
-| Variables/functions | camelCase | `getUserScore` |
-| Constants | SCREAMING_SNAKE | `MAX_ATTEMPTS` |
-| Types/Interfaces | PascalCase | `GameState` |
-| Components | PascalCase | `GameBoard.svelte` |
-| Files (non-component) | kebab-case | `game-logic.ts` |
-| API routes | kebab-case | `/api/game-state` |
-| Redis keys | colon-delimited | `user:123:stats` |
+| Tool | When to call |
+|------|-------------|
+| `list-sections` | First call in any Svelte task — discover available docs |
+| `get-documentation` | Fetch full docs for sections identified by `list-sections` |
+| `svelte-autofixer` | Run on every Svelte component before finishing — keep calling until zero issues |
+| `playground-link` | Only after user asks for one, and only if code was NOT written to a file |
 
-**Mobile-First Breakpoints:**
+Workflow: `list-sections` → read use_cases → `get-documentation` (all relevant sections at once) → write code → `svelte-autofixer` (loop until clean).
 
-```html
-<!-- Mobile first (default) -->
-<div class="text-sm p-2">
+### Devvit MCP (`devvit`)
 
-<!-- Then tablet -->
-<div class="text-sm p-2 md:text-base md:p-4">
+Use for any Devvit platform question, Redis patterns, Reddit API, config, or constraints.
 
-<!-- Then desktop -->
-<div class="text-sm p-2 md:text-base md:p-4 lg:text-lg lg:p-6">
-```
+| Tool | When to call |
+|------|-------------|
+| `devvit_search` | Search Devvit docs for a specific topic (redis commands, API methods, config options, constraints) |
+| `devvit_logs` | Stream logs from a deployed app on a subreddit — useful for debugging live issues |
 
-### 7.4 Functions
-
-```typescript
-// ✅ Good: Small, single-purpose, descriptive name
-const calculateScore = (time: number, mistakes: number): number => {
-  const baseScore = 1000
-  const timePenalty = Math.floor(time / 10)
-  const mistakePenalty = mistakes * 50
-  return Math.max(0, baseScore - timePenalty - mistakePenalty)
-}
-
-// ❌ Bad: Too long, multiple responsibilities, vague name
-const handle = (data) => {
-  // 50 lines doing validation, calculation, saving, logging...
-}
-```
-
-Target: **≤30 lines per function**
+Prefer `devvit_search` over pasting large doc files into context. It's hybrid search so natural language queries work well (e.g. `"redis sorted set leaderboard"`, `"custom post height options"`).
 
 ---
 
-## 8. Reference
+## Research & Clarification
 
-### 8.1 All Context Variables
+### Use web search when uncertain
+- If you're unsure about an API, library version, behavior, or best practice — search the web first
+- Don't guess at package APIs, config options, or platform constraints — look them up
+- Use web search and web fetch tools proactively for anything outside your confident knowledge
+- Prefer official docs and recent sources; cross-reference when results conflict
 
-```typescript
-import { context } from '@devvit/web/server'
+### Ask questions until ≥90% confident
+- Before starting implementation, assess your confidence in the approach
+- If confidence is below 90%, ask the user clarifying questions — don't assume
+- Cover: expected behavior, edge cases, integration points, constraints, and user preferences
+- It's better to ask one extra question than to build the wrong thing
+- Once you're ≥90% sure of the requirements and approach, proceed without further delay
 
-// Always available
-context.subredditId     // "t5_2qh1o"
-context.subredditName   // "gaming"
-
-// Available if user logged in
-context.userId          // "t2_abc123" or undefined
-
-// Available in post context
-context.postId          // "t3_xyz789" or undefined
-```
-
-### 8.5 Platform Limits
-
-| Resource | Limit |
-|----------|-------|
-| Redis storage | 500MB per install |
-| Redis commands | 1,000/second |
-| Request payload | 4MB |
-| Response payload | 10MB |
-| Request timeout | 30 seconds |
-| Realtime messages | 100/second |
-| Realtime channels | 5 per install |
-| Scheduler jobs | 10 recurring per install |
-| Asset file size | 20MB per file |
-
----
-
-### 8.6 NO-SCROLL RULES
-
-| Rule | Implementation |
-|------|----------------|
-| **Never use `overflow-y-auto` or `overflow-scroll`** | Content must fit, period |
-| **Never use `min-h-screen` or `h-screen`** | Use `h-full` relative to container |
-| **Always use `h-full` on root container** | Fills available space without exceeding |
-| **Use `flex` + `flex-shrink` for adaptive layouts** | Elements shrink to fit |
-| **Test at MINIMUM viewport** | 320px × 320px is your worst case |
-| **Use `overflow-hidden` on root** | Prevents any accidental scroll |
-
-## 9. Troubleshooting
-
-### Common Errors & Fixes
-
-#### "Changes not appearing"
-
-```bash
-# 1. Check dev server is running
-bun dev
-
-# 2. Hard refresh in browser
-Cmd+Shift+R (Mac) or Ctrl+Shift+R (Windows)
-
-# 3. Check for build errors in terminal
-```
-
----
-
-## 10. Post-Coding Checklist
-
-After completing any feature:
-
-1. **Update CHANGELOG.md** with:
-   - What changed
-   - Why it changed
-   - Breaking changes (if any)
-
-2. **Update AGENTS.md** if you:
-   - Added new patterns
-   - Changed workflows
-   - Added new tools
-
-3. **Run final checks:**
-
-   ```bash
-   bun type-check && bun test
-   ```
-
-4. **Commit with proper message:**
-
-   ```bash
-   git add .
-   git commit -m "feat(scope): description"
-   ```
-
----
-
-> **Remember:** This file is the single source of truth. Keep it updated with every workflow change or new pattern.
