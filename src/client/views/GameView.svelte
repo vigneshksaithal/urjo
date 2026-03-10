@@ -115,11 +115,6 @@
 	<main
 		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative"
 	>
-		<!-- Upvote request -->
-		<p class="text-sm text-theme-text-muted text-center">
-			⬆️ Upvote to support the game — it helps us make more puzzles!
-		</p>
-
 		<!-- Game board -->
 		<GameBoard {grid} {gridSize} {onCellChange} />
 
