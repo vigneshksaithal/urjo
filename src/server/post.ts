@@ -1,8 +1,9 @@
 import { context, reddit, redis } from '@devvit/web/server'
 import { generatePuzzle } from './lib/generator'
 
-export const createPost = async (customTitle?: string): Promise<{ id: string }> => {
-	const { subredditName } = context
+export const createPost = async (customTitle?: string, ctxOverride?: any): Promise<{ id: string }> => {
+	const currentContext = ctxOverride || context
+	const { subredditName } = currentContext
 	if (!subredditName) {
 		throw new Error('subredditName is required')
 	}
