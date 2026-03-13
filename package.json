@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@devvit/test": "^0.12.14",
-    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@types/canvas-confetti": "^1.9.0",
     "concurrently": "^9.2.1",
     "dotenv-cli": "^11.0.0",
