@@ -1,17 +1,38 @@
 {
   "mcpServers": {
     "svelte": {
-      "url": "https://mcp.svelte.dev/mcp"
+      "type": "remote",
+      "url": "https://mcp.svelte.dev/mcp",
+      "autoApprove": [
+        "list-sections",
+        "get-documentation",
+        "svelte-autofixer",
+        "svelte-autofixer",
+        "svelte-autofixer",
+        "playground-link"
+      ]
     },
     "devvit": {
+      "type": "local",
       "command": "npx",
       "args": [
         "-y",
         "@devvit/mcp"
+      ],
+      "autoApprove": [
+        "devvit_search"
       ]
     },
-    "playwright": {
-      "command": "npx @playwright/mcp@latest"
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "sequentialthinking"
+      ]
     }
   }
 }
