@@ -1,25 +1,28 @@
 <script lang="ts">
-	import type { StreakData } from '../../shared/types'
+	import type { StreakData } from "../../shared/types";
 
 	type Props = {
-		streak: StreakData
-	}
+		streak: StreakData;
+	};
 
-	let { streak }: Props = $props()
+	let { streak }: Props = $props();
 
-	const hasStreak = $derived(streak.currentStreak > 0)
+	const hasStreak = $derived(streak.currentStreak > 0);
 	const displayText = $derived(
-		hasStreak ? `🔥 ${streak.currentStreak} day${streak.currentStreak === 1 ? '' : 's'}` : 'Start your streak!'
-	)
+		hasStreak
+			? `🔥 ${streak.currentStreak} day${streak.currentStreak === 1 ? "" : "s"}`
+			: "🔥",
+	);
 </script>
 
 <div class="flex flex-col items-center">
 	<div
 		class="px-3 py-1 rounded-full bg-theme-hover backdrop-blur-sm border border-theme-border
 			transition-all duration-300 hover:bg-theme-hover"
-		class:animate-pulse={hasStreak}
 	>
-		<span class="text-xs font-bold text-theme-text-primary whitespace-nowrap">
+		<span
+			class="text-xs font-bold text-theme-text-primary whitespace-nowrap"
+		>
 			{displayText}
 		</span>
 	</div>

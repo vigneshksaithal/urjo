@@ -1,17 +1,29 @@
 <script lang="ts">
-	import type { Grid, CellColor } from '../../shared/types'
-	import Cell from './Cell.svelte'
+	import type { Grid, CellColor } from "../../shared/types";
+	import Cell from "./Cell.svelte";
 
 	type Props = {
-		grid: Grid
-		gridSize: number
-		onCellChange: (row: number, col: number, color: CellColor) => void
-	}
+		grid: Grid;
+		gridSize: number;
+		onCellChange: (row: number, col: number, color: CellColor) => void;
+		violatedRows?: Set<number>;
+		violatedCols?: Set<number>;
+	};
 
-	let { grid, gridSize, onCellChange }: Props = $props()
+	let {
+		grid,
+		gridSize,
+		onCellChange,
+		violatedRows = new Set(),
+		violatedCols = new Set(),
+	}: Props = $props();
 
-	const gridStyle = $derived(`grid-template-columns: repeat(${gridSize}, 1fr)`)
-	const maxWidth = $derived(gridSize === 6 ? 'max-w-[400px]' : 'max-w-[340px]')
+	const gridStyle = $derived(
+		`grid-template-columns: repeat(${gridSize}, 1fr)`,
+	);
+	const maxWidth = $derived(
+		gridSize === 6 ? "max-w-[400px]" : "max-w-[340px]",
+	);
 </script>
 
 <div class="grid gap-0 w-full mx-auto {maxWidth}" style={gridStyle}>
@@ -21,9 +33,12 @@
 				color={cell.color}
 				number={cell.number}
 				locked={cell.locked}
-				rowIndex={rowIndex}
-				colIndex={colIndex}
+				{rowIndex}
+				{colIndex}
 				isLoading={cell.isLoading ?? false}
+				hasError={violatedRows.has(rowIndex) ||
+					violatedCols.has(colIndex)}
+				{gridSize}
 				onChange={(color) => onCellChange(rowIndex, colIndex, color)}
 			/>
 		{/each}

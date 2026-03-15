@@ -1,68 +1,75 @@
 <script lang="ts">
-	import type { LeaderboardData } from '../../shared/types'
-	import Trophy from 'lucide-svelte/icons/trophy'
-	import Flame from 'lucide-svelte/icons/flame'
-	import Zap from 'lucide-svelte/icons/zap'
-	import X from 'lucide-svelte/icons/x'
-	import Loader2 from 'lucide-svelte/icons/loader-2'
+	import type { LeaderboardData } from "../../shared/types";
+	import { focusTrap } from "../lib/focus-trap";
+	import Trophy from "lucide-svelte/icons/trophy";
+	import Flame from "lucide-svelte/icons/flame";
+	import Zap from "lucide-svelte/icons/zap";
+	import X from "lucide-svelte/icons/x";
+	import Loader2 from "lucide-svelte/icons/loader-2";
 
 	type Props = {
-		isOpen: boolean
-		onClose: () => void
-		onNextChallenge: () => void
-	}
+		isOpen: boolean;
+		onClose: () => void;
+		onNextChallenge: () => void;
+	};
 
-	let { isOpen, onClose, onNextChallenge }: Props = $props()
+	let { isOpen, onClose, onNextChallenge }: Props = $props();
 
-	let activeTab = $state<'streak' | 'speed' | 'coins'>('streak')
-	let leaderboardData = $state<LeaderboardData | null>(null)
-	let isLoading = $state(false)
-	let error = $state<string | null>(null)
+	let activeTab = $state<"streak" | "speed" | "coins">("streak");
+	let leaderboardData = $state<LeaderboardData | null>(null);
+	let isLoading = $state(false);
+	let error = $state<string | null>(null);
 
 	// Fetch leaderboard data when tab changes
 	$effect(() => {
 		if (isOpen) {
-			fetchLeaderboard()
+			fetchLeaderboard();
 		}
-	})
+	});
 
 	async function fetchLeaderboard() {
-		isLoading = true
-		error = null
+		isLoading = true;
+		error = null;
 
 		try {
-			let url: string
-			if (activeTab === 'coins') {
-				url = '/api/leaderboard/coins'
+			let url: string;
+			if (activeTab === "coins") {
+				url = "/api/leaderboard/coins";
 			} else {
-				url = `/api/game/leaderboard?type=${activeTab}`
+				url = `/api/game/leaderboard?type=${activeTab}`;
 			}
-			
-			const response = await fetch(url)
-			if (!response.ok) throw new Error('Failed to fetch leaderboard')
-			
-			const data: LeaderboardData = await response.json()
-			leaderboardData = data
+
+			const response = await fetch(url);
+			if (!response.ok) throw new Error("Failed to fetch leaderboard");
+
+			const data: LeaderboardData = await response.json();
+			leaderboardData = data;
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to load leaderboard'
-			leaderboardData = null
+			error =
+				err instanceof Error
+					? err.message
+					: "Failed to load leaderboard";
+			leaderboardData = null;
 		} finally {
-			isLoading = false
+			isLoading = false;
 		}
 	}
 
-	function handleTabChange(tab: 'streak' | 'speed' | 'coins') {
-		activeTab = tab
-		fetchLeaderboard()
+	function handleTabChange(tab: "streak" | "speed" | "coins") {
+		activeTab = tab;
+		fetchLeaderboard();
 	}
 
-	function formatScore(score: number, type: 'streak' | 'speed' | 'coins'): string {
-		if (type === 'streak') {
-			return `${score} day${score === 1 ? '' : 's'}`
-		} else if (type === 'speed') {
-			return `${score}s`
+	function formatScore(
+		score: number,
+		type: "streak" | "speed" | "coins",
+	): string {
+		if (type === "streak") {
+			return `${score} day${score === 1 ? "" : "s"}`;
+		} else if (type === "speed") {
+			return `${score}s`;
 		} else {
-			return `${score.toLocaleString()} 🪙`
+			return `${score.toLocaleString()} 🪙`;
 		}
 	}
 </script>
@@ -84,12 +91,17 @@
 			role="dialog"
 			aria-modal="true"
 			tabindex="-1"
+			use:focusTrap={{ onClose }}
 		>
 			<!-- Header -->
-			<div class="flex items-center justify-between p-4 border-b border-theme-border">
+			<div
+				class="flex items-center justify-between p-4 border-b border-theme-border"
+			>
 				<div class="flex items-center gap-2">
 					<Trophy class="w-5 h-5 text-yellow-400" />
-					<h2 class="text-lg font-bold text-theme-text-primary">Leaderboard</h2>
+					<h2 class="text-lg font-bold text-theme-text-primary">
+						Leaderboard
+					</h2>
 				</div>
 				<button
 					onclick={onClose}
@@ -103,25 +115,31 @@
 			<!-- Tabs -->
 			<div class="flex border-b border-theme-border">
 				<button
-					onclick={() => handleTabChange('streak')}
+					onclick={() => handleTabChange("streak")}
 					class="flex-1 flex items-center justify-center gap-2 px-4 py-3 font-medium transition-colors
-						{activeTab === 'streak' ? 'text-theme-text-primary bg-theme-hover border-b-2 border-yellow-400' : 'text-theme-text-muted hover:text-theme-text-primary'}"
+						{activeTab === 'streak'
+						? 'text-theme-text-primary bg-theme-hover border-b-2 border-yellow-400'
+						: 'text-theme-text-muted hover:text-theme-text-primary'}"
 				>
 					<Flame class="w-4 h-4" />
 					<span>Streaks</span>
 				</button>
 				<button
-					onclick={() => handleTabChange('speed')}
+					onclick={() => handleTabChange("speed")}
 					class="flex-1 flex items-center justify-center gap-2 px-4 py-3 font-medium transition-colors
-						{activeTab === 'speed' ? 'text-theme-text-primary bg-theme-hover border-b-2 border-blue-400' : 'text-theme-text-muted hover:text-theme-text-primary'}"
+						{activeTab === 'speed'
+						? 'text-theme-text-primary bg-theme-hover border-b-2 border-blue-400'
+						: 'text-theme-text-muted hover:text-theme-text-primary'}"
 				>
 					<Zap class="w-4 h-4" />
 					<span>Speed</span>
 				</button>
 				<button
-					onclick={() => handleTabChange('coins')}
+					onclick={() => handleTabChange("coins")}
 					class="flex-1 flex items-center justify-center gap-2 px-4 py-3 font-medium transition-colors
-						{activeTab === 'coins' ? 'text-theme-text-primary bg-theme-hover border-b-2 border-yellow-400' : 'text-theme-text-muted hover:text-theme-text-primary'}"
+						{activeTab === 'coins'
+						? 'text-theme-text-primary bg-theme-hover border-b-2 border-yellow-400'
+						: 'text-theme-text-muted hover:text-theme-text-primary'}"
 				>
 					<span class="text-sm">🪙</span>
 					<span>Coins</span>
@@ -132,21 +150,35 @@
 			<div class="flex-1 overflow-y-auto">
 				{#if isLoading}
 					<div class="flex items-center justify-center py-8">
-						<Loader2 class="w-8 h-8 text-theme-text-muted animate-spin" />
+						<Loader2
+							class="w-8 h-8 text-theme-text-muted animate-spin"
+						/>
 					</div>
 				{:else if error}
 					<div class="text-center py-8 text-red-400">
 						<p>{error}</p>
+						<button
+							onclick={fetchLeaderboard}
+							class="mt-4 px-4 py-2 border border-red-400 text-red-400 rounded-lg text-sm hover:bg-red-400/10 active:scale-95 transition-all"
+						>
+							Retry
+						</button>
 					</div>
 				{:else if leaderboardData && leaderboardData.entries.length > 0}
 					<!-- Table layout -->
 					<table class="w-full border-collapse">
 						<thead>
-							<tr class="border-b border-theme-border text-left text-xs text-theme-text-muted">
+							<tr
+								class="border-b border-theme-border text-left text-xs text-theme-text-muted"
+							>
 								<th class="px-4 py-2 font-medium">Rank</th>
 								<th class="px-4 py-2 font-medium">Player</th>
 								<th class="px-4 py-2 font-medium text-right">
-									{activeTab === 'streak' ? 'Streak' : activeTab === 'speed' ? 'Time' : 'Coins'}
+									{activeTab === "streak"
+										? "Streak"
+										: activeTab === "speed"
+											? "Time"
+											: "Coins"}
 								</th>
 							</tr>
 						</thead>
@@ -154,15 +186,29 @@
 							{#each leaderboardData.entries as entry}
 								<tr
 									class="border-b border-theme-border transition-colors
-										{leaderboardData.userRank === entry.rank ? 'bg-green-500/20 text-green-400' : 'hover:bg-theme-hover'}"
+										{leaderboardData.userRank === entry.rank
+										? 'bg-green-500/20 text-green-400'
+										: 'hover:bg-theme-hover'}"
 								>
-									<td class="px-4 py-3 text-sm text-theme-text-primary">
-										{entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : `${entry.rank}.`}
+									<td
+										class="px-4 py-3 text-sm text-theme-text-primary"
+									>
+										{entry.rank === 1
+											? "🥇"
+											: entry.rank === 2
+												? "🥈"
+												: entry.rank === 3
+													? "🥉"
+													: `${entry.rank}.`}
 									</td>
-									<td class="px-4 py-3 text-sm font-medium text-theme-text-primary">
+									<td
+										class="px-4 py-3 text-sm font-medium text-theme-text-primary"
+									>
 										{entry.username}
 									</td>
-									<td class="px-4 py-3 text-sm font-bold text-yellow-400 text-right">
+									<td
+										class="px-4 py-3 text-sm font-bold text-yellow-400 text-right"
+									>
 										{formatScore(entry.score, activeTab)}
 									</td>
 								</tr>
@@ -171,7 +217,9 @@
 					</table>
 				{:else}
 					<div class="text-center py-8 text-theme-text-muted">
-						<p>No entries yet. Be the first!</p>
+						<p>
+							Solve puzzles to earn your spot on the leaderboard.
+						</p>
 					</div>
 				{/if}
 			</div>

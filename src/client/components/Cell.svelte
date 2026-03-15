@@ -1,51 +1,63 @@
 <script lang="ts">
-	import type { CellColor } from '../../shared/types'
+	import type { CellColor } from "../../shared/types";
 
 	type Props = {
-		color: CellColor
-		number: number | null
-		locked: boolean
-		rowIndex?: number
-		colIndex?: number
-		isLoading: boolean
-		onChange: (color: CellColor) => void
-	}
+		color: CellColor;
+		number: number | null;
+		locked: boolean;
+		rowIndex?: number;
+		colIndex?: number;
+		isLoading: boolean;
+		hasError?: boolean;
+		gridSize?: number;
+		onChange: (color: CellColor) => void;
+	};
 
-	let { color, number, locked, rowIndex, colIndex, isLoading = false, onChange }: Props = $props()
+	let {
+		color,
+		number,
+		locked,
+		rowIndex,
+		colIndex,
+		isLoading = false,
+		hasError = false,
+		gridSize,
+		onChange,
+	}: Props = $props();
 
-	let pointerStartY = $state(0)
-	const SWIPE_THRESHOLD = 20
+	let pointerStartY = $state(0);
+	const SWIPE_THRESHOLD = 20;
 
 	const animationDelay = $derived(
 		rowIndex !== undefined && colIndex !== undefined
 			? `${(rowIndex + colIndex) * 50}ms`
-			: '0ms'
-	)
+			: "0ms",
+	);
 
 	function handlePointerDown(e: PointerEvent) {
-		if (locked) return
-		pointerStartY = e.clientY
-		;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+		if (locked) return;
+		pointerStartY = e.clientY;
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
 
 	function handlePointerUp(e: PointerEvent) {
-		if (locked) return
-		const deltaY = pointerStartY - e.clientY
+		if (locked) return;
+		const deltaY = pointerStartY - e.clientY;
 
 		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
-			onChange(deltaY > 0 ? 'blue' : 'red')
+			onChange(deltaY > 0 ? "blue" : "red");
 		} else {
-			cycleColor()
+			cycleColor();
 		}
 	}
 
 	function cycleColor() {
 		if (color === null) {
-			onChange('blue')
-		} else if (color === 'blue') {
-			onChange('red')
+			onChange("blue");
+		} else if (color === "blue") {
+			onChange("red");
 		} else {
-			onChange(null)
+			onChange(null);
 		}
 	}
 </script>
@@ -54,7 +66,7 @@
 <div
 	onpointerdown={handlePointerDown}
 	onpointerup={handlePointerUp}
-	role={locked ? undefined : 'button'}
+	role={locked ? undefined : "button"}
 	tabindex={locked ? undefined : 0}
 	class="
 		relative w-full aspect-square rounded-full
@@ -62,11 +74,14 @@
 		touch-none select-none
 		transition-transform
 		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
+		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
 >
 	<!-- Loading state: animated empty cell with diagonal split -->
 	{#if isLoading && color === null}
-		<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
+		<div
+			class="absolute inset-0 overflow-hidden rounded-full pointer-events-none"
+		>
 			<div
 				class="absolute inset-0 bg-[#E54E3E] animate-loading-red"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%); animation-delay: {animationDelay}"
@@ -80,7 +95,9 @@
 
 	<!-- Empty cell: diagonal split with lighter red and blue -->
 	{#if !isLoading && color === null}
-		<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
+		<div
+			class="absolute inset-0 overflow-hidden rounded-full pointer-events-none"
+		>
 			<div
 				class="absolute inset-0 bg-theme-empty-red"
 				style="clip-path: polygon(0 0, 0 100%, 100% 100%)"
@@ -93,7 +110,7 @@
 	{/if}
 
 	<!-- Loading state: animated red cell -->
-	{#if isLoading && (color === 'red' || color === null)}
+	{#if isLoading && (color === "red" || color === null)}
 		<div
 			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
 			style="animation-delay: {animationDelay}"
@@ -101,7 +118,7 @@
 	{/if}
 
 	<!-- Loading state: animated blue cell -->
-	{#if isLoading && color === 'blue'}
+	{#if isLoading && color === "blue"}
 		<div
 			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
 			style="animation-delay: {animationDelay}"
@@ -109,20 +126,28 @@
 	{/if}
 
 	<!-- Non-loading: filled red -->
-	{#if !isLoading && color === 'red'}
-		<div class="absolute inset-0 bg-[#E54E3E] rounded-full transition-opacity duration-500 pointer-events-none" class:opacity-0={isLoading}></div>
+	{#if !isLoading && color === "red"}
+		<div
+			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-opacity duration-500 pointer-events-none"
+			class:opacity-0={isLoading}
+		></div>
 	{/if}
 
 	<!-- Non-loading: filled blue -->
-	{#if !isLoading && color === 'blue'}
-		<div class="absolute inset-0 bg-[#3997D7] rounded-full transition-opacity duration-500 pointer-events-none" class:opacity-0={isLoading}></div>
+	{#if !isLoading && color === "blue"}
+		<div
+			class="absolute inset-0 bg-[#3997D7] rounded-full transition-opacity duration-500 pointer-events-none"
+			class:opacity-0={isLoading}
+		></div>
 	{/if}
 
 	<!-- Number overlay -->
 	{#if number !== null}
 		<span
 			class="absolute inset-0 flex items-center justify-center
-				text-white font-bold text-3xl z-10 select-none pointer-events-none
+				text-white font-bold {gridSize === 6
+				? 'text-xl'
+				: 'text-3xl'} z-10 select-none pointer-events-none
 				drop-shadow-md"
 		>
 			{number}
@@ -132,20 +157,22 @@
 
 <style>
 	@keyframes loadingRedBlue {
-		0%, 100% {
-			background-color: #E54E3E;
+		0%,
+		100% {
+			background-color: #e54e3e;
 		}
 		50% {
-			background-color: #3997D7;
+			background-color: #3997d7;
 		}
 	}
 
 	@keyframes loadingBlueRed {
-		0%, 100% {
-			background-color: #3997D7;
+		0%,
+		100% {
+			background-color: #3997d7;
 		}
 		50% {
-			background-color: #E54E3E;
+			background-color: #e54e3e;
 		}
 	}
 

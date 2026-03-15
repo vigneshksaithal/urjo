@@ -1,13 +1,12 @@
 <script lang="ts">
-	import Coins from 'lucide-svelte/icons/coins'
+	import Coins from "lucide-svelte/icons/coins";
 
 	type Props = {
-		coins: number
-		totalCoins?: number
-		onClick?: () => void
-	}
+		coins: number;
+		onClick?: () => void;
+	};
 
-	let { coins, totalCoins, onClick }: Props = $props()
+	let { coins, onClick }: Props = $props();
 </script>
 
 <button
@@ -17,7 +16,4 @@
 >
 	<Coins class="w-4 h-4 text-yellow-400" />
 	<span class="text-sm font-bold text-yellow-400">{coins}</span>
-	{#if totalCoins !== undefined && totalCoins > coins}
-		<span class="text-xs text-theme-text-muted">({totalCoins})</span>
-	{/if}
 </button>

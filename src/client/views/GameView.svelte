@@ -1,17 +1,16 @@
 <script lang="ts">
-	import type {
-		CellColor,
-		Grid,
-		StreakData,
-		LeaderboardData,
-	} from "../../shared/types";
+	import type { CellColor, Grid, StreakData } from "../../shared/types";
+	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
 	import StreakBadge from "../components/StreakBadge.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
+	import HowToPlayModal from "../components/HowToPlayModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import Share2 from "lucide-svelte/icons/share-2";
+	import CircleHelp from "lucide-svelte/icons/circle-help";
+	import Shuffle from "lucide-svelte/icons/shuffle";
 
 	type CoinReward = {
 		base: number;
@@ -28,13 +27,13 @@
 		isCompleted: boolean;
 		onNextChallenge: () => void;
 		onRestart: () => void;
-		onHowToPlay: () => void;
 		streakData: StreakData;
 		hasShared: boolean;
 		onShare: () => void;
 		coinReward?: CoinReward;
 		coins?: number;
 		onOpenShop?: () => void;
+		timeTaken?: number;
 	};
 
 	let {
@@ -44,45 +43,39 @@
 		isCompleted,
 		onNextChallenge,
 		onRestart,
-		onHowToPlay,
 		streakData,
 		hasShared,
 		onShare,
 		coinReward,
 		coins,
 		onOpenShop,
+		timeTaken,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
-	let leaderboardPreview = $state<LeaderboardData | null>(null);
+	let showHowToPlay = $state(false);
+	let hasFiredConfetti = $state(false);
 
-	// Fetch mini leaderboard preview when completed
 	$effect(() => {
-		if (isCompleted && !leaderboardPreview) {
-			fetchLeaderboardPreview();
+		if (isCompleted && !hasFiredConfetti) {
+			hasFiredConfetti = true;
+		} else if (!isCompleted) {
+			hasFiredConfetti = false;
 		}
 	});
 
-	async function fetchLeaderboardPreview() {
-		try {
-			const response = await fetch("/api/game/leaderboard?type=speed");
-			if (response.ok) {
-				leaderboardPreview = await response.json();
-			}
-		} catch {
-			// Non-critical
-		}
-	}
+	const validation = $derived(validateGrid(grid, gridSize));
 </script>
 
 <div class="h-full w-full flex flex-col p-4 overflow-hidden">
 	<!-- Header -->
 	<header class="flex-none h-10 flex items-center justify-between px-2 gap-2">
 		<button
-			onclick={onHowToPlay}
-			class="text-sm font-medium text-urjo-blue hover:underline flex-shrink-0"
+			onclick={() => (showHowToPlay = true)}
+			class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+			aria-label="How to Play"
 		>
-			How to Play
+			<CircleHelp class="w-5 h-5 text-urjo-blue" />
 		</button>
 
 		<div class="flex items-center gap-2 flex-1 justify-center">
@@ -92,7 +85,7 @@
 			{/if}
 			<button
 				onclick={() => (showLeaderboard = true)}
-				class="p-1.5 rounded-lg hover:bg-theme-hover transition-colors"
+				class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
 				aria-label="View leaderboard"
 			>
 				<Trophy class="w-5 h-5 text-yellow-400" />
@@ -102,12 +95,13 @@
 		{#if !isCompleted}
 			<button
 				onclick={onNextChallenge}
-				class="text-sm font-medium text-urjo-blue hover:underline flex-shrink-0"
+				class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+				aria-label="New Puzzle"
 			>
-				New Puzzle
+				<Shuffle class="w-5 h-5 text-urjo-blue" />
 			</button>
 		{:else}
-			<div class="w-20 flex-shrink-0"></div>
+			<div class="min-w-[44px] flex-shrink-0"></div>
 		{/if}
 	</header>
 
@@ -116,7 +110,13 @@
 		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative"
 	>
 		<!-- Game board -->
-		<GameBoard {grid} {gridSize} {onCellChange} />
+		<GameBoard
+			{grid}
+			{gridSize}
+			{onCellChange}
+			violatedRows={validation.violatedRows}
+			violatedCols={validation.violatedCols}
+		/>
 
 		<!-- Completion overlay -->
 		{#if isCompleted}
@@ -124,34 +124,23 @@
 				class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-theme-overlay backdrop-blur-sm"
 			>
 				<div class="flex flex-col items-center gap-3 max-w-sm w-full">
-					<!-- Primary CTA -->
-					<button
-						onclick={onNextChallenge}
-						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
-							text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
-					>
-						Next Challenge
-					</button>
-
-					<!-- Streak display -->
-					{#if streakData.currentStreak > 0}
-						<div class="text-center">
-							<p
-								class="text-3xl font-bold text-theme-text-primary drop-shadow-lg"
-							>
-								🔥 {streakData.currentStreak} Day Streak!
-							</p>
-						</div>
-					{/if}
-
-					<!-- Coin reward display -->
+					<!-- Coin reward with inline streak badge -->
 					{#if coinReward && coinReward.total > 0}
 						<div
 							class="flex flex-col items-center gap-1 animate-bounce-in"
 						>
-							<span class="text-2xl font-bold text-yellow-400"
-								>+{coinReward.total} 🪙</span
-							>
+							<div class="flex items-center gap-2">
+								<span class="text-2xl font-bold text-yellow-400"
+									>+{coinReward.total} 🪙</span
+								>
+								{#if streakData.currentStreak > 0}
+									<span
+										class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
+									>
+										🔥 {streakData.currentStreak}
+									</span>
+								{/if}
+							</div>
 							<div class="flex gap-2 text-xs text-gray-400">
 								{#if coinReward.streakBonus > 0}
 									<span>🔥 +{coinReward.streakBonus}</span>
@@ -164,84 +153,48 @@
 								{/if}
 							</div>
 						</div>
-					{/if}
-
-					<!-- Mini leaderboard preview -->
-					{#if leaderboardPreview && leaderboardPreview.entries.length > 0}
-						<div
-							class="w-full bg-theme-bg-secondary backdrop-blur-md rounded-lg p-3 border border-theme-border"
+					{:else if streakData.currentStreak > 0}
+						<span
+							class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
 						>
-							<div class="flex items-center justify-between mb-2">
-								<h3
-									class="text-sm font-bold text-theme-text-primary flex items-center gap-1"
-								>
-									<Trophy class="w-4 h-4 text-yellow-400" />
-									Top 3 Today
-								</h3>
-								<button
-									onclick={() => (showLeaderboard = true)}
-									class="text-xs text-urjo-blue hover:underline"
-								>
-									View All
-								</button>
-							</div>
-							<div class="space-y-1">
-								{#each leaderboardPreview.entries.slice(0, 3) as entry}
-									<div
-										class="flex items-center justify-between text-xs"
-									>
-										<span class="text-theme-text-secondary">
-											{entry.rank === 1
-												? "🥇"
-												: entry.rank === 2
-													? "🥈"
-													: "🥉"}
-											{entry.username}
-										</span>
-										<span class="text-yellow-400 font-bold"
-											>{entry.score}s</span
-										>
-									</div>
-								{/each}
-							</div>
-						</div>
+							🔥 {streakData.currentStreak}
+						</span>
 					{/if}
 
-					<!-- Share button -->
+					<!-- Primary CTA -->
 					<button
-						onclick={onShare}
-						disabled={hasShared}
-						class="px-6 py-2 border-2 border-theme-text-primary text-theme-text-primary rounded-lg
-							text-sm hover:bg-theme-hover active:scale-95 transition-all
-							disabled:opacity-50 disabled:cursor-not-allowed w-full
-							flex items-center justify-center gap-2"
+						onclick={onNextChallenge}
+						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
+							text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
 					>
-						{#if hasShared}
-							<span>✅ Shared!</span>
-						{:else}
-							<Share2 class="w-4 h-4" />
-							<span>Share to Comments</span>
-						{/if}
+						Next Challenge
 					</button>
 
-					<!-- Upvote prompt -->
-					<p class="text-xs text-theme-text-muted text-center">
-						⬆️ Your upvote helps us keep building — thank you!
-					</p>
-
-					<!-- Restart button -->
-					<button
-						onclick={onRestart}
-						class="px-6 py-1.5 border border-theme-border text-theme-text-secondary rounded-lg
-							text-sm hover:bg-theme-hover active:scale-95 transition-all"
-					>
-						Restart
-					</button>
-
-					<!-- Cross-promo -->
-					<p class="text-xs text-theme-text-muted text-center">
-						🧩 Play daily puzzles at r/urjo
-					</p>
+					<!-- Secondary actions -->
+					<div class="flex gap-3 w-full">
+						<button
+							onclick={onShare}
+							disabled={hasShared}
+							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
+								text-sm hover:bg-theme-hover active:scale-95 transition-all
+								disabled:opacity-50 disabled:cursor-not-allowed
+								flex items-center justify-center gap-2"
+						>
+							{#if hasShared}
+								<span>✅ Shared!</span>
+							{:else}
+								<Share2 class="w-4 h-4" />
+								<span>Share</span>
+							{/if}
+						</button>
+						<button
+							onclick={onRestart}
+							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
+								text-sm hover:bg-theme-hover active:scale-95 transition-all"
+						>
+							Restart
+						</button>
+					</div>
 				</div>
 			</div>
 		{/if}
@@ -249,7 +202,11 @@
 
 	<!-- Footer instructions -->
 	<footer class="flex-none h-10 flex items-center justify-center">
-		{#if !isCompleted}
+		{#if isCompleted}
+			<p class="text-xs text-theme-text-muted text-center">
+				Solved in {timeTaken ?? 0}s
+			</p>
+		{:else}
 			<p class="text-xs text-theme-text-muted text-center">
 				Tap to cycle colors
 			</p>
@@ -258,7 +215,7 @@
 </div>
 
 <!-- Confetti effect -->
-{#if isCompleted}
+{#if isCompleted && hasFiredConfetti}
 	<ConfettiEffect />
 {/if}
 
@@ -270,4 +227,11 @@
 		showLeaderboard = false;
 		onNextChallenge();
 	}}
+/>
+
+<!-- How to Play modal -->
+<HowToPlayModal
+	isOpen={showHowToPlay}
+	onClose={() => (showHowToPlay = false)}
+	{gridSize}
 />
