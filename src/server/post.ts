@@ -1,6 +1,9 @@
 import { context, reddit, redis } from '@devvit/web/server'
 import { generatePuzzle } from './lib/generator'
 
+export const URJO_POST_TYPE_KEY = 'postType'
+export const URJO_PUZZLE_POST_TYPE = 'urjo-puzzle'
+
 export const createPost = async (customTitle?: string, ctxOverride?: any): Promise<{ id: string }> => {
 	const currentContext = ctxOverride || context
 	const { subredditName } = currentContext
@@ -17,6 +20,9 @@ export const createPost = async (customTitle?: string, ctxOverride?: any): Promi
 	const post = await reddit.submitCustomPost({
 		subredditName,
 		title,
+		postData: {
+			[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+		},
 	})
 
 	// Save puzzle to Redis
@@ -27,6 +33,10 @@ export const createPost = async (customTitle?: string, ctxOverride?: any): Promi
 		difficulty: puzzle.difficulty,
 		gridSize: puzzle.gridSize.toString(),
 		created: new Date().toISOString(),
+	})
+
+	await redis.hSet(`game:${post.id}:meta`, {
+		[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
 	})
 
 	// Increment global stats

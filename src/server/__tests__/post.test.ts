@@ -1,7 +1,7 @@
 import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis, reddit } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
-import { createPost } from '../post'
+import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from '../post'
 
 // ─── createPost — happy path ──────────────────────────────────────────────────
 
@@ -18,6 +18,9 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 	expect(reddit.submitCustomPost).toHaveBeenCalledWith({
 		subredditName: 'testsub',
 		title: 'Urjo Puzzle - Can you solve it?',
+		postData: {
+			[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+		},
 	})
 
 	const puzzle = await redis.hGetAll('game:t3_abc123:puzzle')

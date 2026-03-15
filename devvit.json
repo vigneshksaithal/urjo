@@ -34,7 +34,8 @@
     ]
   },
   "triggers": {
-    "onAppInstall": "/internal/on-app-install"
+    "onAppInstall": "/internal/on-app-install",
+    "onPostCreate": "/internal/on-post-create"
   },
   "scheduler": {
     "tasks": {

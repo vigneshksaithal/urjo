@@ -6,11 +6,12 @@ import {
   reddit
 } from '@devvit/web/server'
 import type { TaskRequest, TaskResponse } from '@devvit/web/server'
+import type { OnPostCreateRequest } from '@devvit/web/shared'
 import { serve } from '@hono/node-server'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 
-import { createPost } from './post'
+import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from './post'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
 
@@ -142,6 +143,75 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       500
     )
   }
+})
+
+const REDDIT_GAMES_SUBREDDIT = 'RedditGames'
+const REDDIT_GAMES_CROSSPOST_ID_KEY = 'redditGamesCrosspostId'
+
+const isUrjoPuzzlePost = async (
+  postId: `t3_${string}`,
+  authorName: string | undefined
+): Promise<boolean> => {
+  const [appUser, postMeta] = await Promise.all([
+    reddit.getAppUser(),
+    redis.hGetAll(`game:${postId}:meta`),
+  ])
+
+  const appUsername = appUser?.username
+  const postType = postMeta[URJO_POST_TYPE_KEY]
+
+  return Boolean(
+    appUsername
+    && authorName
+    && authorName === appUsername
+    && postType === URJO_PUZZLE_POST_TYPE
+  )
+}
+
+const wasCrosspostedToRedditGames = async (postId: `t3_${string}`): Promise<boolean> => {
+  const postMeta = await redis.hGetAll(`game:${postId}:meta`)
+  return typeof postMeta[REDDIT_GAMES_CROSSPOST_ID_KEY] === 'string'
+    && postMeta[REDDIT_GAMES_CROSSPOST_ID_KEY].length > 0
+}
+
+// Trigger handler: crosspost to r/RedditGames whenever a new post is created in urjo
+app.post('/internal/on-post-create', async (c: Context) => {
+  const input = await c.req.json<OnPostCreateRequest>()
+  const post = input.post
+  const authorName = input.author?.name
+
+  if (!post) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  const postId = (post.id.startsWith('t3_') ? post.id : `t3_${post.id}`) as `t3_${string}`
+  const shouldCrosspost = await isUrjoPuzzlePost(postId, authorName)
+
+  if (!shouldCrosspost) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  if (await wasCrosspostedToRedditGames(postId)) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  try {
+    const crosspost = await reddit.crosspost({
+      subredditName: REDDIT_GAMES_SUBREDDIT,
+      postId,
+      title: post.title,
+    })
+    await redis.hSet(`game:${postId}:meta`, {
+      [REDDIT_GAMES_CROSSPOST_ID_KEY]: crosspost.id,
+    })
+    console.log(`[OnPostCreate] Crossposted ${postId} to r/${REDDIT_GAMES_SUBREDDIT}`)
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Failed to crosspost puzzle post'
+    console.error(`[OnPostCreate] Crosspost to r/${REDDIT_GAMES_SUBREDDIT} failed:`, err)
+    return c.json({ status: 'error', message: errorMessage }, 500)
+  }
+
+  return c.json({ status: 'ok' }, 200)
 })
 
 // Register game API routes
