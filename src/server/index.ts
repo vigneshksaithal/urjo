@@ -5,7 +5,7 @@ import {
   redis,
   reddit
 } from '@devvit/web/server'
-import type { TaskResponse } from '@devvit/web/server'
+import type { TaskRequest, TaskResponse } from '@devvit/web/server'
 import { serve } from '@hono/node-server'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
@@ -110,6 +110,7 @@ const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
 
 // Scheduler endpoint for twice-daily puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
+  await c.req.json<TaskRequest>()
   try {
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
     const title = `🧩 Urjo Puzzle #${puzzleNumber} — Can you solve it?`
@@ -130,7 +131,7 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
 
     console.log(`[Scheduler] Post created successfully: ${post.id}`)
 
-    return c.json<TaskResponse>({ status: 'ok' })
+    return c.json<TaskResponse>({ status: 'ok' }, 200)
   } catch (error) {
     const errorMessage = error instanceof Error
       ? error.message
