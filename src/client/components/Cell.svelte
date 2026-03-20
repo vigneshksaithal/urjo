@@ -26,6 +26,8 @@
 	}: Props = $props();
 
 	let pointerStartY = $state(0);
+	let isPopping = $state(false);
+	let popTimeout: number;
 	const SWIPE_THRESHOLD = 20;
 
 	const animationDelay = $derived(
@@ -33,6 +35,15 @@
 			? `${(rowIndex + colIndex) * 50}ms`
 			: "0ms",
 	);
+
+	function triggerPop() {
+		isPopping = true;
+		if (popTimeout) clearTimeout(popTimeout);
+		popTimeout = window.setTimeout(() => (isPopping = false), 200) as unknown as number;
+		if (typeof navigator !== "undefined" && navigator.vibrate) {
+			navigator.vibrate(10);
+		}
+	}
 
 	function handlePointerDown(e: PointerEvent) {
 		if (locked) return;
@@ -45,6 +56,7 @@
 		const deltaY = pointerStartY - e.clientY;
 
 		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
+			triggerPop();
 			onChange(deltaY > 0 ? "blue" : "red");
 		} else {
 			cycleColor();
@@ -52,6 +64,7 @@
 	}
 
 	function cycleColor() {
+		triggerPop();
 		if (color === null) {
 			onChange("blue");
 		} else if (color === "blue") {
@@ -75,6 +88,7 @@
 		transition-transform
 		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
+		{isPopping ? 'animate-pop' : ''}
 	"
 >
 	<!-- Loading state: animated empty cell with diagonal split -->

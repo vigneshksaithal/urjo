@@ -56,9 +56,13 @@
 	let showHowToPlay = $state(false);
 	let hasFiredConfetti = $state(false);
 
+
 	$effect(() => {
 		if (isCompleted && !hasFiredConfetti) {
 			hasFiredConfetti = true;
+			if (typeof navigator !== "undefined" && navigator.vibrate) {
+				navigator.vibrate([100, 50, 100]);
+			}
 		} else if (!isCompleted) {
 			hasFiredConfetti = false;
 		}

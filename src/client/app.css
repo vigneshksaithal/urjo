@@ -8,6 +8,7 @@
 
 	/* Skeleton loading animation */
 	--animate-pulse-skeleton: pulse-skeleton 2s ease-in-out infinite;
+	--animate-pop: pop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 
 	/* Theme variables */
 	--color-theme-bg-primary: var(--theme-bg-primary);
@@ -63,5 +64,14 @@
 	50% {
 		opacity: 0.7;
 		transform: scale(1);
+	}
+}
+
+@keyframes pop {
+	0%, 100% {
+		transform: scale(1);
+	}
+	50% {
+		transform: scale(1.15);
 	}
 }
