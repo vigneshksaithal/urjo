@@ -15,6 +15,7 @@ import type {
 	UGCPuzzle,
 } from '../../shared/types'
 import { countSolutions, deserializeGrid } from '../lib/generator'
+import { URJO_POST_TYPE_KEY, URJO_PUZZLE_POST_TYPE } from '../post'
 
 export const builderRouter = new Hono()
 
@@ -163,42 +164,50 @@ builderRouter.post('/api/builder/publish', async (c) => {
 		await redis.zAdd('ugc:puzzles:recent', { score: now, member: puzzleId })
 		await redis.zAdd(`ugc:puzzles:by:${userId}`, { score: now, member: puzzleId })
 
-		// Post to subreddit
+		// Create a real playable Devvit custom post with the UGC puzzle embedded
 		let postId: string | undefined
 		try {
-			const post = await reddit.submitPost({
+			const post = await reddit.submitCustomPost({
 				subredditName: context.subredditName ?? 'urjo',
-				title: `🎨 Community Puzzle: ${puzzle.title} by u/${authorName}`,
-				richtext: {
-					document: [
-						{
-							e: 'par',
-							c: [
-								{ e: 'text', t: `u/${authorName} created a new community puzzle: **${puzzle.title}**` },
-							],
-						},
-						{
-							e: 'par',
-							c: [
-								{ e: 'text', t: `Grid: ${parsedSize}×${parsedSize} | Can you solve it? Play inside the app! 🧩` },
-							],
-						},
-					],
+				title: `🎨 ${puzzle.title} — Community Puzzle by u/${authorName}`,
+				postData: {
+					// Same post type key as daily puzzles so the app renders it
+					[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+					// Mark as community puzzle so the app can show attribution
+					ugcPuzzleId: puzzleId,
+					ugcAuthor: authorName,
 				},
 			})
 			postId = post.id
 
-			// Link post back to puzzle
+			// Save the UGC puzzle data under the post ID so the game server
+			// serves it when players open the post (same pattern as daily puzzles)
+			await redis.hSet(`game:${post.id}:puzzle`, {
+				colors,
+				numbers,
+				solution,
+				difficulty: 'medium',
+				gridSize: parsedSize.toString(),
+				created: new Date().toISOString(),
+			})
+
+			await redis.hSet(`game:${post.id}:meta`, {
+				[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+				ugcPuzzleId: puzzleId,
+				ugcAuthor: authorName,
+			})
+
+			// Link post back to puzzle record
 			await redis.hSet(`ugc:puzzle:${puzzleId}`, { postId: post.id })
 
-			// Add coin reward for publishing
+			// Coin reward for publishing
 			const economyKey = `user:${userId}:economy`
 			const economyData = await redis.hGetAll(economyKey)
 			const currentCoins = parseInt(economyData?.coins ?? '0', 10)
 			await redis.hSet(economyKey, { coins: (currentCoins + 20).toString() })
 		} catch (postError) {
-			console.error('Failed to post to subreddit (non-critical):', postError)
-			// Continue — puzzle is saved even if Reddit post fails
+			console.error('Failed to create custom post (non-critical):', postError)
+			// Puzzle is saved in Redis even if post creation fails
 		}
 
 		const publishResp: BuilderPublishResponse = { success: true, puzzleId }
