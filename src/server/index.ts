@@ -14,6 +14,7 @@ import { Hono } from 'hono'
 import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from './post'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
+import { builderRouter } from './routes/builder'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 
@@ -217,6 +218,7 @@ app.post('/internal/on-post-create', async (c: Context) => {
 // Register game API routes
 app.route('/', gameRouter)
 app.route('/', economyRouter)
+app.route('/', builderRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports

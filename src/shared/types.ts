@@ -164,3 +164,69 @@ export type EquipTitleResponse = {
 	success: boolean
 	error?: string
 }
+
+// ─── UGC Types ─────────────────────────────────────────────────────────────────
+
+/** A user-created puzzle submitted to the community */
+export type UGCPuzzle = {
+	id: string
+	authorId: string
+	authorName: string
+	colors: string
+	numbers: string
+	solution: string
+	gridSize: number
+	title: string
+	createdAt: number
+	solveCount: number
+	upvotes: number
+	postId?: string
+}
+
+/** Request to validate a builder grid */
+export type BuilderValidateRequest = {
+	colors: string
+	numbers: string
+	solution: string
+	gridSize: number
+}
+
+/** Response from builder validation */
+export type BuilderValidateResponse = {
+	valid: boolean
+	solutionCount: number
+	error?: string
+}
+
+/** Request to publish a UGC puzzle */
+export type BuilderPublishRequest = {
+	colors: string
+	numbers: string
+	solution: string
+	gridSize: number
+	title: string
+}
+
+/** Response from publishing */
+export type BuilderPublishResponse = {
+	success: boolean
+	puzzleId?: string
+	postId?: string
+	error?: string
+}
+
+/** Community puzzles list response */
+export type CommunityPuzzlesResponse = {
+	puzzles: UGCPuzzle[]
+	total: number
+}
+
+/** Play a community puzzle request */
+export type PlayCommunityRequest = {
+	puzzleId: string
+}
+
+/** Play a community puzzle response */
+export type PlayCommunityResponse = {
+	puzzle: UGCPuzzle
+}

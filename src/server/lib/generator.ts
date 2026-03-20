@@ -369,7 +369,7 @@ function couldBeValid(grid: Grid, row: number, col: number, gridSize: number): b
  * Count solutions for a puzzle grid (early termination at maxCount).
  * Works directly with the grid's embedded number constraints.
  */
-function countSolutions(puzzleGrid: Grid, gridSize: number, maxCount: number = 2): number {
+export function countSolutions(puzzleGrid: Grid, gridSize: number, maxCount: number = 2): number {
 	const grid = deepCopyGrid(puzzleGrid)
 
 	// Find empty cells (cells the player would need to fill)

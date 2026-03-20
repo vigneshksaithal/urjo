@@ -6,10 +6,13 @@
 		NextChallengeResponse,
 		StreakData,
 		ShareResponse,
+		UGCPuzzle,
 	} from "../shared/types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
+	import BuilderModal from "./components/BuilderModal.svelte";
+	import CommunityModal from "./components/CommunityModal.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
 
 	type CoinReward = {
@@ -53,6 +56,8 @@
 	let timeTaken = $state(0);
 	let hasShared = $state(false);
 	let showShop = $state(false);
+	let showBuilder = $state(false);
+	let showCommunity = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
 
@@ -274,6 +279,31 @@
 	}
 
 	/**
+	 * Play a community puzzle.
+	 */
+	function handlePlayCommunity(puzzle: UGCPuzzle) {
+		showCommunity = false;
+		puzzleColors = puzzle.colors;
+		puzzleNumbers = puzzle.numbers;
+		puzzleSolution = puzzle.solution;
+		gridSize = puzzle.gridSize;
+		grid = deserializeGrid(
+			puzzle.colors,
+			puzzle.numbers,
+			puzzle.colors,
+			puzzle.gridSize,
+		).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
+		isCompleted = false;
+		hasShared = false;
+		startTime = Date.now();
+		coinReward = undefined;
+		currentView = "game";
+
+		// Record solve asynchronously when completed
+		// (handled via the existing reportCompletion + a separate call below)
+	}
+
+	/**
 	 * Handle tutorial completion.
 	 */
 	async function handleTutorialComplete() {
@@ -323,6 +353,8 @@
 			onRestart: handleRestart,
 			onShare: handleShare,
 			onOpenShop: () => (showShop = true),
+			onOpenBuilder: () => (showBuilder = true),
+			onOpenCommunity: () => (showCommunity = true),
 		}}
 		{#if coinReward}
 			<GameView {...gameProps} {coinReward} />
@@ -333,3 +365,19 @@
 </div>
 
 <ShopModal isOpen={showShop} onClose={() => (showShop = false)} />
+
+{#if showBuilder}
+	<BuilderModal
+		onClose={() => (showBuilder = false)}
+		onPublished={() => {
+			showBuilder = false;
+			loadEconomy();
+		}}
+	/>
+{/if}
+
+<CommunityModal
+	isOpen={showCommunity}
+	onClose={() => (showCommunity = false)}
+	onPlay={handlePlayCommunity}
+/>

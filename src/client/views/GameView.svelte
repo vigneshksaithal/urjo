@@ -11,6 +11,8 @@
 	import Share2 from "lucide-svelte/icons/share-2";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
+	import Pencil from "lucide-svelte/icons/pencil";
+	import Users from "lucide-svelte/icons/users";
 
 	type CoinReward = {
 		base: number;
@@ -33,6 +35,8 @@
 		coinReward?: CoinReward;
 		coins?: number;
 		onOpenShop?: () => void;
+		onOpenBuilder?: () => void;
+		onOpenCommunity?: () => void;
 		timeTaken?: number;
 	};
 
@@ -49,6 +53,8 @@
 		coinReward,
 		coins,
 		onOpenShop,
+		onOpenBuilder,
+		onOpenCommunity,
 		timeTaken,
 	}: Props = $props();
 
@@ -90,6 +96,24 @@
 			>
 				<Trophy class="w-5 h-5 text-yellow-400" />
 			</button>
+			{#if onOpenCommunity}
+				<button
+					onclick={onOpenCommunity}
+					class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+					aria-label="Community puzzles"
+				>
+					<Users class="w-5 h-5 text-urjo-blue" />
+				</button>
+			{/if}
+			{#if onOpenBuilder}
+				<button
+					onclick={onOpenBuilder}
+					class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+					aria-label="Create puzzle"
+				>
+					<Pencil class="w-5 h-5 text-theme-text-secondary" />
+				</button>
+			{/if}
 		</div>
 
 		{#if !isCompleted}
