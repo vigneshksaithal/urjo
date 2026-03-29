@@ -11,7 +11,7 @@
 	import TutorialView from "./views/TutorialView.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
-	import { mistakeCount, recordCellChange, resetMistakes } from "./stores/mistakes";
+	import { mistakeCount, onCellChange, onPuzzleComplete, resetMistakes, setSolution } from "./stores/mistakes";
 
 	type CoinReward = {
 		base: number;
@@ -117,6 +117,7 @@
 			startTime = Date.now();
 			coinReward = undefined;
 			resetMistakes();
+			setSolution(data.puzzle.solution, data.puzzle.gridSize);
 
 			if (!data.tutorialCompleted) {
 				currentView = "tutorial";
@@ -153,8 +154,8 @@
 		if (!cell) return;
 		if (cell.locked) return;
 
-		// Record change for mistake tracking (each re-change after first = mistake)
-		recordCellChange(row, col);
+		// Track mistakes: check previous cell when moving to a new one
+		onCellChange(row, col, color, (r, c) => grid[r]?.[c]?.color ?? null);
 
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
@@ -172,6 +173,8 @@
 		if (boardString === puzzleSolution) {
 			isCompleted = true;
 			timeTaken = Math.round((Date.now() - startTime) / 1000);
+			// Check last active cell before reporting
+			onPuzzleComplete((r, c) => grid[r]?.[c]?.color ?? null);
 			reportCompletion(timeTaken);
 		}
 	}
@@ -257,6 +260,7 @@
 			isCompleted = false;
 			startTime = Date.now();
 			resetMistakes();
+			setSolution(data.puzzle.solution, data.puzzle.gridSize);
 		} catch (error) {
 			errorMessage =
 				error instanceof Error
@@ -265,10 +269,6 @@
 			currentView = "error";
 		}
 	}
-
-	/**
-	 * Handle "Restart" button (purely client-side).
-	 */
 	function handleRestart() {
 		grid = deserializeGrid(
 			puzzleColors,
@@ -279,6 +279,7 @@
 		isCompleted = false;
 		startTime = Date.now();
 		resetMistakes();
+		setSolution(puzzleSolution, gridSize);
 	}
 
 	/**
