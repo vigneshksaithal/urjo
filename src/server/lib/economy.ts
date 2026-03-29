@@ -10,6 +10,7 @@ import {
 	COIN_STREAK_MULTIPLIER,
 	COIN_SPEED_BONUS,
 	COIN_DAILY_BONUS,
+	COIN_PERFECT_BONUS,
 	PAR_TIME_MULTIPLIER,
 	TITLES,
 	getTitleById,
@@ -69,21 +70,24 @@ export const calculateCoinReward = (
 	timeTaken: number,
 	level: number,
 	currentStreak: number,
-	isDailyFirst: boolean
+	isDailyFirst: boolean,
+	mistakes: number = 0
 ): CoinReward => {
 	const config = getLevelConfig(level)
 	const parTime = config.expectedTime * PAR_TIME_MULTIPLIER
 	const speedBonus = timeTaken <= parTime ? COIN_SPEED_BONUS : 0
+	const perfectBonus = mistakes === 0 ? COIN_PERFECT_BONUS : 0
 
 	const reward: CoinReward = {
 		base: COIN_BASE,
 		streakBonus: currentStreak * COIN_STREAK_MULTIPLIER,
 		speedBonus,
 		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,
+		perfectBonus,
 		total: 0,
 	}
 
-	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus
+	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
 	return reward
 }
 

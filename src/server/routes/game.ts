@@ -201,6 +201,7 @@ type CoinRewardContext = {
 	timeTaken: number
 	currentLevel: number
 	streak: StreakData
+	mistakes: number
 }
 
 /**
@@ -212,7 +213,7 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 	const economyData = await redis.hGetAll(economyKey)
 	const lastDailySolve = economyData?.dailyFirstSolve ?? null
 	const isDailyFirst = lastDailySolve !== today
-	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst)
+	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst, ctx.mistakes)
 	const currentCoins = parseInt(economyData?.coins ?? '0', 10)
 	const currentTotalCoins = parseInt(economyData?.totalCoins ?? '0', 10)
 	const currentTotalSolves = parseInt(economyData?.totalSolves ?? '0', 10)
@@ -308,7 +309,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 	try {
 		const body: CompleteRequest = await c.req.json()
-		const { timeTaken } = body
+		const { timeTaken, mistakes = 0 } = body
 
 		if (typeof timeTaken !== 'number' || timeTaken <= 0) {
 			return c.json({ error: 'Invalid timeTaken' }, 400)
@@ -317,7 +318,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const currentLevel = await getSkillLevel(userId)
 		const history = await getHistory(userId)
 
-		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel)
+		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel, mistakes)
 
 		const record: GameRecord = {
 			level: currentLevel,
@@ -328,7 +329,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const newSkillLevel = determineSkillLevel(currentLevel, updatedHistory)
 		const streak = await updateStreak(userId)
 
-		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak })
+		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak, mistakes })
 
 		const today = getTodayUTC()
 		await Promise.all([
@@ -337,7 +338,11 @@ gameRouter.post('/api/game/complete', async (c) => {
 		])
 
 		await redis.set(`user:${userId}:skillLevel`, newSkillLevel.toString())
-		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
+		// Reset history when level changes — fresh slate for new difficulty
+		await redis.set(
+			`user:${userId}:history`,
+			newSkillLevel !== currentLevel ? JSON.stringify([]) : JSON.stringify(updatedHistory)
+		)
 		await redis.set(`user:${userId}:consecutiveSkips`, '0')
 
 		const response: CompleteResponse = {

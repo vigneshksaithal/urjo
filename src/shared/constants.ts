@@ -37,15 +37,15 @@ export const MIN_SKILL_LEVEL = 1
 /** Maximum skill level */
 export const MAX_SKILL_LEVEL = 9
 
-/** Number of recent games to consider for level adjustment */
-export const HISTORY_SIZE = 10
+/** Number of recent games to consider for level adjustment. Must be >= PROMOTE_WINDOW. */
+export const HISTORY_SIZE = 20
 
 /**
  * Per-level promotion thresholds.
  * Early levels are easier to promote from; later levels require more sustained performance.
  * Index 0 = level 1, index 8 = level 9.
  */
-export const PROMOTE_THRESHOLDS: readonly number[] = [0.42, 0.44, 0.46, 0.50, 0.52, 0.55, 0.58, 0.60, 0.62] as const
+export const PROMOTE_THRESHOLDS: readonly number[] = [0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66] as const
 
 /** Minimum games needed at current window to consider promotion */
 export const PROMOTE_WINDOW = 15
@@ -115,6 +115,9 @@ export const COIN_SPEED_BONUS = 5
 
 /** Bonus coins for first solve of the day */
 export const COIN_DAILY_BONUS = 5
+
+/** Bonus coins for a perfect solve (0 mistakes) */
+export const COIN_PERFECT_BONUS = 10
 
 /** Multiplier for par time calculation (expectedTime * 2) */
 export const PAR_TIME_MULTIPLIER = 2

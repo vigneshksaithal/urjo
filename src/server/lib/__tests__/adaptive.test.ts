@@ -36,7 +36,7 @@ const slowHistory = (level: number, count: number): GameRecord[] =>
 // ─── calculatePerformanceScore ────────────────────────────────────────────────
 
 describe('calculatePerformanceScore', () => {
-    it('returns 1.0 for instant solve (timeTaken=0)', () => {
+    it('returns 1.0 for instant solve with 0 mistakes (timeTaken=0)', () => {
         expect(calculatePerformanceScore(0, 1)).toBe(1.0)
     })
 
@@ -50,6 +50,25 @@ describe('calculatePerformanceScore', () => {
 
     it('returns 0.0 (clamped) when timeTaken > 2 * expectedTime (level 1: timeTaken=100)', () => {
         expect(calculatePerformanceScore(100, 1)).toBe(0.0)
+    })
+
+    it('reduces score by 0.20 per mistake', () => {
+        // instant solve → timeScore=1.0; 1 mistake → 1.0 - 0.20 = 0.80
+        expect(calculatePerformanceScore(0, 1, 1)).toBeCloseTo(0.80)
+        // instant solve; 2 mistakes → 1.0 - 0.40 = 0.60
+        expect(calculatePerformanceScore(0, 1, 2)).toBeCloseTo(0.60)
+    })
+
+    it('clamps to 0 when penalty exceeds time score', () => {
+        // timeTaken=90 → timeScore=0.0; any mistakes → still 0
+        expect(calculatePerformanceScore(90, 1, 3)).toBe(0.0)
+        // timeTaken=45 → timeScore=0.5; 3 mistakes → 0.5 - 0.60 = clamped to 0
+        expect(calculatePerformanceScore(45, 1, 3)).toBe(0.0)
+    })
+
+    it('mistake penalty is capped at 1.0 total (5 mistakes = -1.0 max, not -1.25)', () => {
+        // Even 6 mistakes: penalty capped at 1.0, so result = max(0, timeScore - 1.0) = 0
+        expect(calculatePerformanceScore(0, 1, 6)).toBe(0.0)
     })
 })
 
@@ -134,7 +153,7 @@ describe('shouldForceDemotion', () => {
 // ─── addGameRecord ────────────────────────────────────────────────────────────
 
 describe('addGameRecord', () => {
-    it('caps history at HISTORY_SIZE (10): adding an 11th record drops the oldest', () => {
+    it('caps history at HISTORY_SIZE (20): adding a 21st record drops the oldest', () => {
         const history = Array.from({ length: HISTORY_SIZE }, (_, i) => makeRecord(1, i))
         const newRecord = makeRecord(1, 99)
         const result = addGameRecord(history, newRecord)
@@ -206,17 +225,20 @@ describe('parseHistory', () => {
 describe('Performance score bounded output — Property 2', () => {
     /**
      * Property 2: Performance score bounded output
-     * For any positive timeTaken and valid level in [1, 6], result is in [0.0, 1.0]
+     * For any positive timeTaken, valid level in [1, 6], and any mistakes >= 0, result is in [0.0, 1.0]
      * Validates: Requirement 3.4
      */
     it('calculatePerformanceScore always returns a value in [0.0, 1.0]', () => {
         const times = [0, 1, 5, 10, 20, 50, 100, 1000]
         const levels = [1, 2, 3, 4, 5, 6]
+        const mistakeCounts = [0, 1, 2, 3, 5, 10]
         for (const level of levels) {
             for (const timeTaken of times) {
-                const score = calculatePerformanceScore(timeTaken, level)
-                expect(score).toBeGreaterThanOrEqual(0.0)
-                expect(score).toBeLessThanOrEqual(1.0)
+                for (const mistakes of mistakeCounts) {
+                    const score = calculatePerformanceScore(timeTaken, level, mistakes)
+                    expect(score).toBeGreaterThanOrEqual(0.0)
+                    expect(score).toBeLessThanOrEqual(1.0)
+                }
             }
         }
     })

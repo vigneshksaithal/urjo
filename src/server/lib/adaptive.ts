@@ -29,16 +29,20 @@ import {
  * Calculate performance score for a single completed game.
  * Returns a value from 0.0 to 1.0.
  *
- * Formula: clamp(1.0 - (timeTaken / (expectedTime * 2)), 0, 1)
- * - Solving at half the expected time or less → 1.0
- * - Solving at exactly the expected time → 0.5
- * - Taking 2x the expected time or more → 0.0
+ * Time score: clamp(1.0 - (timeTaken / (expectedTime * 2)), 0, 1)
+ *   - Solving at half the expected time or less → 1.0
+ *   - Solving at exactly the expected time → 0.5
+ *   - Taking 2x the expected time or more → 0.0
+ *
+ * Mistake penalty: each mistake costs 0.20 points (capped at 1.0 total penalty).
+ * Final score: max(0, timeScore - mistakePenalty)
  */
-export const calculatePerformanceScore = (timeTaken: number, level: number): number => {
+export const calculatePerformanceScore = (timeTaken: number, level: number, mistakes: number = 0): number => {
 	const config = getLevelConfig(level)
 	const expectedTime = config.expectedTime
-	const score = 1.0 - timeTaken / (expectedTime * 2)
-	return Math.max(0, Math.min(1, score))
+	const timeScore = Math.max(0, Math.min(1, 1.0 - timeTaken / (expectedTime * 2)))
+	const mistakePenalty = Math.min(1, mistakes * 0.20)
+	return Math.max(0, timeScore - mistakePenalty)
 }
 
 /**

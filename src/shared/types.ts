@@ -36,6 +36,7 @@ export type NextChallengeResponse = {
 
 export type CompleteRequest = {
 	timeTaken: number // seconds
+	mistakes?: number
 }
 
 export type CompleteResponse = {
@@ -123,6 +124,7 @@ export type CoinReward = {
 	streakBonus: number
 	speedBonus: number
 	dailyBonus: number
+	perfectBonus: number
 	total: number
 }
 

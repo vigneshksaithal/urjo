@@ -11,12 +11,14 @@
 	import TutorialView from "./views/TutorialView.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
+	import { mistakeCount, recordCellChange, resetMistakes } from "./stores/mistakes";
 
 	type CoinReward = {
 		base: number;
 		streakBonus: number;
 		speedBonus: number;
 		dailyBonus: number;
+		perfectBonus: number;
 		total: number;
 	};
 
@@ -114,6 +116,7 @@
 			hasShared = false;
 			startTime = Date.now();
 			coinReward = undefined;
+			resetMistakes();
 
 			if (!data.tutorialCompleted) {
 				currentView = "tutorial";
@@ -150,6 +153,9 @@
 		if (!cell) return;
 		if (cell.locked) return;
 
+		// Record change for mistake tracking (each re-change after first = mistake)
+		recordCellChange(row, col);
+
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
 			ri === row
@@ -178,7 +184,7 @@
 			const response = await fetch("/api/game/complete", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ timeTaken: time }),
+				body: JSON.stringify({ timeTaken: time, mistakes: $mistakeCount }),
 			});
 
 			if (response.ok) {
@@ -250,6 +256,7 @@
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
 			startTime = Date.now();
+			resetMistakes();
 		} catch (error) {
 			errorMessage =
 				error instanceof Error
@@ -271,6 +278,7 @@
 		);
 		isCompleted = false;
 		startTime = Date.now();
+		resetMistakes();
 	}
 
 	/**
@@ -318,6 +326,7 @@
 			hasShared,
 			coins,
 			timeTaken,
+			mistakes: $mistakeCount,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
