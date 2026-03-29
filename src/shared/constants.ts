@@ -45,7 +45,7 @@ export const HISTORY_SIZE = 20
  * Early levels are easier to promote from; later levels require more sustained performance.
  * Index 0 = level 1, index 8 = level 9.
  */
-export const PROMOTE_THRESHOLDS: readonly number[] = [0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64, 0.66] as const
+export const PROMOTE_THRESHOLDS: readonly number[] = [0.46, 0.48, 0.50, 0.52, 0.54, 0.57, 0.60, 0.63, 0.66] as const
 
 /** Minimum games needed at current window to consider promotion */
 export const PROMOTE_WINDOW = 15
