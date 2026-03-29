@@ -18,7 +18,7 @@ export type SerializedPuzzle = {
 	colors: string // "rbbrr.bb..." (r=red, b=blue, .=empty)
 	numbers: string // "2-31--5-..." (digit or - for no number)
 	solution: string // Complete solution (rbbrrbbrrbbrrbbb)
-	difficulty: 'easy' | 'medium' | 'hard'
+	difficulty: 'easy' | 'medium' | 'hard' | 'diabolical'
 	gridSize: number // 4 or 6
 }
 

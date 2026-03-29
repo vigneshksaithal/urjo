@@ -18,7 +18,7 @@
 import type { Cell, Grid, SerializedPuzzle, CellColor } from '../../shared/types'
 import type { Difficulty } from '../../shared/constants'
 
-const MAX_GENERATION_ATTEMPTS = 200
+const MAX_GENERATION_ATTEMPTS = 300
 
 /** All 8 surrounding directions (orthogonal + diagonal). */
 const ALL_DIRECTIONS: ReadonlyArray<[number, number]> = [
@@ -693,16 +693,24 @@ type DifficultyTarget = {
  * Difficulty targets per grid size and difficulty level.
  * Controls how many clues and numbers remain in the puzzle.
  */
-const DIFFICULTY_TARGETS: Record<number, Record<Difficulty, DifficultyTarget>> = {
+const DIFFICULTY_TARGETS: Record<number, Record<string, DifficultyTarget>> = {
 	4: {
-		easy: { minClues: 6, minNumbers: 3 },
-		medium: { minClues: 5, minNumbers: 2 },
-		hard: { minClues: 4, minNumbers: 1 },
+		easy:       { minClues: 6,  minNumbers: 3 },
+		medium:     { minClues: 5,  minNumbers: 2 },
+		hard:       { minClues: 4,  minNumbers: 1 },
+		diabolical: { minClues: 3,  minNumbers: 1 },
 	},
 	6: {
-		easy: { minClues: 14, minNumbers: 6 },
-		medium: { minClues: 11, minNumbers: 4 },
-		hard: { minClues: 9, minNumbers: 2 },
+		easy:       { minClues: 14, minNumbers: 6 },
+		medium:     { minClues: 11, minNumbers: 4 },
+		hard:       { minClues: 9,  minNumbers: 2 },
+		diabolical: { minClues: 7,  minNumbers: 1 },
+	},
+	8: {
+		easy:       { minClues: 24, minNumbers: 10 },
+		medium:     { minClues: 20, minNumbers: 7  },
+		hard:       { minClues: 16, minNumbers: 4  },
+		diabolical: { minClues: 12, minNumbers: 2  },
 	},
 }
 
@@ -898,7 +906,7 @@ export function deserializeGrid(colors: string, numbers: string, gridSize: numbe
  */
 export function generatePuzzle(
 	difficulty: Difficulty = 'medium',
-	gridSize: 4 | 6 = 4
+	gridSize: 4 | 6 | 8 = 4
 ): SerializedPuzzle {
 	for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
 		const solution = generateSolution(gridSize)

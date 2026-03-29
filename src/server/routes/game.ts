@@ -84,7 +84,7 @@ const getHistory = async (userId: string): Promise<GameRecord[]> => {
  */
 const generatePuzzleForLevel = (level: number): SerializedPuzzle => {
 	const config = getLevelConfig(level)
-	return generatePuzzle(config.difficulty, config.gridSize as 4 | 6)
+	return generatePuzzle(config.difficulty, config.gridSize as 4 | 6 | 8)
 }
 
 /**
