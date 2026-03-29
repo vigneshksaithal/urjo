@@ -15,7 +15,9 @@ import {
 	MIN_SKILL_LEVEL,
 	MAX_SKILL_LEVEL,
 	HISTORY_SIZE,
-	PROMOTE_THRESHOLD,
+	PROMOTE_THRESHOLDS,
+	PROMOTE_WINDOW,
+	DEMOTE_WINDOW,
 	DEMOTE_THRESHOLD,
 	SKIP_BASE_PENALTY,
 	SKIP_MAX_EXTRA_PENALTY,
@@ -27,16 +29,20 @@ import {
  * Calculate performance score for a single completed game.
  * Returns a value from 0.0 to 1.0.
  *
- * Formula: clamp(1.0 - (timeTaken / (expectedTime * 2)), 0, 1)
- * - Solving at half the expected time or less → 1.0
- * - Solving at exactly the expected time → 0.5
- * - Taking 2x the expected time or more → 0.0
+ * Time score: clamp(1.0 - (timeTaken / (expectedTime * 2)), 0, 1)
+ *   - Solving at half the expected time or less → 1.0
+ *   - Solving at exactly the expected time → 0.5
+ *   - Taking 2x the expected time or more → 0.0
+ *
+ * Mistake penalty: each mistake costs 0.20 points (capped at 1.0 total penalty).
+ * Final score: max(0, timeScore - mistakePenalty)
  */
-export const calculatePerformanceScore = (timeTaken: number, level: number): number => {
+export const calculatePerformanceScore = (timeTaken: number, level: number, mistakes: number = 0): number => {
 	const config = getLevelConfig(level)
 	const expectedTime = config.expectedTime
-	const score = 1.0 - timeTaken / (expectedTime * 2)
-	return Math.max(0, Math.min(1, score))
+	const timeScore = Math.max(0, Math.min(1, 1.0 - timeTaken / (expectedTime * 2)))
+	const mistakePenalty = Math.min(1, mistakes * 0.20)
+	return Math.max(0, timeScore - mistakePenalty)
 }
 
 /**
@@ -81,25 +87,36 @@ export const calculateAverageScore = (history: GameRecord[]): number => {
 /**
  * Determine the new skill level based on recent game history.
  *
- * Rules:
- * - Average score >= PROMOTE_THRESHOLD (0.70) → level up
- * - Average score <= DEMOTE_THRESHOLD (0.30) → level down
- * - Otherwise → stay at current level
- * - Clamped to [MIN_SKILL_LEVEL, MAX_SKILL_LEVEL]
+ * Asymmetric windows:
+ * - Demotion: uses last DEMOTE_WINDOW (5) games — quick to respond to struggles
+ * - Promotion: uses last PROMOTE_WINDOW (15) games — requires sustained performance
+ *
+ * Per-level promotion thresholds (harder to promote at higher levels).
+ * Demotion threshold is fixed at DEMOTE_THRESHOLD (0.18).
  */
 export const determineSkillLevel = (currentLevel: number, history: GameRecord[]): number => {
 	if (history.length === 0) return currentLevel
 
-	const avgScore = calculateAverageScore(history)
-
-	let newLevel = currentLevel
-	if (avgScore >= PROMOTE_THRESHOLD && currentLevel < MAX_SKILL_LEVEL) {
-		newLevel = currentLevel + 1
-	} else if (avgScore <= DEMOTE_THRESHOLD && currentLevel > MIN_SKILL_LEVEL) {
-		newLevel = currentLevel - 1
+	// Check demotion first (short window)
+	if (history.length >= DEMOTE_WINDOW) {
+		const recentShort = history.slice(-DEMOTE_WINDOW)
+		const avgShort = calculateAverageScore(recentShort)
+		if (avgShort <= DEMOTE_THRESHOLD && currentLevel > MIN_SKILL_LEVEL) {
+			return currentLevel - 1
+		}
 	}
 
-	return Math.max(MIN_SKILL_LEVEL, Math.min(MAX_SKILL_LEVEL, newLevel))
+	// Check promotion (longer window)
+	if (history.length >= PROMOTE_WINDOW) {
+		const recentLong = history.slice(-PROMOTE_WINDOW)
+		const avgLong = calculateAverageScore(recentLong)
+		const promoteThreshold = PROMOTE_THRESHOLDS[currentLevel - 1] ?? 0.55
+		if (avgLong >= promoteThreshold && currentLevel < MAX_SKILL_LEVEL) {
+			return currentLevel + 1
+		}
+	}
+
+	return currentLevel
 }
 
 /**

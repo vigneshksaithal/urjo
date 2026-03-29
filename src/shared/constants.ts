@@ -2,27 +2,30 @@
  * Shared constants between client and server
  */
 
-export type Difficulty = 'easy' | 'medium' | 'hard'
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'diabolical'
 
 export type DifficultyLevel = {
 	level: number
-	gridSize: 4 | 6
+	gridSize: 4 | 6 | 8
 	difficulty: Difficulty
 	expectedTime: number // seconds
 }
 
 /**
- * The difficulty ladder: 6 levels from beginner to expert.
+ * The difficulty ladder: 9 levels from beginner to expert.
  * Level maps to (gridSize, difficulty) pair.
  * expectedTime is used for performance scoring -- tunable after playtesting.
  */
 export const DIFFICULTY_LADDER: readonly DifficultyLevel[] = [
-	{ level: 1, gridSize: 4, difficulty: 'easy', expectedTime: 10 },
-	{ level: 2, gridSize: 4, difficulty: 'medium', expectedTime: 20 },
-	{ level: 3, gridSize: 4, difficulty: 'hard', expectedTime: 30 },
-	{ level: 4, gridSize: 6, difficulty: 'easy', expectedTime: 60 },
-	{ level: 5, gridSize: 6, difficulty: 'medium', expectedTime: 90 },
-	{ level: 6, gridSize: 6, difficulty: 'hard', expectedTime: 120 },
+	{ level: 1, gridSize: 4, difficulty: 'easy',       expectedTime: 45  },
+	{ level: 2, gridSize: 4, difficulty: 'medium',     expectedTime: 90  },
+	{ level: 3, gridSize: 4, difficulty: 'hard',       expectedTime: 150 },
+	{ level: 4, gridSize: 6, difficulty: 'easy',       expectedTime: 120 },
+	{ level: 5, gridSize: 6, difficulty: 'medium',     expectedTime: 210 },
+	{ level: 6, gridSize: 6, difficulty: 'hard',       expectedTime: 360 },
+	{ level: 7, gridSize: 8, difficulty: 'easy',       expectedTime: 300 },
+	{ level: 8, gridSize: 8, difficulty: 'medium',     expectedTime: 480 },
+	{ level: 9, gridSize: 8, difficulty: 'diabolical', expectedTime: 720 },
 ] as const
 
 /** Default skill level for new users */
@@ -32,16 +35,29 @@ export const DEFAULT_SKILL_LEVEL = 1
 export const MIN_SKILL_LEVEL = 1
 
 /** Maximum skill level */
-export const MAX_SKILL_LEVEL = 6
+export const MAX_SKILL_LEVEL = 9
 
-/** Number of recent games to consider for level adjustment */
-export const HISTORY_SIZE = 5
+/** Number of recent games to consider for level adjustment. Must be >= PROMOTE_WINDOW. */
+export const HISTORY_SIZE = 20
 
-/** Average performance score threshold to promote (level up) */
-export const PROMOTE_THRESHOLD = 0.7
+/**
+ * Per-level promotion thresholds.
+ * Early levels are easier to promote from; later levels require more sustained performance.
+ * Index 0 = level 1, index 8 = level 9.
+ */
+export const PROMOTE_THRESHOLDS: readonly number[] = [0.46, 0.48, 0.50, 0.52, 0.54, 0.57, 0.60, 0.63, 0.66] as const
+
+/** Minimum games needed at current window to consider promotion */
+export const PROMOTE_WINDOW = 15
+
+/** Minimum games needed at current window to consider demotion */
+export const DEMOTE_WINDOW = 5
 
 /** Average performance score threshold to demote (level down) */
-export const DEMOTE_THRESHOLD = 0.3
+export const DEMOTE_THRESHOLD = 0.18
+
+/** Legacy single promote threshold — unused, kept for test compat */
+export const PROMOTE_THRESHOLD = 0.65
 
 /** Consecutive skips without a solve before forcing an immediate level demotion */
 export const CONSECUTIVE_SKIP_THRESHOLD = 2
@@ -99,6 +115,9 @@ export const COIN_SPEED_BONUS = 5
 
 /** Bonus coins for first solve of the day */
 export const COIN_DAILY_BONUS = 5
+
+/** Bonus coins for a perfect solve (0 mistakes) */
+export const COIN_PERFECT_BONUS = 10
 
 /** Multiplier for par time calculation (expectedTime * 2) */
 export const PAR_TIME_MULTIPLIER = 2

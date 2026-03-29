@@ -7,6 +7,7 @@ import {
     COIN_SPEED_BONUS,
     COIN_DAILY_BONUS,
     COIN_STREAK_MULTIPLIER,
+    COIN_PERFECT_BONUS,
 } from '../../../shared/constants'
 
 // ─── calculateCoinReward (pure — no Redis needed) ─────────────────────────────
@@ -14,41 +15,51 @@ import {
 import { describe, it } from 'vitest'
 
 describe('calculateCoinReward', () => {
-    it('total equals base + streakBonus + speedBonus + dailyBonus', () => {
-        const reward = calculateCoinReward(5, 1, 3, true)
-        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus)
+    it('total equals base + streakBonus + speedBonus + dailyBonus + perfectBonus', () => {
+        const reward = calculateCoinReward(5, 1, 3, true, 0)
+        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus)
     })
 
     it('includes COIN_SPEED_BONUS when timeTaken <= parTime (expectedTime * 2)', () => {
-        // level 1: expectedTime=10, parTime=20; timeTaken=20 is at par
-        const reward = calculateCoinReward(20, 1, 0, false)
+        // level 1: expectedTime=45, parTime=90; timeTaken=90 is at par
+        const reward = calculateCoinReward(90, 1, 0, false, 0)
         expect(reward.speedBonus).toBe(COIN_SPEED_BONUS)
     })
 
     it('does not include COIN_SPEED_BONUS when timeTaken > parTime', () => {
-        // level 1: parTime=20; timeTaken=21 exceeds par
-        const reward = calculateCoinReward(21, 1, 0, false)
+        // level 1: parTime=90; timeTaken=91 exceeds par
+        const reward = calculateCoinReward(91, 1, 0, false, 0)
         expect(reward.speedBonus).toBe(0)
     })
 
     it('includes COIN_DAILY_BONUS when isDailyFirst is true', () => {
-        const reward = calculateCoinReward(100, 1, 0, true)
+        const reward = calculateCoinReward(100, 1, 0, true, 0)
         expect(reward.dailyBonus).toBe(COIN_DAILY_BONUS)
     })
 
     it('does not include COIN_DAILY_BONUS when isDailyFirst is false', () => {
-        const reward = calculateCoinReward(100, 1, 0, false)
+        const reward = calculateCoinReward(100, 1, 0, false, 0)
         expect(reward.dailyBonus).toBe(0)
     })
 
     it('base is always COIN_BASE', () => {
-        const reward = calculateCoinReward(5, 1, 0, false)
+        const reward = calculateCoinReward(5, 1, 0, false, 0)
         expect(reward.base).toBe(COIN_BASE)
     })
 
     it('streakBonus equals currentStreak * COIN_STREAK_MULTIPLIER', () => {
-        const reward = calculateCoinReward(100, 1, 5, false)
+        const reward = calculateCoinReward(100, 1, 5, false, 0)
         expect(reward.streakBonus).toBe(5 * COIN_STREAK_MULTIPLIER)
+    })
+
+    it('perfectBonus is COIN_PERFECT_BONUS when mistakes=0', () => {
+        const reward = calculateCoinReward(100, 1, 0, false, 0)
+        expect(reward.perfectBonus).toBe(COIN_PERFECT_BONUS)
+    })
+
+    it('perfectBonus is 0 when mistakes > 0', () => {
+        const reward = calculateCoinReward(100, 1, 0, false, 1)
+        expect(reward.perfectBonus).toBe(0)
     })
 })
 
@@ -90,7 +101,7 @@ test('getUserStreakData returns defaults for new user', async () => {
 describe('Coin reward algebraic invariant — Property 8', () => {
     /**
      * Property 8: Coin reward algebraic invariant
-     * For any valid inputs, total === base + streakBonus + speedBonus + dailyBonus
+     * For any valid inputs, total === base + streakBonus + speedBonus + dailyBonus + perfectBonus
      * Validates: Requirements 4.1, 4.2, 4.3
      */
     it('total always equals sum of components for all input combinations', () => {
@@ -98,15 +109,18 @@ describe('Coin reward algebraic invariant — Property 8', () => {
         const levels = [1, 2, 3, 4, 5, 6]
         const streakValues = [0, 1, 3, 5, 10]
         const isDailyFirstValues = [true, false]
+        const mistakesValues = [0, 1, 3]
 
         for (const timeTaken of timeTakenValues) {
             for (const level of levels) {
                 for (const currentStreak of streakValues) {
                     for (const isDailyFirst of isDailyFirstValues) {
-                        const reward = calculateCoinReward(timeTaken, level, currentStreak, isDailyFirst)
-                        expect(reward.total).toBe(
-                            reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus
-                        )
+                        for (const mistakes of mistakesValues) {
+                            const reward = calculateCoinReward(timeTaken, level, currentStreak, isDailyFirst, mistakes)
+                            expect(reward.total).toBe(
+                                reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
+                            )
+                        }
                     }
                 }
             }

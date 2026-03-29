@@ -17,6 +17,7 @@
 		streakBonus: number;
 		speedBonus: number;
 		dailyBonus: number;
+		perfectBonus: number;
 		total: number;
 	};
 
@@ -34,6 +35,7 @@
 		coins?: number;
 		onOpenShop?: () => void;
 		timeTaken?: number;
+		mistakes?: number;
 	};
 
 	let {
@@ -50,6 +52,7 @@
 		coins,
 		onOpenShop,
 		timeTaken,
+		mistakes = 0,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -151,6 +154,9 @@
 								{#if coinReward.dailyBonus > 0}
 									<span>📅 +{coinReward.dailyBonus}</span>
 								{/if}
+								{#if coinReward.perfectBonus > 0}
+									<span>🎯 +{coinReward.perfectBonus}</span>
+								{/if}
 							</div>
 						</div>
 					{:else if streakData.currentStreak > 0}
@@ -159,6 +165,17 @@
 						>
 							🔥 {streakData.currentStreak}
 						</span>
+					{/if}
+
+					<!-- Perfect / mistakes badge -->
+					{#if mistakes === 0}
+						<div class="text-sm font-semibold text-green-400">
+							🎯 Perfect!
+						</div>
+					{:else}
+						<div class="text-sm text-yellow-400">
+							⚠️ {mistakes} mistake{mistakes === 1 ? "" : "s"}
+						</div>
 					{/if}
 
 					<!-- Primary CTA -->
@@ -208,7 +225,11 @@
 			</p>
 		{:else}
 			<p class="text-xs text-theme-text-muted text-center">
-				Tap to cycle colors
+				{#if mistakes === 0}
+					✓ Perfect so far
+				{:else}
+					Mistakes: {mistakes}
+				{/if}
 			</p>
 		{/if}
 	</footer>

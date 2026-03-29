@@ -13,6 +13,8 @@ import {
     MAX_SKILL_LEVEL,
     HISTORY_SIZE,
     CONSECUTIVE_SKIP_THRESHOLD,
+    PROMOTE_WINDOW,
+    DEMOTE_WINDOW,
 } from '../../../shared/constants'
 import type { GameRecord } from '../../../shared/types'
 
@@ -29,25 +31,44 @@ const fastHistory = (level: number, count: number): GameRecord[] =>
     Array.from({ length: count }, () => makeRecord(level, 0))
 
 const slowHistory = (level: number, count: number): GameRecord[] =>
-    Array.from({ length: count }, () => makeRecord(level, 100))
+    Array.from({ length: count }, () => makeRecord(level, 10000))
 
 // ─── calculatePerformanceScore ────────────────────────────────────────────────
 
 describe('calculatePerformanceScore', () => {
-    it('returns 1.0 for instant solve (timeTaken=0)', () => {
+    it('returns 1.0 for instant solve with 0 mistakes (timeTaken=0)', () => {
         expect(calculatePerformanceScore(0, 1)).toBe(1.0)
     })
 
-    it('returns 0.5 when timeTaken equals expectedTime (level 1: expectedTime=10)', () => {
-        expect(calculatePerformanceScore(10, 1)).toBe(0.5)
+    it('returns 0.5 when timeTaken equals expectedTime (level 1: expectedTime=45)', () => {
+        expect(calculatePerformanceScore(45, 1)).toBe(0.5)
     })
 
-    it('returns 0.0 when timeTaken equals 2 * expectedTime (level 1: timeTaken=20)', () => {
-        expect(calculatePerformanceScore(20, 1)).toBe(0.0)
+    it('returns 0.0 when timeTaken equals 2 * expectedTime (level 1: timeTaken=90)', () => {
+        expect(calculatePerformanceScore(90, 1)).toBe(0.0)
     })
 
     it('returns 0.0 (clamped) when timeTaken > 2 * expectedTime (level 1: timeTaken=100)', () => {
         expect(calculatePerformanceScore(100, 1)).toBe(0.0)
+    })
+
+    it('reduces score by 0.20 per mistake', () => {
+        // instant solve → timeScore=1.0; 1 mistake → 1.0 - 0.20 = 0.80
+        expect(calculatePerformanceScore(0, 1, 1)).toBeCloseTo(0.80)
+        // instant solve; 2 mistakes → 1.0 - 0.40 = 0.60
+        expect(calculatePerformanceScore(0, 1, 2)).toBeCloseTo(0.60)
+    })
+
+    it('clamps to 0 when penalty exceeds time score', () => {
+        // timeTaken=90 → timeScore=0.0; any mistakes → still 0
+        expect(calculatePerformanceScore(90, 1, 3)).toBe(0.0)
+        // timeTaken=45 → timeScore=0.5; 3 mistakes → 0.5 - 0.60 = clamped to 0
+        expect(calculatePerformanceScore(45, 1, 3)).toBe(0.0)
+    })
+
+    it('mistake penalty is capped at 1.0 total (5 mistakes = -1.0 max, not -1.25)', () => {
+        // Even 6 mistakes: penalty capped at 1.0, so result = max(0, timeScore - 1.0) = 0
+        expect(calculatePerformanceScore(0, 1, 6)).toBe(0.0)
     })
 })
 
@@ -61,7 +82,7 @@ describe('calculateSkipScore', () => {
     })
 
     it('returns a value in [-0.5, -0.2] for timeSpent=expectedTime, level=1', () => {
-        const score = calculateSkipScore(10, 1)
+        const score = calculateSkipScore(45, 1)
         expect(score).toBeGreaterThanOrEqual(-0.5)
         expect(score).toBeLessThanOrEqual(-0.2)
     })
@@ -71,8 +92,8 @@ describe('calculateSkipScore', () => {
     })
 
     it('returns -0.2 for slow skip (timeSpent >= expectedTime * 0.5)', () => {
-        // level 1: expectedTime=10, threshold=5; timeSpent=5 → quicknessFactor=0
-        expect(calculateSkipScore(5, 1)).toBe(-0.2)
+        // level 1: expectedTime=45, threshold=22.5; timeSpent=23 → quicknessFactor=0
+        expect(calculateSkipScore(23, 1)).toBe(-0.2)
     })
 })
 
@@ -91,22 +112,27 @@ describe('determineSkillLevel', () => {
         expect(determineSkillLevel(3, [])).toBe(3)
     })
 
-    it('promotes (currentLevel + 1) when average score >= 0.70', () => {
-        // fast solves at level 1 → score 1.0 each → avg 1.0 >= 0.70
-        expect(determineSkillLevel(1, fastHistory(1, 3))).toBe(2)
+    it('promotes (currentLevel + 1) when sustained fast solves exceed PROMOTE_WINDOW', () => {
+        // Need PROMOTE_WINDOW (15) fast solves to trigger promotion at level 1
+        expect(determineSkillLevel(1, fastHistory(1, PROMOTE_WINDOW))).toBe(2)
     })
 
-    it('demotes (currentLevel - 1) when average score <= 0.30', () => {
-        // slow solves (timeTaken=100) at level 3 (expectedTime=30) → score 0.0 → avg 0.0 <= 0.30
-        expect(determineSkillLevel(3, slowHistory(3, 3))).toBe(2)
+    it('does NOT promote with fewer than PROMOTE_WINDOW games', () => {
+        // Only 5 fast solves — not enough to promote
+        expect(determineSkillLevel(1, fastHistory(1, 5))).toBe(1)
     })
 
-    it('does NOT promote beyond MAX_SKILL_LEVEL (level 6)', () => {
-        expect(determineSkillLevel(6, fastHistory(6, 3))).toBe(6)
+    it('demotes (currentLevel - 1) when last DEMOTE_WINDOW games are very slow', () => {
+        // Need DEMOTE_WINDOW (5) very slow solves to trigger demotion at level 3
+        expect(determineSkillLevel(3, slowHistory(3, DEMOTE_WINDOW))).toBe(2)
+    })
+
+    it('does NOT demote beyond MAX_SKILL_LEVEL (level 9)', () => {
+        expect(determineSkillLevel(9, fastHistory(9, PROMOTE_WINDOW))).toBe(9)
     })
 
     it('does NOT demote below MIN_SKILL_LEVEL (level 1)', () => {
-        expect(determineSkillLevel(1, slowHistory(1, 3))).toBe(1)
+        expect(determineSkillLevel(1, slowHistory(1, DEMOTE_WINDOW))).toBe(1)
     })
 })
 
@@ -127,7 +153,7 @@ describe('shouldForceDemotion', () => {
 // ─── addGameRecord ────────────────────────────────────────────────────────────
 
 describe('addGameRecord', () => {
-    it('caps history at HISTORY_SIZE (5): adding a 6th record drops the oldest', () => {
+    it('caps history at HISTORY_SIZE (20): adding a 21st record drops the oldest', () => {
         const history = Array.from({ length: HISTORY_SIZE }, (_, i) => makeRecord(1, i))
         const newRecord = makeRecord(1, 99)
         const result = addGameRecord(history, newRecord)
@@ -199,17 +225,20 @@ describe('parseHistory', () => {
 describe('Performance score bounded output — Property 2', () => {
     /**
      * Property 2: Performance score bounded output
-     * For any positive timeTaken and valid level in [1, 6], result is in [0.0, 1.0]
+     * For any positive timeTaken, valid level in [1, 6], and any mistakes >= 0, result is in [0.0, 1.0]
      * Validates: Requirement 3.4
      */
     it('calculatePerformanceScore always returns a value in [0.0, 1.0]', () => {
         const times = [0, 1, 5, 10, 20, 50, 100, 1000]
         const levels = [1, 2, 3, 4, 5, 6]
+        const mistakeCounts = [0, 1, 2, 3, 5, 10]
         for (const level of levels) {
             for (const timeTaken of times) {
-                const score = calculatePerformanceScore(timeTaken, level)
-                expect(score).toBeGreaterThanOrEqual(0.0)
-                expect(score).toBeLessThanOrEqual(1.0)
+                for (const mistakes of mistakeCounts) {
+                    const score = calculatePerformanceScore(timeTaken, level, mistakes)
+                    expect(score).toBeGreaterThanOrEqual(0.0)
+                    expect(score).toBeLessThanOrEqual(1.0)
+                }
             }
         }
     })

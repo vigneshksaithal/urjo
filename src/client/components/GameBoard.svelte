@@ -22,7 +22,7 @@
 		`grid-template-columns: repeat(${gridSize}, 1fr)`,
 	);
 	const maxWidth = $derived(
-		gridSize === 6 ? "max-w-[400px]" : "max-w-[340px]",
+		gridSize === 8 ? "max-w-[480px]" : gridSize === 6 ? "max-w-[400px]" : "max-w-[340px]",
 	);
 </script>
 

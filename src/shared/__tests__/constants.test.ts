@@ -26,12 +26,12 @@ describe('getLevelConfig', () => {
         expect(getLevelConfig(-5).level).toBe(1)
     })
 
-    it('clamps level 7 to level 6 config', () => {
-        expect(getLevelConfig(7).level).toBe(6)
+    it('clamps level 10 to level 9 config (MAX_SKILL_LEVEL)', () => {
+        expect(getLevelConfig(10).level).toBe(MAX_SKILL_LEVEL)
     })
 
-    it('clamps level 99 to level 6 config', () => {
-        expect(getLevelConfig(99).level).toBe(6)
+    it('clamps level 99 to level 9 config (MAX_SKILL_LEVEL)', () => {
+        expect(getLevelConfig(99).level).toBe(MAX_SKILL_LEVEL)
     })
 })
 

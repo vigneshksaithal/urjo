@@ -11,12 +11,14 @@
 	import TutorialView from "./views/TutorialView.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
+	import { mistakeCount, onCellChange, onPuzzleComplete, resetMistakes, setSolution } from "./stores/mistakes";
 
 	type CoinReward = {
 		base: number;
 		streakBonus: number;
 		speedBonus: number;
 		dailyBonus: number;
+		perfectBonus: number;
 		total: number;
 	};
 
@@ -114,6 +116,8 @@
 			hasShared = false;
 			startTime = Date.now();
 			coinReward = undefined;
+			resetMistakes();
+			setSolution(data.puzzle.solution, data.puzzle.gridSize);
 
 			if (!data.tutorialCompleted) {
 				currentView = "tutorial";
@@ -150,6 +154,9 @@
 		if (!cell) return;
 		if (cell.locked) return;
 
+		// Track mistakes: check previous cell when moving to a new one
+		onCellChange(row, col, color, (r, c) => grid[r]?.[c]?.color ?? null);
+
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
 			ri === row
@@ -166,6 +173,8 @@
 		if (boardString === puzzleSolution) {
 			isCompleted = true;
 			timeTaken = Math.round((Date.now() - startTime) / 1000);
+			// Check last active cell before reporting
+			onPuzzleComplete((r, c) => grid[r]?.[c]?.color ?? null);
 			reportCompletion(timeTaken);
 		}
 	}
@@ -178,7 +187,7 @@
 			const response = await fetch("/api/game/complete", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ timeTaken: time }),
+				body: JSON.stringify({ timeTaken: time, mistakes: $mistakeCount }),
 			});
 
 			if (response.ok) {
@@ -250,6 +259,8 @@
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
 			startTime = Date.now();
+			resetMistakes();
+			setSolution(data.puzzle.solution, data.puzzle.gridSize);
 		} catch (error) {
 			errorMessage =
 				error instanceof Error
@@ -258,10 +269,6 @@
 			currentView = "error";
 		}
 	}
-
-	/**
-	 * Handle "Restart" button (purely client-side).
-	 */
 	function handleRestart() {
 		grid = deserializeGrid(
 			puzzleColors,
@@ -271,6 +278,8 @@
 		);
 		isCompleted = false;
 		startTime = Date.now();
+		resetMistakes();
+		setSolution(puzzleSolution, gridSize);
 	}
 
 	/**
@@ -318,6 +327,7 @@
 			hasShared,
 			coins,
 			timeTaken,
+			mistakes: $mistakeCount,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
