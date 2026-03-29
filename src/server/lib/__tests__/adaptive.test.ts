@@ -29,7 +29,7 @@ const fastHistory = (level: number, count: number): GameRecord[] =>
     Array.from({ length: count }, () => makeRecord(level, 0))
 
 const slowHistory = (level: number, count: number): GameRecord[] =>
-    Array.from({ length: count }, () => makeRecord(level, 100))
+    Array.from({ length: count }, () => makeRecord(level, 10000))
 
 // ─── calculatePerformanceScore ────────────────────────────────────────────────
 
@@ -38,12 +38,12 @@ describe('calculatePerformanceScore', () => {
         expect(calculatePerformanceScore(0, 1)).toBe(1.0)
     })
 
-    it('returns 0.5 when timeTaken equals expectedTime (level 1: expectedTime=10)', () => {
-        expect(calculatePerformanceScore(10, 1)).toBe(0.5)
+    it('returns 0.5 when timeTaken equals expectedTime (level 1: expectedTime=45)', () => {
+        expect(calculatePerformanceScore(45, 1)).toBe(0.5)
     })
 
-    it('returns 0.0 when timeTaken equals 2 * expectedTime (level 1: timeTaken=20)', () => {
-        expect(calculatePerformanceScore(20, 1)).toBe(0.0)
+    it('returns 0.0 when timeTaken equals 2 * expectedTime (level 1: timeTaken=90)', () => {
+        expect(calculatePerformanceScore(90, 1)).toBe(0.0)
     })
 
     it('returns 0.0 (clamped) when timeTaken > 2 * expectedTime (level 1: timeTaken=100)', () => {
@@ -61,7 +61,7 @@ describe('calculateSkipScore', () => {
     })
 
     it('returns a value in [-0.5, -0.2] for timeSpent=expectedTime, level=1', () => {
-        const score = calculateSkipScore(10, 1)
+        const score = calculateSkipScore(45, 1)
         expect(score).toBeGreaterThanOrEqual(-0.5)
         expect(score).toBeLessThanOrEqual(-0.2)
     })
@@ -71,8 +71,8 @@ describe('calculateSkipScore', () => {
     })
 
     it('returns -0.2 for slow skip (timeSpent >= expectedTime * 0.5)', () => {
-        // level 1: expectedTime=10, threshold=5; timeSpent=5 → quicknessFactor=0
-        expect(calculateSkipScore(5, 1)).toBe(-0.2)
+        // level 1: expectedTime=45, threshold=22.5; timeSpent=23 → quicknessFactor=0
+        expect(calculateSkipScore(23, 1)).toBe(-0.2)
     })
 })
 
@@ -96,13 +96,13 @@ describe('determineSkillLevel', () => {
         expect(determineSkillLevel(1, fastHistory(1, 3))).toBe(2)
     })
 
-    it('demotes (currentLevel - 1) when average score <= 0.30', () => {
-        // slow solves (timeTaken=100) at level 3 (expectedTime=30) → score 0.0 → avg 0.0 <= 0.30
+    it('demotes (currentLevel - 1) when average score <= 0.25', () => {
+        // slow solves (timeTaken=1000) at level 3 (expectedTime=150) → score 0.0 → avg 0.0 <= 0.25
         expect(determineSkillLevel(3, slowHistory(3, 3))).toBe(2)
     })
 
-    it('does NOT promote beyond MAX_SKILL_LEVEL (level 6)', () => {
-        expect(determineSkillLevel(6, fastHistory(6, 3))).toBe(6)
+    it('does NOT promote beyond MAX_SKILL_LEVEL (level 9)', () => {
+        expect(determineSkillLevel(9, fastHistory(9, 3))).toBe(9)
     })
 
     it('does NOT demote below MIN_SKILL_LEVEL (level 1)', () => {
@@ -127,7 +127,7 @@ describe('shouldForceDemotion', () => {
 // ─── addGameRecord ────────────────────────────────────────────────────────────
 
 describe('addGameRecord', () => {
-    it('caps history at HISTORY_SIZE (5): adding a 6th record drops the oldest', () => {
+    it('caps history at HISTORY_SIZE (10): adding an 11th record drops the oldest', () => {
         const history = Array.from({ length: HISTORY_SIZE }, (_, i) => makeRecord(1, i))
         const newRecord = makeRecord(1, 99)
         const result = addGameRecord(history, newRecord)

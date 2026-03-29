@@ -20,14 +20,14 @@ describe('calculateCoinReward', () => {
     })
 
     it('includes COIN_SPEED_BONUS when timeTaken <= parTime (expectedTime * 2)', () => {
-        // level 1: expectedTime=10, parTime=20; timeTaken=20 is at par
-        const reward = calculateCoinReward(20, 1, 0, false)
+        // level 1: expectedTime=45, parTime=90; timeTaken=90 is at par
+        const reward = calculateCoinReward(90, 1, 0, false)
         expect(reward.speedBonus).toBe(COIN_SPEED_BONUS)
     })
 
     it('does not include COIN_SPEED_BONUS when timeTaken > parTime', () => {
-        // level 1: parTime=20; timeTaken=21 exceeds par
-        const reward = calculateCoinReward(21, 1, 0, false)
+        // level 1: parTime=90; timeTaken=91 exceeds par
+        const reward = calculateCoinReward(91, 1, 0, false)
         expect(reward.speedBonus).toBe(0)
     })
 
