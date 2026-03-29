@@ -13,6 +13,8 @@ import {
     MAX_SKILL_LEVEL,
     HISTORY_SIZE,
     CONSECUTIVE_SKIP_THRESHOLD,
+    PROMOTE_WINDOW,
+    DEMOTE_WINDOW,
 } from '../../../shared/constants'
 import type { GameRecord } from '../../../shared/types'
 
@@ -91,22 +93,27 @@ describe('determineSkillLevel', () => {
         expect(determineSkillLevel(3, [])).toBe(3)
     })
 
-    it('promotes (currentLevel + 1) when average score >= 0.70', () => {
-        // fast solves at level 1 → score 1.0 each → avg 1.0 >= 0.70
-        expect(determineSkillLevel(1, fastHistory(1, 3))).toBe(2)
+    it('promotes (currentLevel + 1) when sustained fast solves exceed PROMOTE_WINDOW', () => {
+        // Need PROMOTE_WINDOW (15) fast solves to trigger promotion at level 1
+        expect(determineSkillLevel(1, fastHistory(1, PROMOTE_WINDOW))).toBe(2)
     })
 
-    it('demotes (currentLevel - 1) when average score <= 0.25', () => {
-        // slow solves (timeTaken=1000) at level 3 (expectedTime=150) → score 0.0 → avg 0.0 <= 0.25
-        expect(determineSkillLevel(3, slowHistory(3, 3))).toBe(2)
+    it('does NOT promote with fewer than PROMOTE_WINDOW games', () => {
+        // Only 5 fast solves — not enough to promote
+        expect(determineSkillLevel(1, fastHistory(1, 5))).toBe(1)
     })
 
-    it('does NOT promote beyond MAX_SKILL_LEVEL (level 9)', () => {
-        expect(determineSkillLevel(9, fastHistory(9, 3))).toBe(9)
+    it('demotes (currentLevel - 1) when last DEMOTE_WINDOW games are very slow', () => {
+        // Need DEMOTE_WINDOW (5) very slow solves to trigger demotion at level 3
+        expect(determineSkillLevel(3, slowHistory(3, DEMOTE_WINDOW))).toBe(2)
+    })
+
+    it('does NOT demote beyond MAX_SKILL_LEVEL (level 9)', () => {
+        expect(determineSkillLevel(9, fastHistory(9, PROMOTE_WINDOW))).toBe(9)
     })
 
     it('does NOT demote below MIN_SKILL_LEVEL (level 1)', () => {
-        expect(determineSkillLevel(1, slowHistory(1, 3))).toBe(1)
+        expect(determineSkillLevel(1, slowHistory(1, DEMOTE_WINDOW))).toBe(1)
     })
 })
 

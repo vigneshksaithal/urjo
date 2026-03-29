@@ -15,7 +15,9 @@ import {
 	MIN_SKILL_LEVEL,
 	MAX_SKILL_LEVEL,
 	HISTORY_SIZE,
-	PROMOTE_THRESHOLD,
+	PROMOTE_THRESHOLDS,
+	PROMOTE_WINDOW,
+	DEMOTE_WINDOW,
 	DEMOTE_THRESHOLD,
 	SKIP_BASE_PENALTY,
 	SKIP_MAX_EXTRA_PENALTY,
@@ -81,25 +83,36 @@ export const calculateAverageScore = (history: GameRecord[]): number => {
 /**
  * Determine the new skill level based on recent game history.
  *
- * Rules:
- * - Average score >= PROMOTE_THRESHOLD (0.70) → level up
- * - Average score <= DEMOTE_THRESHOLD (0.30) → level down
- * - Otherwise → stay at current level
- * - Clamped to [MIN_SKILL_LEVEL, MAX_SKILL_LEVEL]
+ * Asymmetric windows:
+ * - Demotion: uses last DEMOTE_WINDOW (5) games — quick to respond to struggles
+ * - Promotion: uses last PROMOTE_WINDOW (15) games — requires sustained performance
+ *
+ * Per-level promotion thresholds (harder to promote at higher levels).
+ * Demotion threshold is fixed at DEMOTE_THRESHOLD (0.18).
  */
 export const determineSkillLevel = (currentLevel: number, history: GameRecord[]): number => {
 	if (history.length === 0) return currentLevel
 
-	const avgScore = calculateAverageScore(history)
-
-	let newLevel = currentLevel
-	if (avgScore >= PROMOTE_THRESHOLD && currentLevel < MAX_SKILL_LEVEL) {
-		newLevel = currentLevel + 1
-	} else if (avgScore <= DEMOTE_THRESHOLD && currentLevel > MIN_SKILL_LEVEL) {
-		newLevel = currentLevel - 1
+	// Check demotion first (short window)
+	if (history.length >= DEMOTE_WINDOW) {
+		const recentShort = history.slice(-DEMOTE_WINDOW)
+		const avgShort = calculateAverageScore(recentShort)
+		if (avgShort <= DEMOTE_THRESHOLD && currentLevel > MIN_SKILL_LEVEL) {
+			return currentLevel - 1
+		}
 	}
 
-	return Math.max(MIN_SKILL_LEVEL, Math.min(MAX_SKILL_LEVEL, newLevel))
+	// Check promotion (longer window)
+	if (history.length >= PROMOTE_WINDOW) {
+		const recentLong = history.slice(-PROMOTE_WINDOW)
+		const avgLong = calculateAverageScore(recentLong)
+		const promoteThreshold = PROMOTE_THRESHOLDS[currentLevel - 1] ?? 0.55
+		if (avgLong >= promoteThreshold && currentLevel < MAX_SKILL_LEVEL) {
+			return currentLevel + 1
+		}
+	}
+
+	return currentLevel
 }
 
 /**

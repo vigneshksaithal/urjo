@@ -40,11 +40,24 @@ export const MAX_SKILL_LEVEL = 9
 /** Number of recent games to consider for level adjustment */
 export const HISTORY_SIZE = 10
 
-/** Average performance score threshold to promote (level up) */
-export const PROMOTE_THRESHOLD = 0.65
+/**
+ * Per-level promotion thresholds.
+ * Early levels are easier to promote from; later levels require more sustained performance.
+ * Index 0 = level 1, index 8 = level 9.
+ */
+export const PROMOTE_THRESHOLDS: readonly number[] = [0.42, 0.44, 0.46, 0.50, 0.52, 0.55, 0.58, 0.60, 0.62] as const
+
+/** Minimum games needed at current window to consider promotion */
+export const PROMOTE_WINDOW = 15
+
+/** Minimum games needed at current window to consider demotion */
+export const DEMOTE_WINDOW = 5
 
 /** Average performance score threshold to demote (level down) */
-export const DEMOTE_THRESHOLD = 0.25
+export const DEMOTE_THRESHOLD = 0.18
+
+/** Legacy single promote threshold — unused, kept for test compat */
+export const PROMOTE_THRESHOLD = 0.65
 
 /** Consecutive skips without a solve before forcing an immediate level demotion */
 export const CONSECUTIVE_SKIP_THRESHOLD = 2
