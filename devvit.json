@@ -46,7 +46,7 @@
     }
   },
   "dev": {
-    "subreddit": "urjo"
+    "subreddit": "cat543"
   },
   "scripts": {
     "dev": "vite build --watch",
