@@ -81,6 +81,10 @@ export type LeaderboardData = {
 export type ShareRequest = {
 	timeTaken: number
 	streak: number
+	puzzleColors: string // "rbbrr..." string
+	gridSize: number // 4, 6, or 8
+	skillLevel: number // 1-9
+	mistakes: number // mistake count
 }
 
 /** Share score response */
@@ -88,6 +92,20 @@ export type ShareResponse = {
 	success: boolean
 	shared?: boolean
 	alreadyShared?: boolean
+}
+
+/** Challenge post request */
+export type ChallengeRequest = {
+	timeTaken: number
+	skillLevel: number
+	mistakes: number
+}
+
+/** Challenge post response */
+export type ChallengeResponse = {
+	success: boolean
+	postUrl?: string
+	error?: string
 }
 
 // ─── Economy Types ─────────────────────────────────────────────────────────────

@@ -53,7 +53,10 @@
 		lastPlayedDate: null,
 	});
 	let timeTaken = $state(0);
+	let skillLevel = $state(1);
 	let hasShared = $state(false);
+	let hasChallenged = $state(false);
+	let challengeUrl = $state<string | null>(null);
 	let showShop = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
@@ -100,6 +103,7 @@
 			puzzleSolution = data.puzzle.solution;
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
+			skillLevel = data.skillLevel;
 
 			// Update streak data
 			if (data.streak) {
@@ -114,6 +118,8 @@
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
 			hasShared = false;
+			hasChallenged = false;
+			challengeUrl = null;
 			startTime = Date.now();
 			coinReward = undefined;
 			resetMistakes();
@@ -218,6 +224,10 @@
 				body: JSON.stringify({
 					timeTaken,
 					streak: streakData.currentStreak,
+					puzzleColors,
+					gridSize,
+					skillLevel,
+					mistakes: $mistakeCount,
 				}),
 			});
 
@@ -233,9 +243,38 @@
 	}
 
 	/**
+	 * Handle challenge post creation.
+	 */
+	async function handleChallenge() {
+		if (hasChallenged) return;
+		try {
+			const response = await fetch("/api/game/challenge", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					timeTaken,
+					skillLevel,
+					mistakes: $mistakeCount,
+				}),
+			});
+			if (response.ok) {
+				const data = await response.json();
+				if (data.success) {
+					hasChallenged = true;
+					challengeUrl = data.postUrl ?? null;
+				}
+			}
+		} catch {
+			// Non-critical
+		}
+	}
+
+	/**
 	 * Handle "Next Challenge" button.
 	 */
 	async function handleNextChallenge() {
+		hasChallenged = false;
+		challengeUrl = null;
 		try {
 			const timeSpent = Math.round((Date.now() - startTime) / 1000);
 			const response = await fetch("/api/game/next-challenge", {
@@ -251,6 +290,7 @@
 			puzzleNumbers = data.puzzle.numbers;
 			puzzleSolution = data.puzzle.solution;
 			gridSize = data.puzzle.gridSize;
+			skillLevel = data.skillLevel;
 			grid = deserializeGrid(
 				data.puzzle.colors,
 				data.puzzle.numbers,
@@ -270,6 +310,8 @@
 		}
 	}
 	function handleRestart() {
+		hasChallenged = false;
+		challengeUrl = null;
 		grid = deserializeGrid(
 			puzzleColors,
 			puzzleNumbers,
@@ -325,6 +367,8 @@
 			isCompleted,
 			streakData,
 			hasShared,
+			hasChallenged,
+			challengeUrl,
 			coins,
 			timeTaken,
 			mistakes: $mistakeCount,
@@ -332,6 +376,7 @@
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
 			onShare: handleShare,
+			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
 		}}
 		{#if coinReward}
