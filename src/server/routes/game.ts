@@ -16,6 +16,8 @@ import type {
 	LeaderboardEntry,
 	ShareRequest,
 	ShareResponse,
+	ChallengeRequest,
+	ChallengeResponse,
 	SerializedPuzzle,
 } from '../../shared/types'
 import { DEFAULT_SKILL_LEVEL, MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
@@ -496,7 +498,7 @@ gameRouter.post('/api/game/share', async (c) => {
 
 	try {
 		const body: ShareRequest = await c.req.json()
-		const { timeTaken, streak } = body
+		const { timeTaken, streak, puzzleColors, gridSize, skillLevel, mistakes } = body
 
 		const sharedKey = `user:${userId}:shared:${postId}`
 		const alreadyShared = await redis.get(sharedKey)
@@ -505,7 +507,18 @@ gameRouter.post('/api/game/share', async (c) => {
 			return c.json({ success: false, alreadyShared: true })
 		}
 
-		const commentText = `🎯 I solved today's Urjo puzzle in ${timeTaken}s! 🔥 ${streak} day streak | Play at r/urjo`
+		// Build emoji grid
+		const emojiMap: Record<string, string> = { r: '🟥', b: '🟦' }
+		const cells = puzzleColors.split('').map((ch) => emojiMap[ch] ?? '⬛')
+		const rows: string[] = []
+		for (let i = 0; i < cells.length; i += gridSize) {
+			rows.push(cells.slice(i, i + gridSize).join(''))
+		}
+		const emojiGrid = rows.join('\n')
+
+		const perfTag = mistakes === 0 ? 'Perfect! ✨' : `⚠️ ${mistakes} mistake${mistakes === 1 ? '' : 's'}`
+		const statsLine = `⏱️ ${timeTaken}s · 🎯 Level ${skillLevel} · 🔥 ${streak} day streak · ${perfTag}`
+		const commentText = `${emojiGrid}\n\n${statsLine}\nPlay → r/urjo`
 
 		await reddit.submitComment({
 			id: postId,
@@ -539,5 +552,82 @@ gameRouter.post('/api/game/tutorial-complete', async (c) => {
 	} catch (error) {
 		console.error('Error marking tutorial complete:', error)
 		return c.json({ error: 'Failed to mark tutorial complete' }, 500)
+	}
+})
+
+// ─── POST /api/game/challenge ─────────────────────────────────────────────────
+
+gameRouter.post('/api/game/challenge', async (c) => {
+	const { postId, userId, subredditName } = context
+
+	if (!postId || !userId) return c.json({ error: 'Missing context' }, 400)
+
+	try {
+		const body: ChallengeRequest = await c.req.json()
+		const { timeTaken, skillLevel, mistakes } = body
+
+		// Rate limit: one challenge post per user per day
+		const today = getTodayUTC()
+		const challengeKey = `user:${userId}:challenge:${today}`
+		const alreadyChallenged = await redis.get(challengeKey)
+		if (alreadyChallenged === 'true') {
+			return c.json<ChallengeResponse>({ success: false, error: 'Already created a challenge today' })
+		}
+
+		// Get current puzzle for this post
+		const puzzle = await getCurrentPuzzle(postId, userId)
+		if (!puzzle) return c.json<ChallengeResponse>({ success: false, error: 'No puzzle found' })
+
+		// Get username directly from Reddit API to avoid "You" fallback
+		let username = 'Anon'
+		try {
+			const user = await reddit.getUserById(userId as `t2_${string}`)
+			username = user?.username ?? 'Anon'
+		} catch {
+			// fallback to Anon
+		}
+
+		// Build title
+		const perfectTag = mistakes === 0 ? ' (perfect!)' : ''
+		const title = `u/${username} solved Level ${skillLevel} in ${timeTaken}s${perfectTag} — can YOU beat it? 🎯`
+
+		if (!subredditName) return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' })
+
+		const newPost = await reddit.submitCustomPost({
+			subredditName,
+			title,
+			postData: {
+				postType: 'urjo-puzzle',
+			},
+		})
+
+		// Seed the new post with the same puzzle
+		await redis.hSet(`game:${newPost.id}:puzzle`, {
+			colors: puzzle.colors,
+			numbers: puzzle.numbers,
+			solution: puzzle.solution,
+			difficulty: puzzle.difficulty,
+			gridSize: puzzle.gridSize,
+			created: new Date().toISOString(),
+			challengeBy: userId,
+			challengeScore: timeTaken.toString(),
+		})
+
+		await redis.hSet(`game:${newPost.id}:meta`, {
+			postType: 'urjo-puzzle',
+		})
+
+		// Mark rate limit
+		await redis.set(challengeKey, 'true')
+		await redis.expire(challengeKey, 86400)
+
+		// Post a comment on the challenge post showing the score to beat
+		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`} at Level ${skillLevel}\n\nThink you can do better? Solve the puzzle above! 🎯`
+		await reddit.submitComment({ id: newPost.id, text: scoreComment })
+
+		return c.json<ChallengeResponse>({ success: true, postUrl: `https://reddit.com/${newPost.id}` })
+	} catch (error) {
+		console.error('Challenge post error:', error)
+		return c.json<ChallengeResponse>({ success: false, error: 'Failed to create challenge' })
 	}
 })

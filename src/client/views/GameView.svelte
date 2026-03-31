@@ -30,7 +30,10 @@
 		onRestart: () => void;
 		streakData: StreakData;
 		hasShared: boolean;
+		hasChallenged: boolean;
+		challengeUrl: string | null;
 		onShare: () => void;
+		onChallenge: () => void;
 		coinReward?: CoinReward;
 		coins?: number;
 		onOpenShop?: () => void;
@@ -47,7 +50,10 @@
 		onRestart,
 		streakData,
 		hasShared,
+		hasChallenged,
+		challengeUrl,
 		onShare,
+		onChallenge,
 		coinReward,
 		coins,
 		onOpenShop,
@@ -202,6 +208,20 @@
 							{:else}
 								<Share2 class="w-4 h-4" />
 								<span>Share</span>
+							{/if}
+						</button>
+						<button
+							onclick={onChallenge}
+							disabled={hasChallenged}
+							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
+								text-sm hover:bg-theme-hover active:scale-95 transition-all
+								disabled:opacity-50 disabled:cursor-not-allowed
+								flex items-center justify-center gap-2"
+						>
+							{#if hasChallenged}
+								<span>⚔️ Challenged!</span>
+							{:else}
+								<span>⚔️ Challenge</span>
 							{/if}
 						</button>
 						<button
