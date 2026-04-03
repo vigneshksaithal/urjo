@@ -787,7 +787,7 @@ function generateClues(
 
 	// Phase 1: Remove numbers from cells (keep color, drop number).
 	for (const { row, col } of shuffle(positions)) {
-		if (countNumbers(puzzle, gridSize) <= targets.minNumbers) break
+		if (countNumbers(puzzle, gridSize) <= targets!.minNumbers) break
 
 		const cell = puzzle[row]![col]!
 		if (!cell.locked || cell.number === null) continue
@@ -802,12 +802,12 @@ function generateClues(
 
 	// Phase 2: Remove entire cells (make empty).
 	for (const { row, col } of shuffle(positions)) {
-		if (countClues(puzzle, gridSize) <= targets.minClues) break
+		if (countClues(puzzle, gridSize) <= targets!.minClues) break
 
 		const cell = puzzle[row]![col]!
 		if (!cell.locked) continue
 
-		if (cell.number !== null && countNumbers(puzzle, gridSize) <= targets.minNumbers) continue
+		if (cell.number !== null && countNumbers(puzzle, gridSize) <= targets!.minNumbers) continue
 
 		const saved = { ...cell }
 
@@ -820,7 +820,7 @@ function generateClues(
 
 	// Phase 3: Final cleanup — try removing numbers from remaining locked cells.
 	for (const { row, col } of shuffle(positions)) {
-		if (countNumbers(puzzle, gridSize) <= targets.minNumbers) break
+		if (countNumbers(puzzle, gridSize) <= targets!.minNumbers) break
 
 		const cell = puzzle[row]![col]!
 		if (!cell.locked || cell.number === null) continue
