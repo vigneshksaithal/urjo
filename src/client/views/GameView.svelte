@@ -51,7 +51,6 @@
 		streakData,
 		hasShared,
 		hasChallenged,
-		challengeUrl,
 		onShare,
 		onChallenge,
 		coinReward,
