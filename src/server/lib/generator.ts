@@ -757,6 +757,7 @@ function generateClues(
 	const sizeTargets = DIFFICULTY_TARGETS[gridSize]
 	if (!sizeTargets) throw new Error(`Unsupported grid size: ${gridSize}`)
 	const targets = sizeTargets[difficulty]
+	if (!targets) throw new Error(`Unsupported difficulty: ${difficulty}`)
 
 	// Compute neighbor counts for every cell in the solution
 	const neighborCounts: number[][] = []
