@@ -35,7 +35,6 @@
 	type View = "game" | "tutorial" | "error";
 
 	const PLACEHOLDER_COLORS = "brbbrbbrbrbbrbrbbrbbrbbrbrbbrbrbbrbbrbbrbbrb";
-	const PLACEHOLDER_NUMBERS = "----------------";
 
 	let currentView = $state<View>("game");
 	let grid = $state<Grid>(createPlaceholderGrid());
@@ -43,7 +42,6 @@
 	let isCompleted = $state(false);
 	let errorMessage = $state("");
 	let puzzleColors = $state(PLACEHOLDER_COLORS);
-	let puzzleNumbers = $state(PLACEHOLDER_NUMBERS);
 	let puzzleSolution = $state("");
 	let tutorialCompleted = $state(false);
 	let startTime = $state(0);
@@ -55,8 +53,6 @@
 	let timeTaken = $state(0);
 	let skillLevel = $state(1);
 	let hasShared = $state(false);
-	let hasChallenged = $state(false);
-	let challengeUrl = $state<string | null>(null);
 	let showShop = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
@@ -99,7 +95,6 @@
 			const data: GameState = await response.json();
 
 			puzzleColors = data.puzzle.colors;
-			puzzleNumbers = data.puzzle.numbers;
 			puzzleSolution = data.puzzle.solution;
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
@@ -118,8 +113,6 @@
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
 			hasShared = false;
-			hasChallenged = false;
-			challengeUrl = null;
 			startTime = Date.now();
 			coinReward = undefined;
 			resetMistakes();
@@ -243,38 +236,9 @@
 	}
 
 	/**
-	 * Handle challenge post creation.
-	 */
-	async function handleChallenge() {
-		if (hasChallenged) return;
-		try {
-			const response = await fetch("/api/game/challenge", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					timeTaken,
-					skillLevel,
-					mistakes: $mistakeCount,
-				}),
-			});
-			if (response.ok) {
-				const data = await response.json();
-				if (data.success) {
-					hasChallenged = true;
-					challengeUrl = data.postUrl ?? null;
-				}
-			}
-		} catch {
-			// Non-critical
-		}
-	}
-
-	/**
 	 * Handle "Next Challenge" button.
 	 */
 	async function handleNextChallenge() {
-		hasChallenged = false;
-		challengeUrl = null;
 		try {
 			const timeSpent = Math.round((Date.now() - startTime) / 1000);
 			const response = await fetch("/api/game/next-challenge", {
@@ -287,7 +251,6 @@
 			const data: NextChallengeResponse = await response.json();
 
 			puzzleColors = data.puzzle.colors;
-			puzzleNumbers = data.puzzle.numbers;
 			puzzleSolution = data.puzzle.solution;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
@@ -309,21 +272,6 @@
 			currentView = "error";
 		}
 	}
-	function handleRestart() {
-		hasChallenged = false;
-		challengeUrl = null;
-		grid = deserializeGrid(
-			puzzleColors,
-			puzzleNumbers,
-			puzzleColors,
-			gridSize,
-		);
-		isCompleted = false;
-		startTime = Date.now();
-		resetMistakes();
-		setSolution(puzzleSolution, gridSize);
-	}
-
 	/**
 	 * Handle tutorial completion.
 	 */
@@ -367,16 +315,12 @@
 			isCompleted,
 			streakData,
 			hasShared,
-			hasChallenged,
-			challengeUrl,
 			coins,
 			timeTaken,
 			mistakes: $mistakeCount,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
-			onRestart: handleRestart,
 			onShare: handleShare,
-			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
 		}}
 		{#if coinReward}

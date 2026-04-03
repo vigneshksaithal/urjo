@@ -30,7 +30,7 @@
 			tabindex="-1"
 			use:focusTrap={{ onClose }}
 		>
-			<h2 class="text-2xl font-bold mb-4 text-theme-text-primary">
+			<h2 class="text-lg font-bold mb-4 text-theme-text-primary">
 				How to Play
 			</h2>
 

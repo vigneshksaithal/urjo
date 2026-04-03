@@ -11,7 +11,7 @@
 
 <button
 	onclick={onClick}
-	class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-theme-bg-secondary hover:bg-theme-hover transition-colors"
+	class="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-theme-bg-secondary hover:bg-theme-hover transition-colors"
 	aria-label="Open shop"
 >
 	<Coins class="w-4 h-4 text-yellow-400" />

@@ -1,10 +1,26 @@
+@import "./design-system.css";
 @import "tailwindcss";
+
+@layer components {
+	.btn-primary {
+		@apply w-full bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg px-6 py-2.5 text-base hover:opacity-90 active:scale-95 transition-all shadow-lg;
+	}
+
+	.btn-secondary {
+		@apply flex items-center justify-center gap-2 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all;
+	}
+
+	.btn-ghost {
+		@apply text-sm text-theme-text-muted hover:text-theme-text-secondary transition-colors;
+	}
+
+	.btn-icon {
+		@apply flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0;
+	}
+}
 
 /* Tailwind 4 Configuration */
 @theme {
-	/* Custom colors for Urjo game */
-	--color-urjo-coral: #E54E3E;
-	--color-urjo-blue: #3997D7;
 
 	/* Skeleton loading animation */
 	--animate-pulse-skeleton: pulse-skeleton 2s ease-in-out infinite;

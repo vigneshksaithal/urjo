@@ -1,4 +1,4 @@
-import { writable, get } from 'svelte/store'
+import { writable } from 'svelte/store'
 import type { CellColor } from '../../shared/types'
 
 /**
@@ -42,10 +42,9 @@ export const setSolution = (sol: string, size: number) => {
 export const onCellChange = (
 	row: number,
 	col: number,
-	newColor: CellColor,
+	_newColor: CellColor,
 	getGridColor: (r: number, c: number) => CellColor
 ) => {
-	const newKey = `${row}-${col}`
 
 	// If tapping a DIFFERENT cell than before, evaluate the previous cell
 	if (lastActiveCell && (lastActiveCell.row !== row || lastActiveCell.col !== col)) {
