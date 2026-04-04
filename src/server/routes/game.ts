@@ -266,6 +266,15 @@ gameRouter.get('/api/game/state', async (c) => {
 		const tutorialCompleted = (await redis.get(`user:${userId}:tutorialCompleted`)) === 'true'
 		const streak = await getStreakData(userId)
 
+		// Fetch username for consent dialog display
+		let username: string | undefined
+		try {
+			const user = await reddit.getUserById(userId as `t2_${string}`)
+			username = user?.username
+		} catch {
+			// non-critical
+		}
+
 		const gameState: GameState = {
 			puzzle: {
 				colors: puzzle.colors,
@@ -277,6 +286,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			tutorialCompleted,
 			skillLevel,
 			streak,
+			username,
 		}
 
 		return c.json(gameState)
@@ -507,6 +517,13 @@ gameRouter.post('/api/game/share', async (c) => {
 			return c.json({ success: false, alreadyShared: true })
 		}
 
+		// Fetch current username for attribution
+		let sharerUsername = 'Anon'
+		try {
+			const user = await reddit.getUserById(userId as `t2_${string}`)
+			sharerUsername = user?.username ?? 'Anon'
+		} catch { /* fallback */ }
+
 		// Build emoji grid
 		const emojiMap: Record<string, string> = { r: '🟥', b: '🟦' }
 		const cells = puzzleColors.split('').map((ch) => emojiMap[ch] ?? '⬛')
@@ -518,10 +535,18 @@ gameRouter.post('/api/game/share', async (c) => {
 
 		const perfTag = mistakes === 0 ? 'Perfect! ✨' : `⚠️ ${mistakes} mistake${mistakes === 1 ? '' : 's'}`
 		const statsLine = `⏱️ ${timeTaken}s · 🎯 Level ${skillLevel} · 🔥 ${streak} day streak · ${perfTag}`
-		const commentText = `${emojiGrid}\n\n${statsLine}\nPlay → r/urjo`
+		const commentText = `u/${sharerUsername} solved it!\n\n${emojiGrid}\n\n${statsLine}\nPlay → r/urjo`
+
+		// Post as reply to the sticky scores comment, if one exists.
+		// Fall back to a new top-level comment.
+		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
+		const stickyCommentId = postMeta['stickyCommentId']
+		const targetId = stickyCommentId
+			? (stickyCommentId as `t1_${string}`)
+			: (postId as `t3_${string}`)
 
 		await reddit.submitComment({
-			id: postId,
+			id: targetId,
 			text: commentText,
 		})
 
