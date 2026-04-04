@@ -39,6 +39,8 @@
 		onOpenShop?: () => void;
 		timeTaken?: number;
 		mistakes?: number;
+		username?: string;
+		skillLevel?: number;
 	};
 
 	let {
@@ -58,10 +60,14 @@
 		onOpenShop,
 		timeTaken,
 		mistakes = 0,
+		username,
+		skillLevel = 1,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
 	let showHowToPlay = $state(false);
+	let showShareConfirm = $state(false);
+	let showChallengeConfirm = $state(false);
 	let hasFiredConfetti = $state(false);
 
 	$effect(() => {
@@ -73,6 +79,16 @@
 	});
 
 	const validation = $derived(validateGrid(grid, gridSize));
+
+	function confirmShare() {
+		showShareConfirm = false;
+		onShare();
+	}
+
+	function confirmChallenge() {
+		showChallengeConfirm = false;
+		onChallenge();
+	}
 </script>
 
 <div class="h-full w-full flex flex-col p-4 overflow-hidden">
@@ -195,7 +211,7 @@
 					<!-- Secondary actions -->
 					<div class="flex gap-3 w-full">
 						<button
-							onclick={onShare}
+							onclick={() => { if (!hasShared) showShareConfirm = true; }}
 							disabled={hasShared}
 							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
 								text-sm hover:bg-theme-hover active:scale-95 transition-all
@@ -210,7 +226,7 @@
 							{/if}
 						</button>
 						<button
-							onclick={onChallenge}
+							onclick={() => { if (!hasChallenged) showChallengeConfirm = true; }}
 							disabled={hasChallenged}
 							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
 								text-sm hover:bg-theme-hover active:scale-95 transition-all
@@ -257,6 +273,58 @@
 <!-- Confetti effect -->
 {#if isCompleted && hasFiredConfetti}
 	<ConfettiEffect />
+{/if}
+
+<!-- Share confirmation dialog -->
+{#if showShareConfirm}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+		<div class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl">
+			<h2 class="text-base font-bold text-theme-text-primary">Post your score?</h2>
+			<p class="text-sm text-theme-text-secondary">
+				This will post a comment with your score{username ? ` as u/${username}` : ''}. Others can see it.
+			</p>
+			<div class="flex gap-3">
+				<button
+					onclick={() => (showShareConfirm = false)}
+					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={confirmShare}
+					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
+				>
+					Post Score
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Challenge confirmation dialog -->
+{#if showChallengeConfirm}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+		<div class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl">
+			<h2 class="text-base font-bold text-theme-text-primary">Issue a challenge?</h2>
+			<p class="text-sm text-theme-text-secondary">
+				This creates a public post in r/urjo with your time{username ? ` as u/${username}` : ''} for others to beat.
+			</p>
+			<div class="flex gap-3">
+				<button
+					onclick={() => (showChallengeConfirm = false)}
+					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={confirmChallenge}
+					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
+				>
+					Post Challenge
+				</button>
+			</div>
+		</div>
+	</div>
 {/if}
 
 <!-- Leaderboard modal -->

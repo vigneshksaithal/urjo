@@ -60,6 +60,7 @@
 	let showShop = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
+	let username = $state<string | undefined>(undefined);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -108,6 +109,9 @@
 			// Update streak data
 			if (data.streak) {
 				streakData = data.streak;
+			}
+			if (data.username) {
+				username = data.username;
 			}
 
 			grid = deserializeGrid(
@@ -372,6 +376,8 @@
 			coins,
 			timeTaken,
 			mistakes: $mistakeCount,
+			username,
+			skillLevel,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,

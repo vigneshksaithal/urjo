@@ -27,6 +27,7 @@ export type GameState = {
 	tutorialCompleted: boolean
 	skillLevel: number
 	streak?: StreakData
+	username?: string
 }
 
 export type NextChallengeResponse = {
