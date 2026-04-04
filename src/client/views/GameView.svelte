@@ -282,7 +282,7 @@
 		<div class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl">
 			<h2 class="text-base font-bold text-theme-text-primary">Post your score?</h2>
 			<p class="text-sm text-theme-text-secondary">
-				Your username{username ? ` (u/${username})` : ''} and score ({timeTaken ?? 0}s, Level {skillLevel}, {mistakes === 0 ? 'perfect' : `${mistakes} mistakes`}) will be posted as a comment on this puzzle — visible to everyone.
+				This will post a comment with your score{username ? ` as u/${username}` : ''}. Others can see it.
 			</p>
 			<div class="flex gap-3">
 				<button
@@ -308,7 +308,7 @@
 		<div class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl">
 			<h2 class="text-base font-bold text-theme-text-primary">Issue a challenge?</h2>
 			<p class="text-sm text-theme-text-secondary">
-				A new post will be created in r/urjo with your username{username ? ` (u/${username})` : ''} and score ({timeTaken ?? 0}s, Level {skillLevel}{mistakes === 0 ? ', perfect' : `, ${mistakes} mistakes`}) as the challenge to beat. This post will be public.
+				This creates a public post in r/urjo with your time{username ? ` as u/${username}` : ''} for others to beat.
 			</p>
 			<div class="flex gap-3">
 				<button
