@@ -105,7 +105,22 @@ export type UrjoColor = (typeof URJO_COLORS)[keyof typeof URJO_COLORS]
 // ─── Economy Constants ─────────────────────────────────────────────────────────
 
 /** Base coins earned per puzzle completion */
+/** @deprecated Use COINS_BY_LEVEL instead */
 export const COIN_BASE = 10
+
+/**
+ * Coins earned per level completion. Higher levels pay more.
+ * Index 0 = Level 1, Index 8 = Level 9.
+ */
+export const COINS_BY_LEVEL: readonly number[] = [10, 12, 15, 18, 22, 28, 35, 42, 50] as const
+
+/**
+ * Get base coin reward for a given skill level (1-9).
+ */
+export const getCoinBaseForLevel = (level: number): number => {
+	const idx = Math.min(Math.max(level - 1, 0), 8)
+	return COINS_BY_LEVEL[idx] ?? 10
+}
 
 /** Additional coins per streak day */
 export const COIN_STREAK_MULTIPLIER = 2

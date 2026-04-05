@@ -54,6 +54,8 @@
 	});
 	let timeTaken = $state(0);
 	let skillLevel = $state(1);
+	let showLevelUp = $state(false);
+	let levelUpNewLevel = $state(1);
 	let hasShared = $state(false);
 	let hasChallenged = $state(false);
 	let challengeUrl = $state<string | null>(null);
@@ -208,6 +210,13 @@
 				if (data.coinReward) {
 					coinReward = data.coinReward;
 					coins += data.coinReward.total;
+				}
+				// Level-up feedback
+				if (data.newSkillLevel && data.previousSkillLevel && data.newSkillLevel > data.previousSkillLevel) {
+					levelUpNewLevel = data.newSkillLevel;
+					skillLevel = data.newSkillLevel;
+					showLevelUp = true;
+					setTimeout(() => { showLevelUp = false; }, 3500);
 				}
 			}
 		} catch {
@@ -394,3 +403,43 @@
 </div>
 
 <ShopModal isOpen={showShop} onClose={() => (showShop = false)} />
+
+{#if showLevelUp}
+	<div class="level-up-overlay" role="status" aria-live="polite">
+		<div class="level-up-card">
+			<div class="level-up-icon">⬆️</div>
+			<div class="level-up-title">Level Up!</div>
+			<div class="level-up-subtitle">You're now <strong>Level {levelUpNewLevel}</strong></div>
+		</div>
+	</div>
+{/if}
+
+<style>
+	.level-up-overlay {
+		position: fixed;
+		top: 0; left: 0; right: 0; bottom: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+		pointer-events: none;
+		animation: fadeInOut 3.5s ease forwards;
+	}
+	.level-up-card {
+		background: linear-gradient(135deg, #1e3a5f, #2d6a4f);
+		border: 2px solid #10b981;
+		border-radius: 1rem;
+		padding: 2rem 3rem;
+		text-align: center;
+		box-shadow: 0 0 40px rgba(16,185,129,0.4);
+	}
+	.level-up-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+	.level-up-title { font-size: 1.75rem; font-weight: bold; color: #10b981; }
+	.level-up-subtitle { font-size: 1.1rem; color: #d1fae5; margin-top: 0.25rem; }
+	@keyframes fadeInOut {
+		0%   { opacity: 0; transform: scale(0.8); }
+		15%  { opacity: 1; transform: scale(1); }
+		75%  { opacity: 1; transform: scale(1); }
+		100% { opacity: 0; transform: scale(0.95); }
+	}
+</style>

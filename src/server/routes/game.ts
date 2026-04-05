@@ -34,6 +34,57 @@ import type { CoinReward } from '../../shared/types'
 
 export const gameRouter = new Hono()
 
+// ─── checkChallengeBeat ──────────────────────────────────────────────────────
+
+/**
+ * Check if a puzzle completion beats the challenge score for this post.
+ * If beaten, notifies the original challenger via a Reddit comment.
+ */
+async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: number): Promise<void> {
+	try {
+		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
+		if (!puzzleMeta?.challengeBy || !puzzleMeta?.challengeScore) return
+
+		const challengeScore = parseInt(puzzleMeta.challengeScore, 10)
+		const challengerId = puzzleMeta.challengeBy
+
+		// Only trigger if winner is not the original challenger and their time is faster
+		if (winnerId === challengerId) return
+		if (timeTaken >= challengeScore) return
+
+		// Avoid spamming — only notify once per winner per post
+		const notifyKey = `challenge:${postId}:beaten:${winnerId}`
+		const alreadyNotified = await redis.get(notifyKey)
+		if (alreadyNotified === 'true') return
+		await redis.set(notifyKey, 'true')
+
+		// Fetch winner username
+		let winnerUsername = 'Someone'
+		try {
+			const user = await reddit.getUserById(winnerId as `t2_${string}`)
+			winnerUsername = user?.username ?? 'Someone'
+		} catch { /* fallback */ }
+
+		// Post a comment on the challenge post
+		const message = `🏆 u/${winnerUsername} just beat this challenge! They solved it in **${timeTaken}s** (score to beat was ${challengeScore}s). Can you reclaim your title? 🎯`
+		await reddit.submitComment({ id: postId as `t3_${string}`, text: message })
+
+		// Try to DM the original challenger
+		try {
+			const challenger = await reddit.getUserById(challengerId as `t2_${string}`)
+			if (challenger?.username) {
+				await reddit.sendPrivateMessage({
+					to: challenger.username,
+					subject: '🎯 Your Urjo challenge was beaten!',
+					text: `u/${winnerUsername} just beat your Urjo challenge with ${timeTaken}s (your score: ${challengeScore}s). Time to reclaim your title! https://reddit.com/${postId}`,
+				})
+			}
+		} catch { /* DM is best-effort */ }
+	} catch (err) {
+		console.error('checkChallengeBeat error:', err)
+	}
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -315,7 +366,7 @@ gameRouter.get('/api/game/streak', async (c) => {
 // ─── POST /api/game/complete ─────────────────────────────────────────────────
 
 gameRouter.post('/api/game/complete', async (c) => {
-	const { userId } = context
+	const { postId, userId } = context
 
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
@@ -356,6 +407,11 @@ gameRouter.post('/api/game/complete', async (c) => {
 			newSkillLevel !== currentLevel ? JSON.stringify([]) : JSON.stringify(updatedHistory)
 		)
 		await redis.set(`user:${userId}:consecutiveSkips`, '0')
+
+		// Check if this is a challenge post and if the player beat the challenge
+		if (postId) {
+			await checkChallengeBeat(postId, userId, timeTaken)
+		}
 
 		const response: CompleteResponse = {
 			performanceScore,
