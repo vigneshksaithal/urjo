@@ -57,6 +57,7 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 		const alreadyNotified = await redis.get(notifyKey)
 		if (alreadyNotified === 'true') return
 		await redis.set(notifyKey, 'true')
+		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
 
 		// Fetch winner username
 		let winnerUsername = 'Someone'
@@ -267,20 +268,21 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 	const lastDailySolve = economyData?.dailyFirstSolve ?? null
 	const isDailyFirst = lastDailySolve !== today
 	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst, ctx.mistakes)
-	const currentTotalCoins = parseInt(economyData?.totalCoins ?? '0', 10)
-	const currentTotalSolves = parseInt(economyData?.totalSolves ?? '0', 10)
-	const speedSolves = parseInt(economyData?.speedSolves ?? '0', 10)
 
-	// Atomic increments for coins and totalCoins (prevents race conditions)
-	const [newCoins, newTotalCoins] = await Promise.all([
+	// Atomic increments for coins (prevents race conditions)
+	const [, newTotalCoins] = await Promise.all([
 		redis.hIncrBy(economyKey, 'coins', coinReward.total),
 		redis.hIncrBy(economyKey, 'totalCoins', coinReward.total),
 	])
 
-	// Update non-numeric fields with hSet
+	// Atomic increments for solve counters (prevents race conditions)
+	await redis.hIncrBy(economyKey, 'totalSolves', 1)
+	if (coinReward.speedBonus > 0) {
+		await redis.hIncrBy(economyKey, 'speedSolves', 1)
+	}
+
+	// Update non-atomic fields with hSet
 	await redis.hSet(economyKey, {
-		totalSolves: (currentTotalSolves + 1).toString(),
-		speedSolves: (speedSolves + (coinReward.speedBonus > 0 ? 1 : 0)).toString(),
 		ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
 		equippedTitle: economyData?.equippedTitle ?? 'puzzler',
 		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
@@ -332,8 +334,12 @@ gameRouter.get('/api/game/state', async (c) => {
 			// non-critical
 		}
 
-		// Strip solution from puzzle before sending to client (security fix)
-		const { solution: _solution, ...puzzleWithoutSolution } = {
+		// Record start time for server-side time tracking (security fix)
+		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		await redis.set(startTimeKey, Date.now().toString())
+		await redis.expire(startTimeKey, 86400)
+
+		const serializedPuzzle: SerializedPuzzle = {
 			colors: puzzle.colors,
 			numbers: puzzle.numbers,
 			solution: puzzle.solution,
@@ -341,17 +347,12 @@ gameRouter.get('/api/game/state', async (c) => {
 			gridSize: parseInt(puzzle.gridSize, 10),
 		}
 
-		// Record start time for server-side time tracking (security fix)
-		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
-		await redis.set(startTimeKey, Date.now().toString())
-		await redis.expire(startTimeKey, 86400)
-
 		const gameState: GameState = {
-			puzzle: puzzleWithoutSolution, // no solution exposed to client
+			puzzle: serializedPuzzle,
 			tutorialCompleted,
 			skillLevel,
 			streak,
-			username,
+			...(username !== undefined && { username }),
 		}
 
 		return c.json(gameState)
@@ -382,6 +383,7 @@ gameRouter.get('/api/game/streak', async (c) => {
 gameRouter.post('/api/game/complete', async (c) => {
 	const { postId, userId } = context
 
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
 	try {
@@ -442,9 +444,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		await redis.set(`user:${userId}:consecutiveSkips`, '0')
 
 		// Check if this is a challenge post and if the player beat the challenge
-		if (postId) {
-			await checkChallengeBeat(postId, userId, timeTaken)
-		}
+		await checkChallengeBeat(postId, userId, timeTaken)
 
 		const response: CompleteResponse = {
 			performanceScore,
