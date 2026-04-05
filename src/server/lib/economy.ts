@@ -6,7 +6,6 @@
 import { redis, reddit } from '@devvit/web/server'
 import type { UserEconomy, CoinReward, ShopItem, TitleDef, StreakData } from '../../shared/types'
 import {
-	COIN_BASE,
 	COIN_STREAK_MULTIPLIER,
 	COIN_SPEED_BONUS,
 	COIN_DAILY_BONUS,
@@ -15,6 +14,7 @@ import {
 	TITLES,
 	getTitleById,
 	getLevelConfig,
+	getCoinBaseForLevel,
 } from '../../shared/constants'
 
 const ECONOMY_KEY_PREFIX = 'user'
@@ -79,7 +79,7 @@ export const calculateCoinReward = (
 	const perfectBonus = mistakes === 0 ? COIN_PERFECT_BONUS : 0
 
 	const reward: CoinReward = {
-		base: COIN_BASE,
+		base: getCoinBaseForLevel(level),
 		streakBonus: currentStreak * COIN_STREAK_MULTIPLIER,
 		speedBonus,
 		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,

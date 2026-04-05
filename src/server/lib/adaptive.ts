@@ -16,7 +16,7 @@ import {
 	MAX_SKILL_LEVEL,
 	HISTORY_SIZE,
 	PROMOTE_THRESHOLDS,
-	PROMOTE_WINDOW,
+	PROMOTE_WINDOWS,
 	DEMOTE_WINDOW,
 	DEMOTE_THRESHOLD,
 	SKIP_BASE_PENALTY,
@@ -89,7 +89,7 @@ export const calculateAverageScore = (history: GameRecord[]): number => {
  *
  * Asymmetric windows:
  * - Demotion: uses last DEMOTE_WINDOW (5) games — quick to respond to struggles
- * - Promotion: uses last PROMOTE_WINDOW (15) games — requires sustained performance
+ * - Promotion: uses PROMOTE_WINDOWS per level — requires sustained performance
  *
  * Per-level promotion thresholds (harder to promote at higher levels).
  * Demotion threshold is fixed at DEMOTE_THRESHOLD (0.18).
@@ -106,9 +106,10 @@ export const determineSkillLevel = (currentLevel: number, history: GameRecord[])
 		}
 	}
 
-	// Check promotion (longer window)
-	if (history.length >= PROMOTE_WINDOW) {
-		const recentLong = history.slice(-PROMOTE_WINDOW)
+	// Check promotion (longer window - per level)
+	const promoteWindow = PROMOTE_WINDOWS[currentLevel - 1] ?? 15
+	if (history.length >= promoteWindow) {
+		const recentLong = history.slice(-promoteWindow)
 		const avgLong = calculateAverageScore(recentLong)
 		const promoteThreshold = PROMOTE_THRESHOLDS[currentLevel - 1] ?? 0.55
 		if (avgLong >= promoteThreshold && currentLevel < MAX_SKILL_LEVEL) {

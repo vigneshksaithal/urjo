@@ -34,6 +34,58 @@ import type { CoinReward } from '../../shared/types'
 
 export const gameRouter = new Hono()
 
+// ─── checkChallengeBeat ──────────────────────────────────────────────────────
+
+/**
+ * Check if a puzzle completion beats the challenge score for this post.
+ * If beaten, notifies the original challenger via a Reddit comment.
+ */
+async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: number): Promise<void> {
+	try {
+		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
+		if (!puzzleMeta?.challengeBy || !puzzleMeta?.challengeScore) return
+
+		const challengeScore = parseInt(puzzleMeta.challengeScore, 10)
+		const challengerId = puzzleMeta.challengeBy
+
+		// Only trigger if winner is not the original challenger and their time is faster
+		if (winnerId === challengerId) return
+		if (timeTaken >= challengeScore) return
+
+		// Avoid spamming — only notify once per winner per post
+		const notifyKey = `challenge:${postId}:beaten:${winnerId}`
+		const alreadyNotified = await redis.get(notifyKey)
+		if (alreadyNotified === 'true') return
+		await redis.set(notifyKey, 'true')
+		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
+
+		// Fetch winner username
+		let winnerUsername = 'Someone'
+		try {
+			const user = await reddit.getUserById(winnerId as `t2_${string}`)
+			winnerUsername = user?.username ?? 'Someone'
+		} catch { /* fallback */ }
+
+		// Post a comment on the challenge post
+		const message = `🏆 u/${winnerUsername} just beat this challenge! They solved it in **${timeTaken}s** (score to beat was ${challengeScore}s). Can you reclaim your title? 🎯`
+		await reddit.submitComment({ id: postId as `t3_${string}`, text: message })
+
+		// Try to DM the original challenger
+		try {
+			const challenger = await reddit.getUserById(challengerId as `t2_${string}`)
+			if (challenger?.username) {
+				await reddit.sendPrivateMessage({
+					to: challenger.username,
+					subject: '🎯 Your Urjo challenge was beaten!',
+					text: `u/${winnerUsername} just beat your Urjo challenge with ${timeTaken}s (your score: ${challengeScore}s). Time to reclaim your title! https://reddit.com/${postId}`,
+				})
+			}
+		} catch { /* DM is best-effort */ }
+	} catch (err) {
+		console.error('checkChallengeBeat error:', err)
+	}
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -158,7 +210,7 @@ const getTodayUTC = (): string => {
 const getDayDifference = (date1: string, date2: string): number => {
 	const d1 = new Date(date1)
 	const d2 = new Date(date2)
-	const diffTime = Math.abs(d2.getTime() - d1.getTime())
+	const diffTime = d2.getTime() - d1.getTime() // positive = date2 is after date1
 	return Math.floor(diffTime / (1000 * 60 * 60 * 24))
 }
 
@@ -216,22 +268,29 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 	const lastDailySolve = economyData?.dailyFirstSolve ?? null
 	const isDailyFirst = lastDailySolve !== today
 	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst, ctx.mistakes)
-	const currentCoins = parseInt(economyData?.coins ?? '0', 10)
-	const currentTotalCoins = parseInt(economyData?.totalCoins ?? '0', 10)
-	const currentTotalSolves = parseInt(economyData?.totalSolves ?? '0', 10)
-	const speedSolves = parseInt(economyData?.speedSolves ?? '0', 10)
-	await Promise.all([
-		redis.hSet(economyKey, {
-			coins: (currentCoins + coinReward.total).toString(),
-			totalCoins: (currentTotalCoins + coinReward.total).toString(),
-			totalSolves: (currentTotalSolves + 1).toString(),
-			speedSolves: (speedSolves + (coinReward.speedBonus > 0 ? 1 : 0)).toString(),
-			ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
-			equippedTitle: economyData?.equippedTitle ?? 'puzzler',
-			dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
-		}),
-		redis.zAdd('leaderboard:coins', { score: currentTotalCoins + coinReward.total, member: ctx.userId }),
+
+	// Atomic increments for coins (prevents race conditions)
+	const [, newTotalCoins] = await Promise.all([
+		redis.hIncrBy(economyKey, 'coins', coinReward.total),
+		redis.hIncrBy(economyKey, 'totalCoins', coinReward.total),
 	])
+
+	// Atomic increments for solve counters (prevents race conditions)
+	await redis.hIncrBy(economyKey, 'totalSolves', 1)
+	if (coinReward.speedBonus > 0) {
+		await redis.hIncrBy(economyKey, 'speedSolves', 1)
+	}
+
+	// Update non-atomic fields with hSet
+	await redis.hSet(economyKey, {
+		ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
+		equippedTitle: economyData?.equippedTitle ?? 'puzzler',
+		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
+	})
+
+	// Update coins leaderboard
+	await redis.zAdd('leaderboard:coins', { score: newTotalCoins, member: ctx.userId })
+
 	return coinReward
 }
 
@@ -275,18 +334,25 @@ gameRouter.get('/api/game/state', async (c) => {
 			// non-critical
 		}
 
+		// Record start time for server-side time tracking (security fix)
+		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		await redis.set(startTimeKey, Date.now().toString())
+		await redis.expire(startTimeKey, 86400)
+
+		const serializedPuzzle: SerializedPuzzle = {
+			colors: puzzle.colors,
+			numbers: puzzle.numbers,
+			solution: puzzle.solution,
+			difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard',
+			gridSize: parseInt(puzzle.gridSize, 10),
+		}
+
 		const gameState: GameState = {
-			puzzle: {
-				colors: puzzle.colors,
-				numbers: puzzle.numbers,
-				solution: puzzle.solution,
-				difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard',
-				gridSize: parseInt(puzzle.gridSize, 10),
-			},
+			puzzle: serializedPuzzle,
 			tutorialCompleted,
 			skillLevel,
 			streak,
-			username,
+			...(username !== undefined && { username }),
 		}
 
 		return c.json(gameState)
@@ -315,15 +381,34 @@ gameRouter.get('/api/game/streak', async (c) => {
 // ─── POST /api/game/complete ─────────────────────────────────────────────────
 
 gameRouter.post('/api/game/complete', async (c) => {
-	const { userId } = context
+	const { postId, userId } = context
 
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
 	try {
 		const body: CompleteRequest = await c.req.json()
-		const { timeTaken, mistakes = 0 } = body
+		const { mistakes = 0 } = body
 
-		if (typeof timeTaken !== 'number' || timeTaken <= 0) {
+		// Server-side time tracking (security fix)
+		// Calculate timeTaken from stored start time instead of trusting client
+		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		const startTimeStr = await redis.get(startTimeKey)
+		let timeTaken: number
+
+		if (startTimeStr) {
+			timeTaken = Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000)
+			await redis.del(startTimeKey)
+		} else {
+			// Fallback to client value if no server start time (shouldn't happen in production)
+			const clientTime = body.timeTaken
+			if (typeof clientTime !== 'number' || clientTime <= 0) {
+				return c.json({ error: 'Invalid timeTaken' }, 400)
+			}
+			timeTaken = clientTime
+		}
+
+		if (timeTaken <= 0) {
 			return c.json({ error: 'Invalid timeTaken' }, 400)
 		}
 
@@ -347,6 +432,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		await Promise.all([
 			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
 			redis.zAdd(`leaderboard:speed:${today}`, { score: timeTaken, member: userId }),
+			redis.expire(`leaderboard:speed:${today}`, 2592000), // 30-day TTL
 		])
 
 		await redis.set(`user:${userId}:skillLevel`, newSkillLevel.toString())
@@ -356,6 +442,9 @@ gameRouter.post('/api/game/complete', async (c) => {
 			newSkillLevel !== currentLevel ? JSON.stringify([]) : JSON.stringify(updatedHistory)
 		)
 		await redis.set(`user:${userId}:consecutiveSkips`, '0')
+
+		// Check if this is a challenge post and if the player beat the challenge
+		await checkChallengeBeat(postId, userId, timeTaken)
 
 		const response: CompleteResponse = {
 			performanceScore,
