@@ -4,7 +4,7 @@
  */
 
 import { Hono } from 'hono'
-import { context, redis } from '@devvit/web/server'
+import { context, redis, reddit } from '@devvit/web/server'
 import type {
 	EconomyResponse,
 	ShopResponse,
@@ -172,6 +172,24 @@ economyRouter.post('/api/shop/equip', async (c) => {
 
 		// Invalidate display cache
 		await redis.del(`user:${userId}:display`)
+
+		// Auto-assign Reddit flair based on equipped title
+		try {
+			const title = TITLES.find((t) => t.id === titleId)
+			if (title && context.subredditName) {
+				const user = await reddit.getUserById(userId as `t2_${string}`)
+				if (user?.username) {
+					await reddit.setUserFlair({
+						subredditName: context.subredditName,
+						username: user.username,
+						text: `${title.emoji} ${title.label}`,
+						cssClass: '',
+					})
+				}
+			}
+		} catch {
+			// Non-critical, don't fail the equip request
+		}
 
 		const response: EquipTitleResponse = {
 			success: true,

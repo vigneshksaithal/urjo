@@ -16,6 +16,7 @@ import {
 	MAX_SKILL_LEVEL,
 	HISTORY_SIZE,
 	PROMOTE_THRESHOLDS,
+	PROMOTE_WINDOWS,
 	PROMOTE_WINDOW,
 	DEMOTE_WINDOW,
 	DEMOTE_THRESHOLD,
@@ -106,9 +107,10 @@ export const determineSkillLevel = (currentLevel: number, history: GameRecord[])
 		}
 	}
 
-	// Check promotion (longer window)
-	if (history.length >= PROMOTE_WINDOW) {
-		const recentLong = history.slice(-PROMOTE_WINDOW)
+	// Check promotion (longer window - per level)
+	const promoteWindow = PROMOTE_WINDOWS[currentLevel - 1] ?? PROMOTE_WINDOW
+	if (history.length >= promoteWindow) {
+		const recentLong = history.slice(-promoteWindow)
 		const avgLong = calculateAverageScore(recentLong)
 		const promoteThreshold = PROMOTE_THRESHOLDS[currentLevel - 1] ?? 0.55
 		if (avgLong >= promoteThreshold && currentLevel < MAX_SKILL_LEVEL) {

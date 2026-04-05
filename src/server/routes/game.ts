@@ -209,7 +209,7 @@ const getTodayUTC = (): string => {
 const getDayDifference = (date1: string, date2: string): number => {
 	const d1 = new Date(date1)
 	const d2 = new Date(date2)
-	const diffTime = Math.abs(d2.getTime() - d1.getTime())
+	const diffTime = d2.getTime() - d1.getTime() // positive = date2 is after date1
 	return Math.floor(diffTime / (1000 * 60 * 60 * 24))
 }
 
@@ -267,22 +267,28 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 	const lastDailySolve = economyData?.dailyFirstSolve ?? null
 	const isDailyFirst = lastDailySolve !== today
 	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst, ctx.mistakes)
-	const currentCoins = parseInt(economyData?.coins ?? '0', 10)
 	const currentTotalCoins = parseInt(economyData?.totalCoins ?? '0', 10)
 	const currentTotalSolves = parseInt(economyData?.totalSolves ?? '0', 10)
 	const speedSolves = parseInt(economyData?.speedSolves ?? '0', 10)
-	await Promise.all([
-		redis.hSet(economyKey, {
-			coins: (currentCoins + coinReward.total).toString(),
-			totalCoins: (currentTotalCoins + coinReward.total).toString(),
-			totalSolves: (currentTotalSolves + 1).toString(),
-			speedSolves: (speedSolves + (coinReward.speedBonus > 0 ? 1 : 0)).toString(),
-			ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
-			equippedTitle: economyData?.equippedTitle ?? 'puzzler',
-			dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
-		}),
-		redis.zAdd('leaderboard:coins', { score: currentTotalCoins + coinReward.total, member: ctx.userId }),
+
+	// Atomic increments for coins and totalCoins (prevents race conditions)
+	const [newCoins, newTotalCoins] = await Promise.all([
+		redis.hIncrBy(economyKey, 'coins', coinReward.total),
+		redis.hIncrBy(economyKey, 'totalCoins', coinReward.total),
 	])
+
+	// Update non-numeric fields with hSet
+	await redis.hSet(economyKey, {
+		totalSolves: (currentTotalSolves + 1).toString(),
+		speedSolves: (speedSolves + (coinReward.speedBonus > 0 ? 1 : 0)).toString(),
+		ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
+		equippedTitle: economyData?.equippedTitle ?? 'puzzler',
+		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
+	})
+
+	// Update coins leaderboard
+	await redis.zAdd('leaderboard:coins', { score: newTotalCoins, member: ctx.userId })
+
 	return coinReward
 }
 
@@ -326,14 +332,22 @@ gameRouter.get('/api/game/state', async (c) => {
 			// non-critical
 		}
 
+		// Strip solution from puzzle before sending to client (security fix)
+		const { solution: _solution, ...puzzleWithoutSolution } = {
+			colors: puzzle.colors,
+			numbers: puzzle.numbers,
+			solution: puzzle.solution,
+			difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard',
+			gridSize: parseInt(puzzle.gridSize, 10),
+		}
+
+		// Record start time for server-side time tracking (security fix)
+		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		await redis.set(startTimeKey, Date.now().toString())
+		await redis.expire(startTimeKey, 86400)
+
 		const gameState: GameState = {
-			puzzle: {
-				colors: puzzle.colors,
-				numbers: puzzle.numbers,
-				solution: puzzle.solution,
-				difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard',
-				gridSize: parseInt(puzzle.gridSize, 10),
-			},
+			puzzle: puzzleWithoutSolution, // no solution exposed to client
 			tutorialCompleted,
 			skillLevel,
 			streak,
@@ -372,9 +386,27 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 	try {
 		const body: CompleteRequest = await c.req.json()
-		const { timeTaken, mistakes = 0 } = body
+		const { mistakes = 0 } = body
 
-		if (typeof timeTaken !== 'number' || timeTaken <= 0) {
+		// Server-side time tracking (security fix)
+		// Calculate timeTaken from stored start time instead of trusting client
+		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		const startTimeStr = await redis.get(startTimeKey)
+		let timeTaken: number
+
+		if (startTimeStr) {
+			timeTaken = Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000)
+			await redis.del(startTimeKey)
+		} else {
+			// Fallback to client value if no server start time (shouldn't happen in production)
+			const clientTime = body.timeTaken
+			if (typeof clientTime !== 'number' || clientTime <= 0) {
+				return c.json({ error: 'Invalid timeTaken' }, 400)
+			}
+			timeTaken = clientTime
+		}
+
+		if (timeTaken <= 0) {
 			return c.json({ error: 'Invalid timeTaken' }, 400)
 		}
 
@@ -398,6 +430,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		await Promise.all([
 			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
 			redis.zAdd(`leaderboard:speed:${today}`, { score: timeTaken, member: userId }),
+			redis.expire(`leaderboard:speed:${today}`, 2592000), // 30-day TTL
 		])
 
 		await redis.set(`user:${userId}:skillLevel`, newSkillLevel.toString())
