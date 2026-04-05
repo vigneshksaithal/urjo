@@ -23,6 +23,7 @@ import {
 	getUserDisplay,
 	getUserStreakData,
 } from '../lib/economy'
+import { getSkillLevel } from '../lib/helpers'
 
 export const economyRouter = new Hono()
 
@@ -256,11 +257,6 @@ economyRouter.get('/api/leaderboard/coins', async (c) => {
 })
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-const getSkillLevel = async (userId: string): Promise<number> => {
-	const level = await redis.get(`user:${userId}:skillLevel`)
-	return level ? parseInt(level, 10) : 1
-}
 
 const checkCondition = async (
 	title: (typeof TITLES)[number],

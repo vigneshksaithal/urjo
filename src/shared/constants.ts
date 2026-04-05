@@ -146,6 +146,15 @@ export const COIN_PERFECT_BONUS = 10
 /** Multiplier for par time calculation (expectedTime * 2) */
 export const PAR_TIME_MULTIPLIER = 2
 
+/** Daily login bonus coins by consecutive day (index 0 = day 1, index 4+ = day 5+) */
+export const DAILY_LOGIN_BONUS: readonly number[] = [5, 5, 10, 10, 25] as const
+
+/** Get daily login bonus based on consecutive login days */
+export const getDailyLoginBonus = (consecutiveDays: number): number => {
+	const idx = Math.min(consecutiveDays - 1, 4)
+	return DAILY_LOGIN_BONUS[idx] ?? 5
+}
+
 /** Title definitions - purchasable cosmetic titles */
 export const TITLES: readonly import('./types').TitleDef[] = [
 	{ id: 'puzzler', emoji: '🧩', label: 'Puzzler', cost: 0 },
