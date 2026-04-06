@@ -6,22 +6,19 @@
 		NextChallengeResponse,
 		StreakData,
 		ShareResponse,
+		CoinReward,
 	} from "../shared/types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
-	import { mistakeCount, onCellChange, onPuzzleComplete, resetMistakes, setSolution } from "./stores/mistakes";
-
-	type CoinReward = {
-		base: number;
-		streakBonus: number;
-		speedBonus: number;
-		dailyBonus: number;
-		perfectBonus: number;
-		loginBonus: number;
-		total: number;
-	};
+	import {
+		mistakeCount,
+		onCellChange,
+		onPuzzleComplete,
+		resetMistakes,
+		setSolution,
+	} from "./stores/mistakes";
 
 	type EconomyResponse = {
 		coins: number;
@@ -200,7 +197,10 @@
 			const response = await fetch("/api/game/complete", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ timeTaken: time, mistakes: $mistakeCount }),
+				body: JSON.stringify({
+					timeTaken: time,
+					mistakes: $mistakeCount,
+				}),
 			});
 
 			if (response.ok) {
@@ -213,11 +213,17 @@
 					coins += data.coinReward.total;
 				}
 				// Level-up feedback
-				if (data.newSkillLevel && data.previousSkillLevel && data.newSkillLevel > data.previousSkillLevel) {
+				if (
+					data.newSkillLevel &&
+					data.previousSkillLevel &&
+					data.newSkillLevel > data.previousSkillLevel
+				) {
 					levelUpNewLevel = data.newSkillLevel;
 					skillLevel = data.newSkillLevel;
 					showLevelUp = true;
-					setTimeout(() => { showLevelUp = false; }, 3500);
+					setTimeout(() => {
+						showLevelUp = false;
+					}, 3500);
 				}
 			}
 		} catch {
@@ -410,7 +416,9 @@
 		<div class="level-up-card">
 			<div class="level-up-icon">⬆️</div>
 			<div class="level-up-title">Level Up!</div>
-			<div class="level-up-subtitle">You're now <strong>Level {levelUpNewLevel}</strong></div>
+			<div class="level-up-subtitle">
+				You're now <strong>Level {levelUpNewLevel}</strong>
+			</div>
 		</div>
 	</div>
 {/if}
@@ -418,7 +426,10 @@
 <style>
 	.level-up-overlay {
 		position: fixed;
-		top: 0; left: 0; right: 0; bottom: 0;
+		top: 0;
+		left: 0;
+		right: 0;
+		bottom: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -432,15 +443,38 @@
 		border-radius: 1rem;
 		padding: 2rem 3rem;
 		text-align: center;
-		box-shadow: 0 0 40px rgba(16,185,129,0.4);
+		box-shadow: 0 0 40px rgba(16, 185, 129, 0.4);
 	}
-	.level-up-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
-	.level-up-title { font-size: 1.75rem; font-weight: bold; color: #10b981; }
-	.level-up-subtitle { font-size: 1.1rem; color: #d1fae5; margin-top: 0.25rem; }
+	.level-up-icon {
+		font-size: 2.5rem;
+		margin-bottom: 0.5rem;
+	}
+	.level-up-title {
+		font-size: 1.75rem;
+		font-weight: bold;
+		color: #10b981;
+	}
+	.level-up-subtitle {
+		font-size: 1.1rem;
+		color: #d1fae5;
+		margin-top: 0.25rem;
+	}
 	@keyframes fadeInOut {
-		0%   { opacity: 0; transform: scale(0.8); }
-		15%  { opacity: 1; transform: scale(1); }
-		75%  { opacity: 1; transform: scale(1); }
-		100% { opacity: 0; transform: scale(0.95); }
+		0% {
+			opacity: 0;
+			transform: scale(0.8);
+		}
+		15% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		75% {
+			opacity: 1;
+			transform: scale(1);
+		}
+		100% {
+			opacity: 0;
+			transform: scale(0.95);
+		}
 	}
 </style>

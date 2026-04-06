@@ -31,7 +31,7 @@ import {
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
-import { getTodayUTC, getYesterdayUTC, getDayDifference, getSkillLevel, fetchUsername } from '../lib/helpers'
+import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak } from '../lib/helpers'
 
 export const gameRouter = new Hono()
 
@@ -200,59 +200,6 @@ type CoinRewardContext = {
 	currentLevel: number
 	streak: StreakData
 	mistakes: number
-}
-
-/**
- * Get login streak data for a user.
- * Returns [consecutiveDays, lastLoginDate] or [0, null] if not found.
- */
-const getLoginStreak = async (userId: string): Promise<{ days: number; lastDate: string | null }> => {
-	const [daysStr, lastDate] = await Promise.all([
-		redis.get(`user:${userId}:loginStreak:days`),
-		redis.get(`user:${userId}:loginStreak:lastDate`),
-	])
-
-	return {
-		days: daysStr ? parseInt(daysStr, 10) : 0,
-		lastDate: lastDate ?? null,
-	}
-}
-
-/**
- * Update login streak based on first daily solve.
- * Returns the updated consecutive login days count.
- */
-const updateLoginStreak = async (userId: string, isDailyFirst: boolean): Promise<number> => {
-	if (!isDailyFirst) {
-		// Not first solve of the day — no streak update needed
-		const loginStreak = await getLoginStreak(userId)
-		return loginStreak.days
-	}
-
-	const today = getTodayUTC()
-	const yesterday = getYesterdayUTC()
-	const loginStreak = await getLoginStreak(userId)
-
-	let newDays: number
-
-	if (loginStreak.lastDate === yesterday) {
-		// Consecutive login — increment
-		newDays = loginStreak.days + 1
-	} else if (loginStreak.lastDate === today) {
-		// Already logged in today — keep current count
-		return loginStreak.days
-	} else {
-		// Missed a day or first login ever — reset to 1
-		newDays = 1
-	}
-
-	// Save updated streak to Redis
-	await Promise.all([
-		redis.set(`user:${userId}:loginStreak:days`, newDays.toString()),
-		redis.set(`user:${userId}:loginStreak:lastDate`, today),
-	])
-
-	return newDays
 }
 
 /**
