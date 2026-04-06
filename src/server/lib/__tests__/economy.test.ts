@@ -8,6 +8,7 @@ import {
     COIN_DAILY_BONUS,
     COIN_STREAK_MULTIPLIER,
     COIN_PERFECT_BONUS,
+    getDailyLoginBonus,
 } from '../../../shared/constants'
 
 // ─── calculateCoinReward (pure — no Redis needed) ─────────────────────────────
@@ -15,9 +16,9 @@ import {
 import { describe, it } from 'vitest'
 
 describe('calculateCoinReward', () => {
-    it('total equals base + streakBonus + speedBonus + dailyBonus + perfectBonus', () => {
-        const reward = calculateCoinReward(5, 1, 3, true, 0)
-        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus)
+    it('total equals base + streakBonus + speedBonus + dailyBonus + perfectBonus + loginBonus', () => {
+        const reward = calculateCoinReward(5, 1, 3, true, 0, 2)
+        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus)
     })
 
     it('includes COIN_SPEED_BONUS when timeTaken <= parTime (expectedTime * 2)', () => {
@@ -61,6 +62,27 @@ describe('calculateCoinReward', () => {
         const reward = calculateCoinReward(100, 1, 0, false, 1)
         expect(reward.perfectBonus).toBe(0)
     })
+
+    // Login bonus tests
+    it('loginBonus is 0 when isDailyFirst is false', () => {
+        const reward = calculateCoinReward(100, 1, 0, false, 0, 5)
+        expect(reward.loginBonus).toBe(0)
+    })
+
+    it('loginBonus is 0 when isDailyFirst is true but consecutiveLoginDays is 0', () => {
+        const reward = calculateCoinReward(100, 1, 0, true, 0, 0)
+        expect(reward.loginBonus).toBe(0)
+    })
+
+    it('loginBonus equals getDailyLoginBonus(consecutiveLoginDays) when isDailyFirst is true', () => {
+        const reward = calculateCoinReward(100, 1, 0, true, 0, 3)
+        expect(reward.loginBonus).toBe(getDailyLoginBonus(3))
+    })
+
+    it('loginBonus works for day 5+ (max bonus)', () => {
+        const reward = calculateCoinReward(100, 1, 0, true, 0, 10)
+        expect(reward.loginBonus).toBe(25)
+    })
 })
 
 // ─── getUserEconomy (Redis-backed) ────────────────────────────────────────────
@@ -101,7 +123,7 @@ test('getUserStreakData returns defaults for new user', async () => {
 describe('Coin reward algebraic invariant — Property 8', () => {
     /**
      * Property 8: Coin reward algebraic invariant
-     * For any valid inputs, total === base + streakBonus + speedBonus + dailyBonus + perfectBonus
+     * For any valid inputs, total === base + streakBonus + speedBonus + dailyBonus + perfectBonus + loginBonus
      * Validates: Requirements 4.1, 4.2, 4.3
      */
     it('total always equals sum of components for all input combinations', () => {
@@ -110,16 +132,19 @@ describe('Coin reward algebraic invariant — Property 8', () => {
         const streakValues = [0, 1, 3, 5, 10]
         const isDailyFirstValues = [true, false]
         const mistakesValues = [0, 1, 3]
+        const loginDaysValues = [0, 1, 3, 5, 10]
 
         for (const timeTaken of timeTakenValues) {
             for (const level of levels) {
                 for (const currentStreak of streakValues) {
                     for (const isDailyFirst of isDailyFirstValues) {
                         for (const mistakes of mistakesValues) {
-                            const reward = calculateCoinReward(timeTaken, level, currentStreak, isDailyFirst, mistakes)
-                            expect(reward.total).toBe(
-                                reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
-                            )
+                            for (const loginDays of loginDaysValues) {
+                                const reward = calculateCoinReward(timeTaken, level, currentStreak, isDailyFirst, mistakes, loginDays)
+                                expect(reward.total).toBe(
+                                    reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus
+                                )
+                            }
                         }
                     }
                 }

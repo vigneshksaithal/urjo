@@ -31,7 +31,7 @@ import {
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
-import { getTodayUTC, getSkillLevel, fetchUsername } from '../lib/helpers'
+import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak } from '../lib/helpers'
 
 export const gameRouter = new Hono()
 
@@ -157,15 +157,6 @@ const getStreakData = async (userId: string): Promise<StreakData> => {
 		lastPlayedDate: lastDate ?? null,
 	}
 }
-/**
- * Calculate the day difference between two YYYY-MM-DD date strings.
- */
-const getDayDifference = (date1: string, date2: string): number => {
-	const d1 = new Date(date1)
-	const d2 = new Date(date2)
-	const diffTime = d2.getTime() - d1.getTime() // positive = date2 is after date1
-	return Math.floor(diffTime / (1000 * 60 * 60 * 24))
-}
 
 /**
  * Update the user's streak based on completion.
@@ -220,7 +211,18 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 	const economyData = await redis.hGetAll(economyKey)
 	const lastDailySolve = economyData?.dailyFirstSolve ?? null
 	const isDailyFirst = lastDailySolve !== today
-	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst, ctx.mistakes)
+
+	// Track login streak and get consecutive days (only matters on first daily solve)
+	const consecutiveLoginDays = await updateLoginStreak(ctx.userId, isDailyFirst)
+
+	const coinReward = calculateCoinReward(
+		ctx.timeTaken,
+		ctx.currentLevel,
+		ctx.streak.currentStreak,
+		isDailyFirst,
+		ctx.mistakes,
+		consecutiveLoginDays
+	)
 
 	// Atomic increments for coins (prevents race conditions)
 	const [, newTotalCoins] = await Promise.all([
@@ -240,7 +242,6 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 		equippedTitle: economyData?.equippedTitle ?? 'puzzler',
 		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
 	})
-
 	// Update coins leaderboard
 	await redis.zAdd('leaderboard:coins', { score: newTotalCoins, member: ctx.userId })
 

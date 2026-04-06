@@ -15,6 +15,7 @@ import {
 	getTitleById,
 	getLevelConfig,
 	getCoinBaseForLevel,
+	getDailyLoginBonus,
 } from '../../shared/constants'
 import { fetchUsername } from './helpers'
 
@@ -69,12 +70,17 @@ export const calculateCoinReward = (
 	level: number,
 	currentStreak: number,
 	isDailyFirst: boolean,
-	mistakes: number = 0
+	mistakes: number = 0,
+	consecutiveLoginDays: number = 0
 ): CoinReward => {
 	const config = getLevelConfig(level)
 	const parTime = config.expectedTime * PAR_TIME_MULTIPLIER
 	const speedBonus = timeTaken <= parTime ? COIN_SPEED_BONUS : 0
 	const perfectBonus = mistakes === 0 ? COIN_PERFECT_BONUS : 0
+
+	const loginBonus = isDailyFirst && consecutiveLoginDays > 0
+		? getDailyLoginBonus(consecutiveLoginDays)
+		: 0
 
 	const reward: CoinReward = {
 		base: getCoinBaseForLevel(level),
@@ -82,10 +88,11 @@ export const calculateCoinReward = (
 		speedBonus,
 		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,
 		perfectBonus,
+		loginBonus,
 		total: 0,
 	}
 
-	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
+	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus
 	return reward
 }
 

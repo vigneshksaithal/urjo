@@ -1,5 +1,10 @@
 <script lang="ts">
-	import type { CellColor, Grid, StreakData } from "../../shared/types";
+	import type {
+		CellColor,
+		Grid,
+		StreakData,
+		CoinReward,
+	} from "../../shared/types";
 	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -11,15 +16,6 @@
 	import Share2 from "lucide-svelte/icons/share-2";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
-
-	type CoinReward = {
-		base: number;
-		streakBonus: number;
-		speedBonus: number;
-		dailyBonus: number;
-		perfectBonus: number;
-		total: number;
-	};
 
 	type Props = {
 		grid: Grid;
@@ -178,6 +174,11 @@
 								{#if coinReward.perfectBonus > 0}
 									<span>🎯 +{coinReward.perfectBonus}</span>
 								{/if}
+								{#if coinReward.loginBonus > 0}
+									<span
+										>🎁 +{coinReward.loginBonus} login bonus</span
+									>
+								{/if}
 							</div>
 						</div>
 					{:else if streakData.currentStreak > 0}
@@ -211,7 +212,9 @@
 					<!-- Secondary actions -->
 					<div class="flex gap-3 w-full">
 						<button
-							onclick={() => { if (!hasShared) showShareConfirm = true; }}
+							onclick={() => {
+								if (!hasShared) showShareConfirm = true;
+							}}
 							disabled={hasShared}
 							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
 								text-sm hover:bg-theme-hover active:scale-95 transition-all
@@ -226,7 +229,9 @@
 							{/if}
 						</button>
 						<button
-							onclick={() => { if (!hasChallenged) showChallengeConfirm = true; }}
+							onclick={() => {
+								if (!hasChallenged) showChallengeConfirm = true;
+							}}
 							disabled={hasChallenged}
 							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
 								text-sm hover:bg-theme-hover active:scale-95 transition-all
@@ -277,11 +282,19 @@
 
 <!-- Share confirmation dialog -->
 {#if showShareConfirm}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-		<div class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl">
-			<h2 class="text-base font-bold text-theme-text-primary">Post your score?</h2>
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+	>
+		<div
+			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+		>
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Post your score?
+			</h2>
 			<p class="text-sm text-theme-text-secondary">
-				This will post a comment with your score{username ? ` as u/${username}` : ''}. Others can see it.
+				This will post a comment with your score{username
+					? ` as u/${username}`
+					: ""}. Others can see it.
 			</p>
 			<div class="flex gap-3">
 				<button
@@ -303,11 +316,19 @@
 
 <!-- Challenge confirmation dialog -->
 {#if showChallengeConfirm}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-		<div class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl">
-			<h2 class="text-base font-bold text-theme-text-primary">Issue a challenge?</h2>
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+	>
+		<div
+			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+		>
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Issue a challenge?
+			</h2>
 			<p class="text-sm text-theme-text-secondary">
-				This creates a public post in r/urjo with your time{username ? ` as u/${username}` : ''} for others to beat.
+				This creates a public post in r/urjo with your time{username
+					? ` as u/${username}`
+					: ""} for others to beat.
 			</p>
 			<div class="flex gap-3">
 				<button
