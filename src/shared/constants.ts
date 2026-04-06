@@ -191,3 +191,14 @@ export const TITLES: readonly import('./types').TitleDef[] = [
 export const getTitleById = (id: string): import('./types').TitleDef | undefined => {
 	return TITLES.find((t) => t.id === id)
 }
+
+// ─── Daily Login Bonus Constants ────────────────────────────────────────────────
+
+/** Daily login bonus coins by consecutive login day (index 0 = day 1, index 4+ = day 5+) */
+export const DAILY_LOGIN_BONUS: readonly number[] = [5, 5, 10, 10, 25] as const
+
+/** Get daily login bonus for a given consecutive login day count */
+export const getDailyLoginBonus = (consecutiveDays: number): number => {
+	const idx = Math.min(consecutiveDays - 1, 4)
+	return DAILY_LOGIN_BONUS[idx] ?? 5
+}

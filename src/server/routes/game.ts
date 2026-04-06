@@ -31,7 +31,7 @@ import {
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
-import { getTodayUTC, getSkillLevel, fetchUsername } from '../lib/helpers'
+import { getTodayUTC, getYesterdayUTC, getDayDifference, getSkillLevel, fetchUsername } from '../lib/helpers'
 
 export const gameRouter = new Hono()
 
@@ -157,15 +157,6 @@ const getStreakData = async (userId: string): Promise<StreakData> => {
 		lastPlayedDate: lastDate ?? null,
 	}
 }
-/**
- * Calculate the day difference between two YYYY-MM-DD date strings.
- */
-const getDayDifference = (date1: string, date2: string): number => {
-	const d1 = new Date(date1)
-	const d2 = new Date(date2)
-	const diffTime = d2.getTime() - d1.getTime() // positive = date2 is after date1
-	return Math.floor(diffTime / (1000 * 60 * 60 * 24))
-}
 
 /**
  * Update the user's streak based on completion.
@@ -212,6 +203,59 @@ type CoinRewardContext = {
 }
 
 /**
+ * Get login streak data for a user.
+ * Returns [consecutiveDays, lastLoginDate] or [0, null] if not found.
+ */
+const getLoginStreak = async (userId: string): Promise<{ days: number; lastDate: string | null }> => {
+	const [daysStr, lastDate] = await Promise.all([
+		redis.get(`user:${userId}:loginStreak:days`),
+		redis.get(`user:${userId}:loginStreak:lastDate`),
+	])
+
+	return {
+		days: daysStr ? parseInt(daysStr, 10) : 0,
+		lastDate: lastDate ?? null,
+	}
+}
+
+/**
+ * Update login streak based on first daily solve.
+ * Returns the updated consecutive login days count.
+ */
+const updateLoginStreak = async (userId: string, isDailyFirst: boolean): Promise<number> => {
+	if (!isDailyFirst) {
+		// Not first solve of the day — no streak update needed
+		const loginStreak = await getLoginStreak(userId)
+		return loginStreak.days
+	}
+
+	const today = getTodayUTC()
+	const yesterday = getYesterdayUTC()
+	const loginStreak = await getLoginStreak(userId)
+
+	let newDays: number
+
+	if (loginStreak.lastDate === yesterday) {
+		// Consecutive login — increment
+		newDays = loginStreak.days + 1
+	} else if (loginStreak.lastDate === today) {
+		// Already logged in today — keep current count
+		return loginStreak.days
+	} else {
+		// Missed a day or first login ever — reset to 1
+		newDays = 1
+	}
+
+	// Save updated streak to Redis
+	await Promise.all([
+		redis.set(`user:${userId}:loginStreak:days`, newDays.toString()),
+		redis.set(`user:${userId}:loginStreak:lastDate`, today),
+	])
+
+	return newDays
+}
+
+/**
  * Apply coin reward for a completed puzzle and persist economy data.
  */
 const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
@@ -220,7 +264,18 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 	const economyData = await redis.hGetAll(economyKey)
 	const lastDailySolve = economyData?.dailyFirstSolve ?? null
 	const isDailyFirst = lastDailySolve !== today
-	const coinReward = calculateCoinReward(ctx.timeTaken, ctx.currentLevel, ctx.streak.currentStreak, isDailyFirst, ctx.mistakes)
+
+	// Track login streak and get consecutive days (only matters on first daily solve)
+	const consecutiveLoginDays = await updateLoginStreak(ctx.userId, isDailyFirst)
+
+	const coinReward = calculateCoinReward(
+		ctx.timeTaken,
+		ctx.currentLevel,
+		ctx.streak.currentStreak,
+		isDailyFirst,
+		ctx.mistakes,
+		consecutiveLoginDays
+	)
 
 	// Atomic increments for coins (prevents race conditions)
 	const [, newTotalCoins] = await Promise.all([
@@ -240,7 +295,6 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 		equippedTitle: economyData?.equippedTitle ?? 'puzzler',
 		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
 	})
-
 	// Update coins leaderboard
 	await redis.zAdd('leaderboard:coins', { score: newTotalCoins, member: ctx.userId })
 

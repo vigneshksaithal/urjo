@@ -18,6 +18,7 @@
 		speedBonus: number;
 		dailyBonus: number;
 		perfectBonus: number;
+		loginBonus: number;
 		total: number;
 	};
 
@@ -177,6 +178,9 @@
 								{/if}
 								{#if coinReward.perfectBonus > 0}
 									<span>🎯 +{coinReward.perfectBonus}</span>
+								{/if}
+								{#if coinReward.loginBonus > 0}
+									<span>🎁 +{coinReward.loginBonus} login bonus</span>
 								{/if}
 							</div>
 						</div>

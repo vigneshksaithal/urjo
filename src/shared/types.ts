@@ -144,6 +144,7 @@ export type CoinReward = {
 	speedBonus: number
 	dailyBonus: number
 	perfectBonus: number
+	loginBonus: number
 	total: number
 }
 
