@@ -3,7 +3,7 @@
  * Coin calculation, user economy management, title validation
  */
 
-import { redis, reddit } from '@devvit/web/server'
+import { redis } from '@devvit/web/server'
 import type { UserEconomy, CoinReward, ShopItem, TitleDef, StreakData } from '../../shared/types'
 import {
 	COIN_STREAK_MULTIPLIER,
@@ -16,7 +16,7 @@ import {
 	getLevelConfig,
 	getCoinBaseForLevel,
 } from '../../shared/constants'
-import { getTodayUTC, fetchUsername } from './helpers'
+import { fetchUsername } from './helpers'
 
 const ECONOMY_KEY_PREFIX = 'user'
 
@@ -82,11 +82,10 @@ export const calculateCoinReward = (
 		speedBonus,
 		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,
 		perfectBonus,
-		loginBonus: 0,
 		total: 0,
 	}
 
-	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus
+	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
 	return reward
 }
 

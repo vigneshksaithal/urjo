@@ -17,14 +17,14 @@ export type DifficultyLevel = {
  * expectedTime is used for performance scoring -- tunable after playtesting.
  */
 export const DIFFICULTY_LADDER: readonly DifficultyLevel[] = [
-	{ level: 1, gridSize: 4, difficulty: 'easy',       expectedTime: 45  },
-	{ level: 2, gridSize: 4, difficulty: 'medium',     expectedTime: 90  },
-	{ level: 3, gridSize: 4, difficulty: 'hard',       expectedTime: 150 },
-	{ level: 4, gridSize: 6, difficulty: 'easy',       expectedTime: 120 },
-	{ level: 5, gridSize: 6, difficulty: 'medium',     expectedTime: 210 },
-	{ level: 6, gridSize: 6, difficulty: 'hard',       expectedTime: 360 },
-	{ level: 7, gridSize: 8, difficulty: 'easy',       expectedTime: 300 },
-	{ level: 8, gridSize: 8, difficulty: 'medium',     expectedTime: 480 },
+	{ level: 1, gridSize: 4, difficulty: 'easy', expectedTime: 45 },
+	{ level: 2, gridSize: 4, difficulty: 'medium', expectedTime: 90 },
+	{ level: 3, gridSize: 4, difficulty: 'hard', expectedTime: 150 },
+	{ level: 4, gridSize: 6, difficulty: 'easy', expectedTime: 120 },
+	{ level: 5, gridSize: 6, difficulty: 'medium', expectedTime: 210 },
+	{ level: 6, gridSize: 6, difficulty: 'hard', expectedTime: 360 },
+	{ level: 7, gridSize: 8, difficulty: 'easy', expectedTime: 300 },
+	{ level: 8, gridSize: 8, difficulty: 'medium', expectedTime: 480 },
 	{ level: 9, gridSize: 8, difficulty: 'diabolical', expectedTime: 720 },
 ] as const
 
@@ -145,15 +145,6 @@ export const COIN_PERFECT_BONUS = 10
 
 /** Multiplier for par time calculation (expectedTime * 2) */
 export const PAR_TIME_MULTIPLIER = 2
-
-/** Daily login bonus coins by consecutive day (index 0 = day 1, index 4+ = day 5+) */
-export const DAILY_LOGIN_BONUS: readonly number[] = [5, 5, 10, 10, 25] as const
-
-/** Get daily login bonus based on consecutive login days */
-export const getDailyLoginBonus = (consecutiveDays: number): number => {
-	const idx = Math.min(consecutiveDays - 1, 4)
-	return DAILY_LOGIN_BONUS[idx] ?? 5
-}
 
 /** Title definitions - purchasable cosmetic titles */
 export const TITLES: readonly import('./types').TitleDef[] = [

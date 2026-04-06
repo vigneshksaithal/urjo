@@ -48,3 +48,4 @@ export const fetchUsername = async (targetUserId: string, currentUserId?: string
 		return 'Anon'
 	}
 }
+
