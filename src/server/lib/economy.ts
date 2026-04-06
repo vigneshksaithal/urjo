@@ -3,7 +3,7 @@
  * Coin calculation, user economy management, title validation
  */
 
-import { redis, reddit } from '@devvit/web/server'
+import { redis } from '@devvit/web/server'
 import type { UserEconomy, CoinReward, ShopItem, TitleDef, StreakData } from '../../shared/types'
 import {
 	COIN_STREAK_MULTIPLIER,
@@ -16,14 +16,12 @@ import {
 	getLevelConfig,
 	getCoinBaseForLevel,
 } from '../../shared/constants'
+import { fetchUsername } from './helpers'
 
 const ECONOMY_KEY_PREFIX = 'user'
 
 const getEconomyKey = (userId: string): string =>
 	`${ECONOMY_KEY_PREFIX}:${userId}:economy`
-
-export const getTodayUTC = (): string =>
-	new Date().toISOString().split('T')[0] ?? ''
 
 /**
  * Get user's economy data from Redis hash
@@ -200,7 +198,7 @@ export const getUserDisplay = async (
 	}
 
 	// Fetch username
-	const username = await fetchUsernameFromReddit(targetUserId)
+	const username = await fetchUsername(targetUserId)
 
 	// Get title
 	const economy = await getUserEconomy(targetUserId)
@@ -213,18 +211,6 @@ export const getUserDisplay = async (
 	await redis.expire(cacheKey, 86400)
 
 	return { username, titleEmoji }
-}
-
-/**
- * Fetch username from Reddit API
- */
-const fetchUsernameFromReddit = async (targetUserId: string): Promise<string> => {
-	try {
-		const user = await reddit.getUserById(targetUserId as `t2_${string}`)
-		return user?.username ?? 'Anon'
-	} catch {
-		return 'Anon'
-	}
 }
 
 /**

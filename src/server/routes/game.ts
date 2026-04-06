@@ -20,7 +20,7 @@ import type {
 	ChallengeResponse,
 	SerializedPuzzle,
 } from '../../shared/types'
-import { DEFAULT_SKILL_LEVEL, MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
+import { MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
 import { generatePuzzle } from '../lib/generator'
 import {
 	calculatePerformanceScore,
@@ -31,6 +31,7 @@ import {
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
+import { getTodayUTC, getSkillLevel, fetchUsername } from '../lib/helpers'
 
 export const gameRouter = new Hono()
 
@@ -87,43 +88,6 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Fetch Reddit username for a user ID.
- * Caches results in Redis for 24 hours.
- * Returns "You" for current user, actual username for others, "Anon" as fallback.
- */
-const fetchUsername = async (targetUserId: string, currentUserId?: string): Promise<string> => {
-	if (currentUserId && targetUserId === currentUserId) {
-		return 'You'
-	}
-
-	const cacheKey = `user:${targetUserId}:username`
-	const cached = await redis.get(cacheKey)
-	if (cached) return cached
-
-	try {
-		const user = await reddit.getUserById(targetUserId as `t2_${string}`)
-		if (!user) return 'Anon'
-
-		const username = user.username
-		await redis.set(cacheKey, username)
-		await redis.expire(cacheKey, 86400)
-
-		return username
-	} catch (error) {
-		console.error(`Failed to fetch username for ${targetUserId}:`, error)
-		return 'Anon'
-	}
-}
-
-/**
- * Get the user's current skill level from Redis.
- */
-const getSkillLevel = async (userId: string): Promise<number> => {
-	const level = await redis.get(`user:${userId}:skillLevel`)
-	return level ? parseInt(level, 10) : DEFAULT_SKILL_LEVEL
-}
 
 /**
  * Get the user's game history from Redis.
@@ -193,17 +157,6 @@ const getStreakData = async (userId: string): Promise<StreakData> => {
 		lastPlayedDate: lastDate ?? null,
 	}
 }
-
-/**
- * Get today's date in UTC as YYYY-MM-DD.
- */
-const getTodayUTC = (): string => {
-	const now = new Date()
-	const isoString = now.toISOString()
-	const datePart = isoString.split('T')[0]
-	return datePart ?? ''
-}
-
 /**
  * Calculate the day difference between two YYYY-MM-DD date strings.
  */

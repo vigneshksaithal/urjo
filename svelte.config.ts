@@ -6,4 +6,3 @@ const config: SvelteConfig = {
 }
 
 export default config
-
