@@ -82,10 +82,11 @@ export const calculateCoinReward = (
 		speedBonus,
 		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,
 		perfectBonus,
+		loginBonus: 0,
 		total: 0,
 	}
 
-	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
+	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus
 	return reward
 }
 

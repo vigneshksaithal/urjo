@@ -15,9 +15,9 @@ import {
 import { describe, it } from 'vitest'
 
 describe('calculateCoinReward', () => {
-    it('total equals base + streakBonus + speedBonus + dailyBonus + perfectBonus', () => {
+    it('total equals base + streakBonus + speedBonus + dailyBonus + perfectBonus + loginBonus', () => {
         const reward = calculateCoinReward(5, 1, 3, true, 0)
-        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus)
+        expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus)
     })
 
     it('includes COIN_SPEED_BONUS when timeTaken <= parTime (expectedTime * 2)', () => {
@@ -118,7 +118,7 @@ describe('Coin reward algebraic invariant — Property 8', () => {
                         for (const mistakes of mistakesValues) {
                             const reward = calculateCoinReward(timeTaken, level, currentStreak, isDailyFirst, mistakes)
                             expect(reward.total).toBe(
-                                reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus
+                                reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus
                             )
                         }
                     }
