@@ -20,6 +20,15 @@
 
 	let currentStepIndex = $state(0);
 	let tutorialDone = $state(false);
+	let showSkip = $state(false);
+
+	// Show skip button after 4 seconds
+	$effect(() => {
+		const timeout = setTimeout(() => {
+			showSkip = true;
+		}, 4000);
+		return () => clearTimeout(timeout);
+	});
 
 	function buildInitialGrid(): Grid {
 		const grid: Grid = [];
@@ -216,8 +225,8 @@
 		</div>
 	</main>
 
-	<!-- Step indicator -->
-	<footer class="flex-none h-10 flex items-center justify-center">
+	 <!-- Step indicator -->
+	<footer class="flex-none h-10 flex items-center justify-center relative">
 		{#if !tutorialDone}
 			<div class="flex gap-1.5">
 				{#each TUTORIAL_STEPS as _, i (i)}
@@ -231,6 +240,17 @@
 					></div>
 				{/each}
 			</div>
+		{/if}
+
+		<!-- Skip tutorial button -->
+		{#if showSkip && !tutorialDone}
+			<button
+				onclick={onComplete}
+				class="absolute right-0 top-1/2 -translate-y-1/2 px-3 py-1 text-xs text-theme-text-secondary/70
+					hover:text-theme-text-primary active:scale-95 transition-all"
+			>
+				Skip tutorial →
+			</button>
 		{/if}
 	</footer>
 </div>

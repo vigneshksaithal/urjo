@@ -186,3 +186,14 @@ export type EquipTitleResponse = {
 	success: boolean
 	error?: string
 }
+
+/** Challenge entry for the challenges tab */
+export type ChallengeEntry = {
+	postId: string
+	username: string
+	timeTaken: number
+	skillLevel: number
+	mistakes: number
+	createdAt: number
+	postUrl: string
+}

@@ -1,11 +1,12 @@
 <script lang="ts">
-	import type { LeaderboardData } from "../../shared/types";
+	import type { LeaderboardData, ChallengeEntry } from "../../shared/types";
 	import { focusTrap } from "../lib/focus-trap";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import Flame from "lucide-svelte/icons/flame";
 	import Zap from "lucide-svelte/icons/zap";
 	import X from "lucide-svelte/icons/x";
 	import Loader2 from "lucide-svelte/icons/loader-2";
+	import Target from "lucide-svelte/icons/target";
 
 	type Props = {
 		isOpen: boolean;
@@ -15,8 +16,9 @@
 
 	let { isOpen, onClose, onNextChallenge }: Props = $props();
 
-	let activeTab = $state<"streak" | "speed" | "coins">("streak");
+	let activeTab = $state<"streak" | "speed" | "coins" | "challenges">("streak");
 	let leaderboardData = $state<LeaderboardData | null>(null);
+	let challengesData = $state<ChallengeEntry[]>([]);
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -32,30 +34,39 @@
 		error = null;
 
 		try {
-			let url: string;
-			if (activeTab === "coins") {
-				url = "/api/leaderboard/coins";
+			if (activeTab === "challenges") {
+				const response = await fetch("/api/game/challenges");
+				if (!response.ok) throw new Error("Failed to fetch challenges");
+				challengesData = await response.json();
+				leaderboardData = null;
 			} else {
-				url = `/api/game/leaderboard?type=${activeTab}`;
+				let url: string;
+				if (activeTab === "coins") {
+					url = "/api/leaderboard/coins";
+				} else {
+					url = `/api/game/leaderboard?type=${activeTab}`;
+				}
+
+				const response = await fetch(url);
+				if (!response.ok) throw new Error("Failed to fetch leaderboard");
+
+				const data: LeaderboardData = await response.json();
+				leaderboardData = data;
+				challengesData = [];
 			}
-
-			const response = await fetch(url);
-			if (!response.ok) throw new Error("Failed to fetch leaderboard");
-
-			const data: LeaderboardData = await response.json();
-			leaderboardData = data;
 		} catch (err) {
 			error =
 				err instanceof Error
 					? err.message
 					: "Failed to load leaderboard";
 			leaderboardData = null;
+			challengesData = [];
 		} finally {
 			isLoading = false;
 		}
 	}
 
-	function handleTabChange(tab: "streak" | "speed" | "coins") {
+	function handleTabChange(tab: "streak" | "speed" | "coins" | "challenges") {
 		activeTab = tab;
 		fetchLeaderboard();
 	}
@@ -71,6 +82,17 @@
 		} else {
 			return `${score.toLocaleString()} 🪙`;
 		}
+	}
+
+	function formatTimeAgo(timestamp: number): string {
+		const seconds = Math.floor((Date.now() - timestamp) / 1000);
+		if (seconds < 60) return "Just now";
+		const minutes = Math.floor(seconds / 60);
+		if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+		const days = Math.floor(hours / 24);
+		return `${days} day${days === 1 ? "" : "s"} ago`;
 	}
 </script>
 
@@ -144,6 +166,16 @@
 					<span class="text-sm">🪙</span>
 					<span>Coins</span>
 				</button>
+				<button
+					onclick={() => handleTabChange("challenges")}
+					class="flex-1 flex items-center justify-center gap-2 px-4 py-3 font-medium transition-colors
+						{activeTab === 'challenges'
+						? 'text-theme-text-primary bg-theme-hover border-b-2 border-red-400'
+						: 'text-theme-text-muted hover:text-theme-text-primary'}"
+				>
+					<Target class="w-4 h-4" />
+					<span>Challenges</span>
+				</button>
 			</div>
 
 			<!-- Content -->
@@ -164,6 +196,40 @@
 							Retry
 						</button>
 					</div>
+				{:else if activeTab === "challenges"}
+					{#if challengesData.length > 0}
+						<div class="divide-y divide-theme-border">
+							{#each challengesData as challenge}
+								<div class="p-4 hover:bg-theme-hover transition-colors">
+									<div class="flex items-start gap-3">
+										<Target class="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+										<div class="flex-1 min-w-0">
+											<p class="text-sm text-theme-text-primary">
+												🎯 u/{challenge.username} challenged at Level {challenge.skillLevel} in {challenge.timeTaken}s
+											</p>
+											<a
+												href={challenge.postUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="inline-block mt-2 text-xs text-blue-400 hover:text-blue-300 underline"
+											>
+												Beat this challenge →
+											</a>
+											<p class="text-xs text-theme-text-muted mt-1">
+												Posted {formatTimeAgo(challenge.createdAt)}
+											</p>
+										</div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<div class="text-center py-8 text-theme-text-muted">
+							<p>
+								No active challenges. Complete a puzzle and tap 'Compete'!
+							</p>
+						</div>
+					{/if}
 				{:else if leaderboardData && leaderboardData.entries.length > 0}
 					<!-- Table layout -->
 					<table class="w-full border-collapse">
@@ -209,7 +275,7 @@
 									<td
 										class="px-4 py-3 text-sm font-bold text-yellow-400 text-right"
 									>
-										{formatScore(entry.score, activeTab)}
+										{formatScore(entry.score, activeTab as "streak" | "speed" | "coins")}
 									</td>
 								</tr>
 							{/each}

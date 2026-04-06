@@ -18,6 +18,7 @@ import type {
 	ShareResponse,
 	ChallengeRequest,
 	ChallengeResponse,
+	ChallengeEntry,
 	SerializedPuzzle,
 } from '../../shared/types'
 import { MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
@@ -693,9 +694,57 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`} at Level ${skillLevel}\n\nThink you can do better? Solve the puzzle above! 🎯`
 		await reddit.submitComment({ id: newPost.id, text: scoreComment })
 
+		// Add to recent challenges index
+		const challengeEntry = JSON.stringify({
+			postId: newPost.id,
+			username,
+			timeTaken,
+			skillLevel,
+			mistakes,
+			createdAt: Date.now(),
+		})
+		await redis.zAdd('challenges:recent', { score: Date.now(), member: challengeEntry })
+		// Keep only last 50 challenges
+		await redis.zRemRangeByRank('challenges:recent', 0, -51)
+		// TTL 7 days
+		await redis.expire('challenges:recent', 604800)
+
 		return c.json<ChallengeResponse>({ success: true, postUrl: `https://reddit.com/${newPost.id}` })
 	} catch (error) {
 		console.error('Challenge post error:', error)
 		return c.json<ChallengeResponse>({ success: false, error: 'Failed to create challenge' })
+	}
+})
+
+// ─── GET /api/game/challenges ─────────────────────────────────────────────────
+
+gameRouter.get('/api/game/challenges', async (_c) => {
+	try {
+		const recentChallenges = await redis.zRange('challenges:recent', 0, 9, { reverse: true, by: 'rank' })
+
+		const entries: ChallengeEntry[] = recentChallenges.map((item) => {
+			const parsed = JSON.parse(item.member) as {
+				postId: string
+				username: string
+				timeTaken: number
+				skillLevel: number
+				mistakes: number
+				createdAt: number
+			}
+			return {
+				postId: parsed.postId,
+				username: parsed.username,
+				timeTaken: parsed.timeTaken,
+				skillLevel: parsed.skillLevel,
+				mistakes: parsed.mistakes,
+				createdAt: parsed.createdAt,
+				postUrl: `https://reddit.com/${parsed.postId}`,
+			}
+		})
+
+		return c.json(entries)
+	} catch (error) {
+		console.error('Error fetching challenges:', error)
+		return c.json({ error: 'Failed to fetch challenges' }, 500)
 	}
 })
