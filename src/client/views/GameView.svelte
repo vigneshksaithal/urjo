@@ -209,7 +209,7 @@
 						Next Challenge
 					</button>
 
-					<!-- Secondary actions -->
+					<!-- User actions row (Reddit interactions) -->
 					<div class="flex gap-3 w-full">
 						<button
 							onclick={() => {
@@ -222,10 +222,10 @@
 								flex items-center justify-center gap-2"
 						>
 							{#if hasShared}
-								<span>✅ Shared!</span>
+								<span>✅ Commented!</span>
 							{:else}
 								<Share2 class="w-4 h-4" />
-								<span>Share</span>
+								<span>Comment Score</span>
 							{/if}
 						</button>
 						<button
@@ -243,13 +243,6 @@
 							{:else}
 								<span>⚔️ Challenge</span>
 							{/if}
-						</button>
-						<button
-							onclick={onRestart}
-							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
-								text-sm hover:bg-theme-hover active:scale-95 transition-all"
-						>
-							Restart
 						</button>
 					</div>
 				</div>
