@@ -36,7 +36,8 @@
 		timeTaken?: number;
 		mistakes?: number;
 		username?: string;
-		skillLevel?: number;
+		hasSubscribed?: boolean;
+		onSubscribe?: () => void;
 	};
 
 	let {
@@ -57,13 +58,15 @@
 		timeTaken,
 		mistakes = 0,
 		username,
-		skillLevel = 1,
+		hasSubscribed = false,
+		onSubscribe,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
 	let showHowToPlay = $state(false);
 	let showShareConfirm = $state(false);
 	let showChallengeConfirm = $state(false);
+	let showSubscribeConfirm = $state(false);
 	let hasFiredConfetti = $state(false);
 
 	$effect(() => {
@@ -84,6 +87,11 @@
 	function confirmChallenge() {
 		showChallengeConfirm = false;
 		onChallenge();
+	}
+
+	function confirmSubscribe() {
+		showSubscribeConfirm = false;
+		onSubscribe?.();
 	}
 </script>
 
@@ -245,6 +253,18 @@
 							{/if}
 						</button>
 					</div>
+
+					<!-- Subreddit subscribe CTA -->
+					{#if onSubscribe && !hasSubscribed}
+						<button
+							onclick={() => (showSubscribeConfirm = true)}
+							class="px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
+								text-sm hover:bg-theme-hover active:scale-95 transition-all w-full
+								flex items-center justify-center gap-2"
+						>
+							🔔 Join r/urjo for daily puzzles
+						</button>
+					{/if}
 				</div>
 			</div>
 		{/if}
@@ -335,6 +355,39 @@
 					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
 				>
 					Post Challenge
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Subscribe confirmation dialog -->
+{#if showSubscribeConfirm}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+	>
+		<div
+			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+		>
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Join r/urjo?
+			</h2>
+			<p class="text-sm text-theme-text-secondary">
+				This will subscribe you to r/urjo so you get daily puzzle
+				notifications in your feed.
+			</p>
+			<div class="flex gap-3">
+				<button
+					onclick={() => (showSubscribeConfirm = false)}
+					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={confirmSubscribe}
+					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
+				>
+					Join
 				</button>
 			</div>
 		</div>

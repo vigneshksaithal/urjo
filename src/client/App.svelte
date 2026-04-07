@@ -61,6 +61,7 @@
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
+	let hasSubscribed = $state(false);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -135,6 +136,8 @@
 
 			// Load economy data
 			loadEconomy();
+			// Check subscription status
+			checkSubscription();
 		} catch (error) {
 			errorMessage =
 				error instanceof Error ? error.message : "Failed to load game";
@@ -151,6 +154,30 @@
 			}
 		} catch {
 			// Non-critical, use defaults
+		}
+	}
+
+	async function checkSubscription() {
+		try {
+			const response = await fetch("/api/subscribe/status");
+			if (response.ok) {
+				const data = await response.json();
+				hasSubscribed = data.subscribed;
+			}
+		} catch {
+			// Non-critical
+		}
+	}
+
+	async function handleSubscribe() {
+		if (hasSubscribed) return;
+		try {
+			const response = await fetch("/api/subscribe", { method: "POST" });
+			if (response.ok) {
+				hasSubscribed = true;
+			}
+		} catch {
+			// Non-critical
 		}
 	}
 
@@ -393,13 +420,14 @@
 			timeTaken,
 			mistakes: $mistakeCount,
 			username,
-			skillLevel,
+			hasSubscribed,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
 			onShare: handleShare,
 			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
+			onSubscribe: handleSubscribe,
 		}}
 		{#if coinReward}
 			<GameView {...gameProps} {coinReward} />

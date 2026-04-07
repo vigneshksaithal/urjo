@@ -31,6 +31,7 @@ import {
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
+import { getUserEconomy } from '../lib/economy'
 import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak } from '../lib/helpers'
 
 export const gameRouter = new Hono()
@@ -53,31 +54,12 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 		if (winnerId === challengerId) return
 		if (timeTaken >= challengeScore) return
 
-		// Avoid spamming — only notify once per winner per post
+		// Record the beat in Redis so the challenger sees it next time they open the game
 		const notifyKey = `challenge:${postId}:beaten:${winnerId}`
 		const alreadyNotified = await redis.get(notifyKey)
 		if (alreadyNotified === 'true') return
 		await redis.set(notifyKey, 'true')
-		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
-
-		// Fetch winner username
-		let winnerUsername = 'Someone'
-		try {
-			const user = await reddit.getUserById(winnerId as `t2_${string}`)
-			winnerUsername = user?.username ?? 'Someone'
-		} catch { /* fallback */ }
-
-		// Try to DM the original challenger (no public comment - automated comments violate Reddit policy)
-		try {
-			const challenger = await reddit.getUserById(challengerId as `t2_${string}`)
-			if (challenger?.username) {
-				await reddit.sendPrivateMessage({
-					to: challenger.username,
-					subject: '🎯 Your Urjo challenge was beaten!',
-					text: `u/${winnerUsername} just beat your Urjo challenge with ${timeTaken}s (your score: ${challengeScore}s). Time to reclaim your title! https://reddit.com/${postId}`,
-				})
-			}
-		} catch { /* DM is best-effort */ }
+		await redis.expire(notifyKey, 2592000) // 30-day TTL
 	} catch (err) {
 		console.error('checkChallengeBeat error:', err)
 	}
@@ -157,6 +139,7 @@ const getStreakData = async (userId: string): Promise<StreakData> => {
 /**
  * Update the user's streak based on completion.
  * Uses 1-day grace period (48 hours).
+ * Streak freeze protects streak when dayDiff > 2.
  */
 const updateStreak = async (userId: string): Promise<StreakData> => {
 	const today = getTodayUTC()
@@ -172,6 +155,14 @@ const updateStreak = async (userId: string): Promise<StreakData> => {
 		const dayDiff = getDayDifference(streakData.lastPlayedDate, today)
 		if (dayDiff === 1 || dayDiff === 2) {
 			newStreak = streakData.currentStreak + 1
+		} else if (dayDiff > 2) {
+			// Streak would break - check for freeze
+			const economy = await getUserEconomy(userId)
+			if (economy.streakFreezes > 0) {
+				// Use a freeze - keep current streak, consume one freeze
+				await redis.hIncrBy(`user:${userId}:economy`, 'streakFreezes', -1)
+				newStreak = streakData.currentStreak + 1
+			}
 		}
 	}
 
