@@ -118,28 +118,13 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 		// Update the leaderboard comment
 		await updateLeaderboardComment(postId)
 
-		// Fetch winner username
-		let winnerUsername = 'Someone'
-		try {
-			const user = await reddit.getUserById(winnerId as `t2_${string}`)
-			winnerUsername = user?.username ?? 'Someone'
-		} catch { /* fallback */ }
-
-		// Try to DM the original challenger (no public comment - automated comments violate Reddit policy)
-		try {
-			const challenger = await reddit.getUserById(challengerId as `t2_${string}`)
-			if (challenger?.username) {
-				await reddit.sendPrivateMessage({
-					to: challenger.username,
-					subject: '🎯 Your Urjo challenge was beaten!',
-					text: `u/${winnerUsername} just beat your Urjo challenge with ${timeTaken}s (your score: ${challengeScore}s). Time to reclaim your title! https://reddit.com/${postId}`,
-				})
-			}
-		} catch { /* DM is best-effort */ }
-
 		// Mark beat as recorded — after stats are written so partial failure doesn't lose data
 		await redis.set(notifyKey, 'true')
 		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
+
+
+
+
 	} catch (err) {
 		console.error('checkChallengeBeat error:', err)
 	}
@@ -464,10 +449,16 @@ gameRouter.post('/api/game/complete', async (c) => {
 		)
 		await redis.set(`user:${userId}:consecutiveSkips`, '0')
 
-		// Track attempts on challenge posts
+		// Track attempts on challenge posts (once per user)
 		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
 		if (puzzleMeta?.challengeBy) {
-			await redis.hIncrBy(`game:${postId}:stats`, 'attempts', 1)
+			const attemptedKey = `challenge:${postId}:attempted:${userId}`
+			const alreadyAttempted = await redis.get(attemptedKey)
+			if (!alreadyAttempted) {
+				await redis.hIncrBy(`game:${postId}:stats`, 'attempts', 1)
+				await redis.set(attemptedKey, 'true')
+				await redis.expire(attemptedKey, 2592000) // 30-day TTL
+			}
 		}
 
 		// Check if this is a challenge post and if the player beat the challenge
@@ -653,16 +644,16 @@ gameRouter.post('/api/game/share', async (c) => {
 		const statsLine = `⏱️ ${timeTaken}s · 🎯 Level ${skillLevel} · 🔥 ${streak} day streak · ${perfTag}`
 		const commentText = `u/${sharerUsername} solved it!\n\n${emojiGrid}\n\n${statsLine}\nPlay → r/urjo`
 
-		// Post as reply to the sticky scores comment, if one exists.
-		// Fall back to a new top-level comment.
+		// Must reply to the sticky scores comment — required by Reddit user actions policy.
 		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
 		const stickyCommentId = postMeta['stickyCommentId']
-		const targetId = stickyCommentId
-			? (stickyCommentId as `t1_${string}`)
-			: (postId as `t3_${string}`)
+
+		if (!stickyCommentId) {
+			return c.json({ success: false, error: 'No sticky comment available' })
+		}
 
 		await reddit.submitComment({
-			id: targetId,
+			id: stickyCommentId as `t1_${string}`,
 			text: commentText,
 			runAs: 'USER',
 		})
@@ -757,10 +748,6 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			challengeScore: timeTaken.toString(),
 		})
 
-		await redis.hSet(`game:${newPost.id}:meta`, {
-			postType: 'urjo-puzzle',
-		})
-
 		// Initialize stats for the challenge post
 		await redis.hSet(`game:${newPost.id}:stats`, {
 			attempts: '0',
@@ -788,8 +775,9 @@ gameRouter.post('/api/game/challenge', async (c) => {
 Think you can beat it? Play above! 🎯`,
 		})
 
-		// Store the leaderboard comment ID for updates
+		// Store postType and leaderboard comment ID together — single hSet avoids clobbering
 		await redis.hSet(`game:${newPost.id}:meta`, {
+			postType: 'urjo-puzzle',
 			leaderboardCommentId: leaderboardComment.id,
 		})
 
