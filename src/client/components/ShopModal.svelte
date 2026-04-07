@@ -19,6 +19,7 @@
 	let buyingTitle = $state<string | null>(null);
 	let equippingTitle = $state<string | null>(null);
 	let buyingFreeze = $state(false);
+	let flairConfirmTitle = $state<ShopItem | null>(null);
 
 	$effect(() => {
 		if (isOpen) {
@@ -72,7 +73,12 @@
 		}
 	}
 
-	async function equipTitle(titleId: string) {
+	function startEquip(item: ShopItem) {
+		flairConfirmTitle = item;
+	}
+
+	async function equipTitle(titleId: string, updateFlair: boolean) {
+		flairConfirmTitle = null;
 		equippingTitle = titleId;
 		error = null;
 
@@ -80,7 +86,7 @@
 			const response = await fetch("/api/shop/equip", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ titleId }),
+				body: JSON.stringify({ titleId, updateFlair }),
 			});
 
 			const data = await response.json();
@@ -119,7 +125,10 @@
 			coins = data.newBalance ?? coins;
 			streakFreezes = data.streakFreezes ?? streakFreezes;
 		} catch (err) {
-			error = err instanceof Error ? err.message : "Failed to buy streak freeze";
+			error =
+				err instanceof Error
+					? err.message
+					: "Failed to buy streak freeze";
 		} finally {
 			buyingFreeze = false;
 		}
@@ -195,7 +204,9 @@
 				<div class="flex items-center gap-3">
 					<span class="text-3xl">🧊</span>
 					<div>
-						<p class="font-semibold text-theme-text-primary text-sm">
+						<p
+							class="font-semibold text-theme-text-primary text-sm"
+						>
 							Streak Freeze
 						</p>
 						<p class="text-xs text-theme-text-muted">
@@ -285,7 +296,7 @@
 									>
 								{:else if item.owned}
 									<button
-										onclick={() => equipTitle(item.id)}
+										onclick={() => startEquip(item)}
 										disabled={equippingTitle === item.id}
 										class="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 disabled:opacity-40 transition-colors"
 									>
@@ -314,6 +325,46 @@
 						{/each}
 					</div>
 				{/if}
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Flair confirmation dialog -->
+{#if flairConfirmTitle}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+	>
+		<div
+			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+		>
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Equip {flairConfirmTitle.emoji}
+				{flairConfirmTitle.label}?
+			</h2>
+			<p class="text-sm text-theme-text-secondary">
+				Also update your subreddit flair to "{flairConfirmTitle.emoji}
+				{flairConfirmTitle.label}"?
+			</p>
+			<div class="flex flex-col gap-2">
+				<button
+					onclick={() => equipTitle(flairConfirmTitle!.id, true)}
+					class="w-full px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
+				>
+					Equip + Update Flair
+				</button>
+				<button
+					onclick={() => equipTitle(flairConfirmTitle!.id, false)}
+					class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
+				>
+					Equip Only
+				</button>
+				<button
+					onclick={() => (flairConfirmTitle = null)}
+					class="w-full px-4 py-2 text-theme-text-muted text-sm hover:text-theme-text-secondary transition-all"
+				>
+					Cancel
+				</button>
 			</div>
 		</div>
 	</div>

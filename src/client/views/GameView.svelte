@@ -16,8 +16,6 @@
 	import Share2 from "lucide-svelte/icons/share-2";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
-	import Clipboard from "lucide-svelte/icons/clipboard";
-	import Check from "lucide-svelte/icons/check";
 
 	type Props = {
 		grid: Grid;
@@ -38,8 +36,6 @@
 		timeTaken?: number;
 		mistakes?: number;
 		username?: string;
-		skillLevel?: number;
-		puzzleColors?: string;
 		hasSubscribed?: boolean;
 		onSubscribe?: () => void;
 	};
@@ -62,8 +58,6 @@
 		timeTaken,
 		mistakes = 0,
 		username,
-		skillLevel = 1,
-		puzzleColors,
 		hasSubscribed = false,
 		onSubscribe,
 	}: Props = $props();
@@ -72,8 +66,8 @@
 	let showHowToPlay = $state(false);
 	let showShareConfirm = $state(false);
 	let showChallengeConfirm = $state(false);
+	let showSubscribeConfirm = $state(false);
 	let hasFiredConfetti = $state(false);
-	let copyState = $state<'idle' | 'copied'>('idle');
 
 	$effect(() => {
 		if (isCompleted && !hasFiredConfetti) {
@@ -95,41 +89,9 @@
 		onChallenge();
 	}
 
-	function buildShareText(): string {
-		const perfTag =
-			mistakes === 0 ? "⚡ Perfect!" : `⚠️ ${mistakes} mistake${mistakes === 1 ? "" : "s"}`;
-
-		// Build emoji grid from puzzleColors
-		let emojiGrid = "";
-		if (puzzleColors) {
-			for (let i = 0; i < puzzleColors.length; i += gridSize) {
-				const row = puzzleColors.slice(i, i + gridSize);
-				const emojiRow = row
-					.split("")
-					.map((c) => (c === "r" ? "🟥" : c === "b" ? "🟦" : "⬜"))
-					.join("");
-				emojiGrid += emojiRow + "\n";
-			}
-		}
-
-		return `Urjo • Level ${skillLevel} • ${timeTaken ?? 0}s ${perfTag}
-
-${emojiGrid.trim()}
-
-Beat me → reddit.com/r/urjo`;
-	}
-
-	async function handleCopyResult() {
-		const text = buildShareText();
-		try {
-			await navigator.clipboard.writeText(text);
-			copyState = "copied";
-			setTimeout(() => {
-				copyState = "idle";
-			}, 2000);
-		} catch {
-			// Clipboard write failed, ignore
-		}
+	function confirmSubscribe() {
+		showSubscribeConfirm = false;
+		onSubscribe?.();
 	}
 </script>
 
@@ -292,41 +254,16 @@ Beat me → reddit.com/r/urjo`;
 						</button>
 					</div>
 
-					<!-- Copy Result button -->
-					<button
-						onclick={handleCopyResult}
-						class="px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
-							text-sm hover:bg-theme-hover active:scale-95 transition-all w-full
-							flex items-center justify-center gap-2"
-					>
-						{#if copyState === 'copied'}
-							<Check class="w-4 h-4 text-green-400" />
-							<span class="text-green-400">Copied!</span>
-						{:else}
-							<Clipboard class="w-4 h-4" />
-							<span>📋 Copy Result</span>
-						{/if}
-					</button>
-
 					<!-- Subreddit subscribe CTA -->
-					{#if onSubscribe}
-						<div class="w-full pt-2 mt-2 border-t border-theme-border">
-							<button
-								onclick={() => {
-									if (!hasSubscribed) onSubscribe();
-								}}
-								disabled={hasSubscribed}
-								class="w-full px-4 py-2 text-xs text-theme-text-muted rounded-lg
-									hover:bg-theme-hover active:scale-95 transition-all
-									disabled:opacity-60 disabled:cursor-not-allowed"
-							>
-								{#if hasSubscribed}
-									<span>✅ Joined r/urjo!</span>
-								{:else}
-									<span>🔔 Join r/urjo for daily puzzles</span>
-								{/if}
-							</button>
-						</div>
+					{#if onSubscribe && !hasSubscribed}
+						<button
+							onclick={() => (showSubscribeConfirm = true)}
+							class="px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
+								text-sm hover:bg-theme-hover active:scale-95 transition-all w-full
+								flex items-center justify-center gap-2"
+						>
+							🔔 Join r/urjo for daily puzzles
+						</button>
 					{/if}
 				</div>
 			</div>
@@ -418,6 +355,39 @@ Beat me → reddit.com/r/urjo`;
 					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
 				>
 					Post Challenge
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Subscribe confirmation dialog -->
+{#if showSubscribeConfirm}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+	>
+		<div
+			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+		>
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Join r/urjo?
+			</h2>
+			<p class="text-sm text-theme-text-secondary">
+				This will subscribe you to r/urjo so you get daily puzzle
+				notifications in your feed.
+			</p>
+			<div class="flex gap-3">
+				<button
+					onclick={() => (showSubscribeConfirm = false)}
+					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={confirmSubscribe}
+					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
+				>
+					Join
 				</button>
 			</div>
 		</div>

@@ -420,8 +420,6 @@
 			timeTaken,
 			mistakes: $mistakeCount,
 			username,
-			skillLevel,
-			puzzleColors,
 			hasSubscribed,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,

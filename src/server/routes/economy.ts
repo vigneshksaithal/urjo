@@ -153,8 +153,8 @@ economyRouter.post('/api/shop/equip', async (c) => {
 	}
 
 	try {
-		const body = await c.req.json<EquipTitleRequest>()
-		const { titleId } = body
+		const body = await c.req.json<EquipTitleRequest & { updateFlair?: boolean }>()
+		const { titleId, updateFlair } = body
 
 		if (!titleId) {
 			return c.json({ error: 'Title ID required' }, 400)
@@ -175,29 +175,33 @@ economyRouter.post('/api/shop/equip', async (c) => {
 		// Invalidate display cache
 		await redis.del(`user:${userId}:display`)
 
-		// Auto-assign Reddit flair based on equipped title
-		try {
-			const title = TITLES.find((t) => t.id === titleId)
-			if (title && context.subredditName) {
-				const user = await reddit.getUserById(userId as `t2_${string}`)
-				if (user?.username) {
-					await reddit.setUserFlair({
-						subredditName: context.subredditName,
-						username: user.username,
-						text: `${title.emoji} ${title.label}`,
-						cssClass: '',
-					})
+		// Only update Reddit flair if the user explicitly opted in
+		let flairUpdated = false
+		if (updateFlair) {
+			try {
+				const title = TITLES.find((t) => t.id === titleId)
+				if (title && context.subredditName) {
+					const user = await reddit.getUserById(userId as `t2_${string}`)
+					if (user?.username) {
+						await reddit.setUserFlair({
+							subredditName: context.subredditName,
+							username: user.username,
+							text: `${title.emoji} ${title.label}`,
+							cssClass: '',
+						})
+						flairUpdated = true
+					}
 				}
+			} catch {
+				// Non-critical, don't fail the equip request
 			}
-		} catch {
-			// Non-critical, don't fail the equip request
 		}
 
 		const response: EquipTitleResponse = {
 			success: true,
 		}
 
-		return c.json(response)
+		return c.json({ ...response, flairUpdated })
 	} catch (error) {
 		console.error('Error equipping title:', error)
 		return c.json({ error: 'Failed to equip title' }, 500)
