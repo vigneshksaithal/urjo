@@ -15,7 +15,7 @@ import type {
 	LeaderboardData,
 	LeaderboardEntry,
 } from '../../shared/types'
-import { TITLES } from '../../shared/constants'
+import { STREAK_FREEZE_COST, MAX_STREAK_FREEZES, TITLES } from '../../shared/constants'
 import {
 	getUserEconomy,
 	saveUserEconomy,
@@ -67,6 +67,7 @@ economyRouter.get('/api/shop', async (c) => {
 		const response: ShopResponse = {
 			items,
 			coins: economy.coins,
+			streakFreezes: economy.streakFreezes,
 		}
 
 		return c.json(response)
@@ -203,6 +204,45 @@ economyRouter.post('/api/shop/equip', async (c) => {
 	}
 })
 
+// ─── POST /api/shop/buy-streak-freeze ───────────────────────────────────────
+
+economyRouter.post('/api/shop/buy-streak-freeze', async (c) => {
+	const { userId } = context
+
+	if (!userId) {
+		return c.json({ error: 'User ID required' }, 400)
+	}
+
+	try {
+		const economy = await getUserEconomy(userId)
+
+		// Check if user has enough coins
+		if (economy.coins < STREAK_FREEZE_COST) {
+			return c.json({ error: 'Not enough coins' }, 400)
+		}
+
+		// Check if user already has max freezes
+		if (economy.streakFreezes >= MAX_STREAK_FREEZES) {
+			return c.json({ error: 'Maximum freezes reached' }, 400)
+		}
+
+		// Deduct coins and add freeze
+		await saveUserEconomy(userId, {
+			coins: economy.coins - STREAK_FREEZE_COST,
+			streakFreezes: economy.streakFreezes + 1,
+		})
+
+		return c.json({
+			success: true,
+			streakFreezes: economy.streakFreezes + 1,
+			newBalance: economy.coins - STREAK_FREEZE_COST,
+		})
+	} catch (error) {
+		console.error('Error buying streak freeze:', error)
+		return c.json({ error: 'Failed to buy streak freeze' }, 500)
+	}
+})
+
 // ─── GET /api/leaderboard/coins ─────────────────────────────────────────────
 
 economyRouter.get('/api/leaderboard/coins', async (c) => {
@@ -279,3 +319,29 @@ const checkCondition = async (
 			return false
 	}
 }
+
+// ─── GET /api/subscribe/status ──────────────────────────────────────────────
+
+economyRouter.get('/api/subscribe/status', async (c) => {
+	const { userId } = context
+	if (!userId) return c.json({ subscribed: false })
+	const subscribed = await redis.get(`user:${userId}:subscribed`)
+	return c.json({ subscribed: subscribed === 'true' })
+})
+
+// ─── POST /api/subscribe ────────────────────────────────────────────────────
+
+economyRouter.post('/api/subscribe', async (c) => {
+	const { userId } = context
+	if (!userId) return c.json({ error: 'User ID required' }, 400)
+
+	try {
+		await reddit.subscribeToCurrentSubreddit()
+		// Track subscription in Redis so we don't show the prompt again
+		await redis.set(`user:${userId}:subscribed`, 'true')
+		return c.json({ success: true })
+	} catch (error) {
+		console.error('Subscribe error:', error)
+		return c.json({ error: 'Failed to subscribe' }, 500)
+	}
+})

@@ -31,6 +31,7 @@ import {
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
+import { getUserEconomy } from '../lib/economy'
 import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak } from '../lib/helpers'
 
 export const gameRouter = new Hono()
@@ -161,6 +162,7 @@ const getStreakData = async (userId: string): Promise<StreakData> => {
 /**
  * Update the user's streak based on completion.
  * Uses 1-day grace period (48 hours).
+ * Streak freeze protects streak when dayDiff > 2.
  */
 const updateStreak = async (userId: string): Promise<StreakData> => {
 	const today = getTodayUTC()
@@ -176,6 +178,14 @@ const updateStreak = async (userId: string): Promise<StreakData> => {
 		const dayDiff = getDayDifference(streakData.lastPlayedDate, today)
 		if (dayDiff === 1 || dayDiff === 2) {
 			newStreak = streakData.currentStreak + 1
+		} else if (dayDiff > 2) {
+			// Streak would break - check for freeze
+			const economy = await getUserEconomy(userId)
+			if (economy.streakFreezes > 0) {
+				// Use a freeze - keep current streak, consume one freeze
+				await redis.hIncrBy(`user:${userId}:economy`, 'streakFreezes', -1)
+				newStreak = streakData.currentStreak + 1
+			}
 		}
 	}
 

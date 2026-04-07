@@ -13,10 +13,12 @@
 
 	let items = $state<ShopItem[]>([]);
 	let coins = $state(0);
+	let streakFreezes = $state(0);
 	let isLoading = $state(false);
 	let error = $state<string | null>(null);
 	let buyingTitle = $state<string | null>(null);
 	let equippingTitle = $state<string | null>(null);
+	let buyingFreeze = $state(false);
 
 	$effect(() => {
 		if (isOpen) {
@@ -35,6 +37,7 @@
 			const data = await response.json();
 			items = data.items;
 			coins = data.coins;
+			streakFreezes = data.streakFreezes ?? 0;
 		} catch (err) {
 			error = err instanceof Error ? err.message : "Failed to load shop";
 		} finally {
@@ -93,6 +96,32 @@
 				err instanceof Error ? err.message : "Failed to equip title";
 		} finally {
 			equippingTitle = null;
+		}
+	}
+
+	async function buyStreakFreeze() {
+		buyingFreeze = true;
+		error = null;
+
+		try {
+			const response = await fetch("/api/shop/buy-streak-freeze", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				error = data.error || "Failed to buy streak freeze";
+				return;
+			}
+
+			coins = data.newBalance ?? coins;
+			streakFreezes = data.streakFreezes ?? streakFreezes;
+		} catch (err) {
+			error = err instanceof Error ? err.message : "Failed to buy streak freeze";
+		} finally {
+			buyingFreeze = false;
 		}
 	}
 
@@ -157,6 +186,40 @@
 				<span class="text-xl">🪙</span>
 				<span class="text-lg font-bold text-yellow-400">{coins}</span>
 				<span class="text-sm text-theme-text-muted">coins</span>
+			</div>
+
+			<!-- Streak Freeze Section -->
+			<div
+				class="flex items-center justify-between p-4 mx-4 mt-4 rounded-lg bg-blue-900/20 border border-blue-500/30"
+			>
+				<div class="flex items-center gap-3">
+					<span class="text-3xl">🧊</span>
+					<div>
+						<p class="font-semibold text-theme-text-primary text-sm">
+							Streak Freeze
+						</p>
+						<p class="text-xs text-theme-text-muted">
+							Protect your streak for one missed day.
+						</p>
+						<p class="text-xs text-blue-400 mt-1">
+							You have: {streakFreezes}/3 freezes
+						</p>
+					</div>
+				</div>
+				<button
+					onclick={buyStreakFreeze}
+					disabled={buyingFreeze || coins < 50 || streakFreezes >= 3}
+					class="px-3 py-2 rounded bg-blue-600 text-white text-xs font-semibold hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+				>
+					{#if buyingFreeze}
+						<Loader2 class="w-3 h-3 animate-spin" />
+						Buying...
+					{:else if streakFreezes >= 3}
+						Max reached
+					{:else}
+						Buy 50 🪙
+					{/if}
+				</button>
 			</div>
 
 			<!-- Error message -->

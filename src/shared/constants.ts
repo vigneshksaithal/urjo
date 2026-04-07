@@ -203,3 +203,11 @@ export const getDailyLoginBonus = (consecutiveDays: number): number => {
 	const idx = Math.min(consecutiveDays - 1, 4)
 	return DAILY_LOGIN_BONUS[idx] ?? 5
 }
+
+// ─── Streak Freeze Constants ─────────────────────────────────────────────────
+
+/** Cost of a streak freeze in coins */
+export const STREAK_FREEZE_COST = 50
+
+/** Maximum streak freezes a user can hold */
+export const MAX_STREAK_FREEZES = 3

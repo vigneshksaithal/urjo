@@ -39,6 +39,7 @@ export const getUserEconomy = async (userId: string): Promise<UserEconomy> => {
 		equippedTitle: data?.equippedTitle ?? 'puzzler',
 		ownedTitles: data?.ownedTitles ? JSON.parse(data.ownedTitles) : ['puzzler'],
 		dailyFirstSolve: data?.dailyFirstSolve ?? null,
+		streakFreezes: parseInt(data?.streakFreezes ?? '0', 10),
 	}
 }
 
@@ -56,6 +57,7 @@ export const saveUserEconomy = async (userId: string, economy: Partial<UserEcono
 	if (economy.equippedTitle !== undefined) updates.equippedTitle = economy.equippedTitle
 	if (economy.ownedTitles !== undefined) updates.ownedTitles = JSON.stringify(economy.ownedTitles)
 	if (economy.dailyFirstSolve !== undefined) updates.dailyFirstSolve = economy.dailyFirstSolve ?? ''
+	if (economy.streakFreezes !== undefined) updates.streakFreezes = economy.streakFreezes.toString()
 
 	if (Object.keys(updates).length > 0) {
 		await redis.hSet(key, updates)

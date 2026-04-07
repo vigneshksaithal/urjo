@@ -135,6 +135,7 @@ export type UserEconomy = {
 	equippedTitle: string
 	ownedTitles: string[]
 	dailyFirstSolve: string | null
+	streakFreezes: number
 }
 
 /** Coin reward breakdown */
@@ -162,6 +163,7 @@ export type EconomyResponse = UserEconomy
 export type ShopResponse = {
 	items: ShopItem[]
 	coins: number
+	streakFreezes: number
 }
 
 /** Buy title request */
