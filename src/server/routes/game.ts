@@ -773,7 +773,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 
 		// Post a comment on the challenge post showing the score to beat
 		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`} at Level ${skillLevel}\n\nThink you can do better? Solve the puzzle above! 🎯`
-		await reddit.submitComment({ id: newPost.id, text: scoreComment, runAs: 'USER' })
+		await reddit.submitComment({ id: newPost.id as `t3_${string}`, text: scoreComment })
 
 		// Post the initial leaderboard comment (APP account, no user action needed)
 		const leaderboardComment = await reddit.submitComment({
