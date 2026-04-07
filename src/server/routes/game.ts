@@ -68,11 +68,7 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 			winnerUsername = user?.username ?? 'Someone'
 		} catch { /* fallback */ }
 
-		// Post a comment on the challenge post
-		const message = `🏆 u/${winnerUsername} just beat this challenge! They solved it in **${timeTaken}s** (score to beat was ${challengeScore}s). Can you reclaim your title? 🎯`
-		await reddit.submitComment({ id: postId as `t3_${string}`, text: message })
-
-		// Try to DM the original challenger
+		// Try to DM the original challenger (no public comment - automated comments violate Reddit policy)
 		try {
 			const challenger = await reddit.getUserById(challengerId as `t2_${string}`)
 			if (challenger?.username) {
@@ -601,6 +597,8 @@ gameRouter.post('/api/game/share', async (c) => {
 		await reddit.submitComment({
 			id: targetId,
 			text: commentText,
+			runAs: 'USER',
+			userGeneratedContent: { text: commentText },
 		})
 
 		await redis.set(sharedKey, 'true')
@@ -674,6 +672,8 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		const newPost = await reddit.submitCustomPost({
 			subredditName,
 			title,
+			runAs: 'USER',
+			userGeneratedContent: { text: title },
 			postData: {
 				postType: 'urjo-puzzle',
 			},
@@ -701,7 +701,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 
 		// Post a comment on the challenge post showing the score to beat
 		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`} at Level ${skillLevel}\n\nThink you can do better? Solve the puzzle above! 🎯`
-		await reddit.submitComment({ id: newPost.id, text: scoreComment })
+		await reddit.submitComment({ id: newPost.id, text: scoreComment, runAs: 'USER', userGeneratedContent: { text: scoreComment } })
 
 		return c.json<ChallengeResponse>({ success: true, postUrl: `https://reddit.com/${newPost.id}` })
 	} catch (error) {
