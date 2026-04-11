@@ -720,9 +720,18 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			// fallback to Anon
 		}
 
-		// Build title
+		// Build title — rotating high-CTR templates
 		const perfectTag = mistakes === 0 ? ' (perfect!)' : ''
-		const title = `u/${username} solved Level ${skillLevel} in ${timeTaken}s${perfectTag} — can YOU beat it? 🎯`
+		const perfectBadge = mistakes === 0 ? ' (zero mistakes)' : ''
+		const titleTemplates = [
+			`Only top players beat ${timeTaken}s at Level ${skillLevel}. u/${username} just did it${perfectBadge}. Your turn 🎯`,
+			`u/${username} solved Level ${skillLevel} in ${timeTaken}s${perfectTag} — can YOU beat it? 🏆`,
+			`Level ${skillLevel} cleared in ${timeTaken}s by u/${username}${perfectBadge}. Think you're faster? 👀`,
+			`New challenge dropped: Level ${skillLevel}, ${timeTaken}s to beat. u/${username} set the bar${perfectBadge} 🔥`,
+		]
+		// Rotate template based on hour to spread variety without randomness (deterministic)
+		const templateIndex = new Date().getUTCHours() % titleTemplates.length
+		const title = titleTemplates[templateIndex]
 
 		if (!subredditName) return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' })
 
