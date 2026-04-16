@@ -4,16 +4,34 @@ import { generatePuzzle } from './lib/generator'
 export const URJO_POST_TYPE_KEY = 'postType'
 export const URJO_PUZZLE_POST_TYPE = 'urjo-puzzle'
 
-export const createPost = async (customTitle?: string, ctxOverride?: any): Promise<{ id: string }> => {
+export type PostGridConfig = {
+	gridSize: 4 | 6
+	difficulty: 'easy' | 'medium' | 'hard'
+}
+
+/**
+ * Determine grid config based on UTC hour.
+ * 06:00 UTC → 4x4 easy  (morning warm-up)
+ * 16:00 UTC → 6x6 medium (afternoon main challenge)
+ * 20:00 UTC → 6x6 hard   (evening challenge)
+ * Default    → 4x4 easy
+ */
+export const getGridConfigForHour = (utcHour: number): PostGridConfig => {
+	if (utcHour === 16) return { gridSize: 6, difficulty: 'medium' }
+	if (utcHour === 20) return { gridSize: 6, difficulty: 'hard' }
+	return { gridSize: 4, difficulty: 'easy' }
+}
+
+export const createPost = async (customTitle?: string, ctxOverride?: any, gridConfig?: PostGridConfig): Promise<{ id: string }> => {
 	const currentContext = ctxOverride || context
 	const { subredditName } = currentContext
 	if (!subredditName) {
 		throw new Error('subredditName is required')
 	}
 
-	// Generate puzzle with easy 4x4 difficulty for shared post puzzle
-	// Individual users get adaptive difficulty via their own puzzle override
-	const puzzle = generatePuzzle('easy', 4)
+	// Use provided grid config or default to 4x4 easy
+	const config = gridConfig ?? { gridSize: 4 as const, difficulty: 'easy' as const }
+	const puzzle = generatePuzzle(config.difficulty, config.gridSize)
 
 	// Create post with custom title or default
 	const title = customTitle || 'Urjo Puzzle - Can you solve it?'

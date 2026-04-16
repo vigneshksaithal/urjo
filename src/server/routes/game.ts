@@ -489,10 +489,14 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 
 	try {
 		let timeSpent = 0
+		let preferredGridSize: 4 | 6 | undefined
 		try {
-			const body = await c.req.json<{ timeSpent?: number }>()
+			const body = await c.req.json<{ timeSpent?: number; preferredGridSize?: number }>()
 			if (typeof body.timeSpent === 'number' && body.timeSpent >= 0) {
 				timeSpent = body.timeSpent
+			}
+			if (body.preferredGridSize === 4 || body.preferredGridSize === 6) {
+				preferredGridSize = body.preferredGridSize
 			}
 		} catch {
 			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
@@ -525,7 +529,19 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 		await redis.set(`user:${userId}:skillLevel`, newLevel.toString())
 		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
 
-		const newPuzzle = generatePuzzleForLevel(newLevel)
+		// Generate puzzle — if user has a grid size preference, find closest matching level
+		let puzzleLevel = newLevel
+		if (preferredGridSize !== undefined) {
+			const { DIFFICULTY_LADDER } = await import('../../shared/constants')
+			const candidates = DIFFICULTY_LADDER.filter(l => l.gridSize === preferredGridSize)
+			if (candidates.length > 0) {
+				puzzleLevel = candidates.reduce((best, l) =>
+					Math.abs(l.level - newLevel) < Math.abs(best.level - newLevel) ? l : best
+				).level
+			}
+		}
+
+		const newPuzzle = generatePuzzleForLevel(puzzleLevel)
 
 		await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
 			colors: newPuzzle.colors,

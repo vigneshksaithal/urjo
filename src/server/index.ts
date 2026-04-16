@@ -10,7 +10,7 @@ import { serve } from '@hono/node-server'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 
-import { createPost, URJO_PUZZLE_POST_TYPE as _URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY as _URJO_POST_TYPE_KEY } from './post'
+import { createPost, URJO_PUZZLE_POST_TYPE as _URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY as _URJO_POST_TYPE_KEY, getGridConfigForHour } from './post'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
 
@@ -108,16 +108,25 @@ const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
   ].join('\n')
 }
 
-// Scheduler endpoint for twice-daily puzzle posts
+// Scheduler endpoint for thrice-daily puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
   await c.req.json<TaskRequest>()
   try {
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
-    const title = `🧩 Urjo Puzzle #${puzzleNumber} — Can you solve it?`
 
-    console.log(`[Scheduler] Creating post: ${title}`)
+    // Determine grid config based on current UTC hour
+    const utcHour = new Date().getUTCHours()
+    const gridConfig = getGridConfigForHour(utcHour)
 
-    const post = await createPost(title)
+    // Build title based on grid type
+    const gridLabel = gridConfig.gridSize === 6
+      ? (gridConfig.difficulty === 'hard' ? '6×6 Hard' : '6×6 Medium')
+      : '4×4 Quick'
+    const title = `🧩 Urjo #${puzzleNumber} — ${gridLabel} | Can you solve it?`
+
+    console.log(`[Scheduler] Creating post: ${title} (${gridConfig.gridSize}x${gridConfig.gridSize} ${gridConfig.difficulty})`)
+
+    const post = await createPost(title, undefined, gridConfig)
 
     // Build a stats comment from yesterday's data
     try {

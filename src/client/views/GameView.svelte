@@ -4,6 +4,7 @@
 		Grid,
 		StreakData,
 		CoinReward,
+		GridFilter,
 	} from "../../shared/types";
 	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
@@ -38,6 +39,8 @@
 		username?: string;
 		hasSubscribed?: boolean;
 		onSubscribe?: () => void;
+		gridFilter?: GridFilter;
+		onGridFilterChange?: (filter: GridFilter) => void;
 	};
 
 	let {
@@ -60,7 +63,25 @@
 		username,
 		hasSubscribed = false,
 		onSubscribe,
+		gridFilter = 'all',
+		onGridFilterChange,
 	}: Props = $props();
+
+	// Streak milestone messages (variable reward — Hooked framework)
+	const STREAK_MILESTONES: Record<number, string> = {
+		3: '🔥 3-day streak! You\'re warming up!',
+		7: '🔥 One week! You\'re on fire!',
+		14: '⚡ Two weeks strong! Impressive!',
+		30: '🏆 30 days! You\'re a legend!',
+		50: '💎 50-day streak! Unreal!',
+		100: '👑 100 days! Urjo King!',
+	};
+
+	const streakMilestoneMessage = $derived(
+		streakData.currentStreak > 0 && isCompleted
+			? STREAK_MILESTONES[streakData.currentStreak] ?? null
+			: null
+	);
 
 	let showLeaderboard = $state(false);
 	let showHowToPlay = $state(false);
@@ -133,6 +154,24 @@
 		{/if}
 	</header>
 
+	<!-- Grid size filter toggle -->
+	{#if onGridFilterChange}
+		<div class="flex-none flex items-center justify-center gap-1 py-1">
+			{#each [['all', 'All'], ['4x4', '4×4'], ['6x6', '6×6']] as [value, label]}
+				<button
+					onclick={() => onGridFilterChange?.(value as GridFilter)}
+					class="px-3 py-1 rounded-full text-xs font-semibold transition-all
+						{gridFilter === value
+							? 'bg-urjo-blue text-white'
+							: 'bg-theme-hover text-theme-text-secondary hover:text-theme-text-primary'}"
+					aria-pressed={gridFilter === value}
+				>
+					{label}
+				</button>
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Main game area -->
 	<main
 		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative"
@@ -195,6 +234,13 @@
 						>
 							🔥 {streakData.currentStreak}
 						</span>
+					{/if}
+
+					<!-- Streak milestone message (variable reward) -->
+					{#if streakMilestoneMessage}
+						<div class="text-sm font-bold text-yellow-300 animate-bounce-in text-center">
+							{streakMilestoneMessage}
+						</div>
 					{/if}
 
 					<!-- Perfect / mistakes badge -->
