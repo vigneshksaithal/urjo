@@ -11,14 +11,14 @@ export type PostGridConfig = {
 
 /**
  * Determine grid config based on UTC hour.
- * 06:00 UTC → 4x4 easy  (morning warm-up)
- * 16:00 UTC → 6x6 medium (afternoon main challenge)
- * 20:00 UTC → 6x6 hard   (evening challenge)
- * Default    → 4x4 easy
+ * 13:00 UTC (9AM ET)  → 4x4 easy   (morning warm-up)
+ * 18:00 UTC (2PM ET)  → 6x6 medium (afternoon challenge)
+ * 23:00 UTC (7PM ET)  → 6x6 hard   (peak evening)
+ * Default             → 4x4 easy
  */
 export const getGridConfigForHour = (utcHour: number): PostGridConfig => {
-	if (utcHour === 16) return { gridSize: 6, difficulty: 'medium' }
-	if (utcHour === 20) return { gridSize: 6, difficulty: 'hard' }
+	if (utcHour === 18) return { gridSize: 6, difficulty: 'medium' }
+	if (utcHour === 23) return { gridSize: 6, difficulty: 'hard' }
 	return { gridSize: 4, difficulty: 'easy' }
 }
 
