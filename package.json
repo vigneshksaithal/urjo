@@ -17,27 +17,27 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@devvit/start": "^0.12.17",
-    "@devvit/web": "0.12.17",
-    "@hono/node-server": "^1.19.12",
+    "@devvit/start": "^0.12.19",
+    "@devvit/web": "0.12.19",
+    "@hono/node-server": "^1.19.14",
     "@tailwindcss/vite": "^4.2.2",
     "canvas-confetti": "^1.9.4",
-    "devvit": "0.12.17",
-    "hono": "^4.12.10",
+    "devvit": "0.12.19",
+    "hono": "^4.12.14",
     "lucide-svelte": "^1.0.1",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
-    "@devvit/test": "^0.12.17",
+    "@devvit/test": "^0.12.19",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@types/canvas-confetti": "^1.9.0",
     "concurrently": "^9.2.1",
     "dotenv-cli": "^11.0.0",
     "fast-check": "^4.6.0",
-    "svelte": "^5.55.1",
+    "svelte": "^5.55.4",
     "svelte-check": "^4.4.6",
     "typescript": "^6.0.2",
-    "vite": "8.0.5",
-    "vitest": "^4.1.2"
+    "vite": "8.0.8",
+    "vitest": "^4.1.4"
   }
 }
