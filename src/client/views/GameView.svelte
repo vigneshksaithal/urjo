@@ -4,7 +4,6 @@
 		Grid,
 		StreakData,
 		CoinReward,
-		GridFilter,
 	} from "../../shared/types";
 	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
@@ -39,8 +38,6 @@
 		username?: string;
 		hasSubscribed?: boolean;
 		onSubscribe?: () => void;
-		gridFilter?: GridFilter;
-		onGridFilterChange?: (filter: GridFilter) => void;
 	};
 
 	let {
@@ -63,8 +60,6 @@
 		username,
 		hasSubscribed = false,
 		onSubscribe,
-		gridFilter = 'all',
-		onGridFilterChange,
 	}: Props = $props();
 
 	// Streak milestone messages (variable reward — Hooked framework)
@@ -154,20 +149,6 @@
 		{/if}
 	</header>
 
-	<!-- Grid size filter toggle -->
-	{#if onGridFilterChange}
-		<div class="flex-none flex items-center justify-center gap-1 py-1">
-			{#each ([{ value: 'all', label: 'All' }, { value: '4x4', label: '4×4' }, { value: '6x6', label: '6×6' }] as const) as opt (opt.value)}
-				<button
-					onclick={() => onGridFilterChange?.(opt.value as GridFilter)}
-					class="px-3 py-1 rounded-full text-xs font-semibold transition-all {gridFilter === opt.value ? 'bg-urjo-blue text-white' : 'bg-theme-hover text-theme-text-secondary hover:text-theme-text-primary'}"
-					aria-pressed={gridFilter === opt.value}
-				>
-					{opt.label}
-				</button>
-			{/each}
-		</div>
-	{/if}
 
 	<!-- Main game area -->
 	<main

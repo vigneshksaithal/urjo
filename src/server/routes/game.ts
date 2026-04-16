@@ -529,19 +529,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 		await redis.set(`user:${userId}:skillLevel`, newLevel.toString())
 		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
 
-		// Generate puzzle — if user has a grid size preference, find closest matching level
-		let puzzleLevel = newLevel
-		if (preferredGridSize !== undefined) {
-			const { DIFFICULTY_LADDER } = await import('../../shared/constants')
-			const candidates = DIFFICULTY_LADDER.filter(l => l.gridSize === preferredGridSize)
-			if (candidates.length > 0) {
-				puzzleLevel = candidates.reduce((best, l) =>
-					Math.abs(l.level - newLevel) < Math.abs(best.level - newLevel) ? l : best
-				).level
-			}
-		}
-
-		const newPuzzle = generatePuzzleForLevel(puzzleLevel)
+		const newPuzzle = generatePuzzleForLevel(newLevel)
 
 		await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
 			colors: newPuzzle.colors,

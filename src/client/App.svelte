@@ -7,7 +7,6 @@
 		StreakData,
 		ShareResponse,
 		CoinReward,
-		GridFilter,
 	} from "../shared/types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
@@ -63,13 +62,6 @@
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
 	let hasSubscribed = $state(false);
-	let gridFilter = $state<GridFilter>('all');
-
-	function handleGridFilterChange(filter: GridFilter) {
-		gridFilter = filter;
-		// When filter changes, request next challenge with appropriate grid size
-		handleNextChallengeWithFilter(filter);
-	}
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -325,18 +317,17 @@
 	}
 
 	/**
-	 * Handle "Next Challenge" button with optional grid size preference.
+	 * Handle "Next Challenge" button.
 	 */
-	async function handleNextChallengeWithFilter(filter: GridFilter) {
+	async function handleNextChallenge() {
 		hasChallenged = false;
 		challengeUrl = null;
 		try {
 			const timeSpent = Math.round((Date.now() - startTime) / 1000);
-			const preferredGridSize = filter === '4x4' ? 4 : filter === '6x6' ? 6 : undefined;
 			const response = await fetch("/api/game/next-challenge", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ timeSpent, preferredGridSize }),
+				body: JSON.stringify({ timeSpent }),
 			});
 			if (!response.ok) throw new Error("Failed to get next challenge");
 
@@ -364,10 +355,6 @@
 					: "Failed to load next challenge";
 			currentView = "error";
 		}
-	}
-
-	async function handleNextChallenge() {
-		await handleNextChallengeWithFilter(gridFilter);
 	}
 	function handleRestart() {
 		hasChallenged = false;
@@ -441,8 +428,6 @@
 			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
 			onSubscribe: handleSubscribe,
-			gridFilter,
-			onGridFilterChange: handleGridFilterChange,
 		}}
 		{#if coinReward}
 			<GameView {...gameProps} {coinReward} />

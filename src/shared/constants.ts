@@ -13,19 +13,20 @@ export type DifficultyLevel = {
 
 /**
  * The difficulty ladder: 9 levels from beginner to expert.
- * Level maps to (gridSize, difficulty) pair.
- * expectedTime is used for performance scoring -- tunable after playtesting.
+ * Redesigned to show 6x6 early (Level 2) — based on user feedback requesting more 6x6.
+ * Level 1 stays 4x4 easy as the entry point for new players.
+ * Levels 2+ alternate between 4x4 and 6x6, with 6x6 dominating from Level 3 onward.
  */
 export const DIFFICULTY_LADDER: readonly DifficultyLevel[] = [
-	{ level: 1, gridSize: 4, difficulty: 'easy', expectedTime: 45 },
-	{ level: 2, gridSize: 4, difficulty: 'medium', expectedTime: 90 },
-	{ level: 3, gridSize: 4, difficulty: 'hard', expectedTime: 150 },
-	{ level: 4, gridSize: 6, difficulty: 'easy', expectedTime: 120 },
-	{ level: 5, gridSize: 6, difficulty: 'medium', expectedTime: 210 },
-	{ level: 6, gridSize: 6, difficulty: 'hard', expectedTime: 360 },
-	{ level: 7, gridSize: 8, difficulty: 'easy', expectedTime: 300 },
-	{ level: 8, gridSize: 8, difficulty: 'medium', expectedTime: 480 },
-	{ level: 9, gridSize: 8, difficulty: 'diabolical', expectedTime: 720 },
+	{ level: 1, gridSize: 4, difficulty: 'easy',       expectedTime: 45  },  // Entry: 4x4 easy
+	{ level: 2, gridSize: 6, difficulty: 'easy',       expectedTime: 90  },  // Early 6x6 exposure
+	{ level: 3, gridSize: 4, difficulty: 'hard',       expectedTime: 120 },  // 4x4 challenge
+	{ level: 4, gridSize: 6, difficulty: 'medium',     expectedTime: 180 },  // 6x6 medium
+	{ level: 5, gridSize: 6, difficulty: 'hard',       expectedTime: 300 },  // 6x6 hard
+	{ level: 6, gridSize: 4, difficulty: 'diabolical', expectedTime: 240 },  // 4x4 diabolical
+	{ level: 7, gridSize: 6, difficulty: 'hard',       expectedTime: 420 },  // 6x6 hard+
+	{ level: 8, gridSize: 8, difficulty: 'easy',       expectedTime: 360 },  // 8x8 intro
+	{ level: 9, gridSize: 8, difficulty: 'medium',     expectedTime: 600 },  // 8x8 expert
 ] as const
 
 /** Default skill level for new users */
