@@ -316,12 +316,31 @@ gameRouter.get('/api/game/state', async (c) => {
 		if (!puzzle) {
 			const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
 			if (postPuzzle && postPuzzle.colors) {
-				puzzle = {
-					colors: postPuzzle.colors,
-					numbers: postPuzzle.numbers ?? '',
-					solution: postPuzzle.solution ?? '',
-					difficulty: postPuzzle.difficulty ?? 'easy',
-					gridSize: postPuzzle.gridSize ?? '4',
+				// If user is above Level 1, generate a skill-appropriate puzzle instead of the default 4x4
+				if (skillLevel > 1) {
+					const skillPuzzle = generatePuzzleForLevel(skillLevel)
+					await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+						colors: skillPuzzle.colors,
+						numbers: skillPuzzle.numbers,
+						solution: skillPuzzle.solution,
+						difficulty: skillPuzzle.difficulty,
+						gridSize: skillPuzzle.gridSize.toString(),
+					})
+					puzzle = {
+						colors: skillPuzzle.colors,
+						numbers: skillPuzzle.numbers,
+						solution: skillPuzzle.solution,
+						difficulty: skillPuzzle.difficulty,
+						gridSize: skillPuzzle.gridSize.toString(),
+					}
+				} else {
+					puzzle = {
+						colors: postPuzzle.colors,
+						numbers: postPuzzle.numbers ?? '',
+						solution: postPuzzle.solution ?? '',
+						difficulty: postPuzzle.difficulty ?? 'easy',
+						gridSize: postPuzzle.gridSize ?? '4',
+					}
 				}
 			} else {
 				return c.json({ error: 'Game not found' }, 404)
@@ -448,6 +467,11 @@ gameRouter.post('/api/game/complete', async (c) => {
 			newSkillLevel !== currentLevel ? JSON.stringify([]) : JSON.stringify(updatedHistory)
 		)
 		await redis.set(`user:${userId}:consecutiveSkips`, '0')
+
+		// When level changes, clear the cached personal puzzle so next open generates a fresh one
+		if (newSkillLevel !== currentLevel) {
+			await redis.del(`user:${userId}:game:${postId}:currentPuzzle`)
+		}
 
 		// Track attempts on challenge posts (once per user)
 		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
