@@ -46,7 +46,7 @@ test('POST /internal/scheduler/daily-puzzle creates a post with puzzle number in
 
     expect(reddit.submitCustomPost).toHaveBeenCalledWith(
         expect.objectContaining({
-            title: expect.stringMatching(/Urjo Puzzle #\d+/),
+            title: expect.stringMatching(/Urjo #\d+/),
         })
     )
 })

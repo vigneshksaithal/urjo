@@ -117,9 +117,9 @@ describe('determineSkillLevel', () => {
         expect(determineSkillLevel(1, fastHistory(1, PROMOTE_WINDOW))).toBe(2)
     })
 
-    it('does NOT promote with fewer than PROMOTE_WINDOW games', () => {
-        // Only 5 fast solves — not enough to promote
-        expect(determineSkillLevel(1, fastHistory(1, 5))).toBe(1)
+    it('does NOT promote with fewer than PROMOTE_WINDOWS[level] games', () => {
+        // Only 1 fast solve — not enough to promote (PROMOTE_WINDOWS[0] = 2)
+        expect(determineSkillLevel(1, fastHistory(1, 1))).toBe(1)
     })
 
     it('demotes (currentLevel - 1) when last DEMOTE_WINDOW games are very slow', () => {

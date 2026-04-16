@@ -524,14 +524,10 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 
 	try {
 		let timeSpent = 0
-		let preferredGridSize: 4 | 6 | undefined
 		try {
-			const body = await c.req.json<{ timeSpent?: number; preferredGridSize?: number }>()
+			const body = await c.req.json<{ timeSpent?: number }>()
 			if (typeof body.timeSpent === 'number' && body.timeSpent >= 0) {
 				timeSpent = body.timeSpent
-			}
-			if (body.preferredGridSize === 4 || body.preferredGridSize === 6) {
-				preferredGridSize = body.preferredGridSize
 			}
 		} catch {
 			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
@@ -770,7 +766,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		]
 		// Rotate template based on hour to spread variety without randomness (deterministic)
 		const templateIndex = new Date().getUTCHours() % titleTemplates.length
-		const title = titleTemplates[templateIndex]
+		const title = titleTemplates[templateIndex] ?? titleTemplates[0]!
 
 		if (!subredditName) return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' })
 
