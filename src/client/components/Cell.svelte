@@ -9,8 +9,6 @@
 		colIndex?: number;
 		isLoading: boolean;
 		hasError?: boolean;
-		isRowComplete?: boolean;
-		isColComplete?: boolean;
 		gridSize?: number;
 		onChange: (color: CellColor) => void;
 	};
@@ -23,8 +21,6 @@
 		colIndex,
 		isLoading = false,
 		hasError = false,
-		isRowComplete = false,
-		isColComplete = false,
 		gridSize,
 		onChange,
 	}: Props = $props();
@@ -76,10 +72,10 @@
 		relative w-full aspect-square rounded-full
 		flex items-center justify-center
 		touch-none select-none
-		transition-all duration-300
+		transition-transform
 		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
-		{(isRowComplete || isColComplete) && !hasError ? 'ring-2 ring-green-400/50 ring-offset-1 ring-offset-transparent' : ''}
+
 	"
 >
 	<!-- Loading state: animated empty cell with diagonal split -->

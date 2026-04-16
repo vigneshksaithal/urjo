@@ -30,22 +30,27 @@
 	);
 </script>
 
-<div class="grid gap-0 w-full mx-auto {maxWidth}" style={gridStyle}>
+<div class="flex flex-col gap-0 w-full mx-auto {maxWidth}">
 	{#each grid as row, rowIndex}
-		{#each row as cell, colIndex}
-			<Cell
-				color={cell.color}
-				number={cell.number}
-				locked={cell.locked}
-				{rowIndex}
-				{colIndex}
-				isLoading={cell.isLoading ?? false}
-				hasError={violatedRows.has(rowIndex) || violatedCols.has(colIndex)}
-				isRowComplete={completedRows.has(rowIndex)}
-				isColComplete={completedCols.has(colIndex)}
-				{gridSize}
-				onChange={(color) => onCellChange(rowIndex, colIndex, color)}
-			/>
-		{/each}
+		<div
+			class="grid gap-0 transition-colors duration-500
+				{completedRows.has(rowIndex) ? 'bg-green-500/10 rounded-lg' : ''}
+				{violatedRows.has(rowIndex) ? 'bg-red-500/10 rounded-lg' : ''}"
+			style={gridStyle}
+		>
+			{#each row as cell, colIndex}
+				<Cell
+					color={cell.color}
+					number={cell.number}
+					locked={cell.locked}
+					{rowIndex}
+					{colIndex}
+					isLoading={cell.isLoading ?? false}
+					hasError={violatedRows.has(rowIndex) || violatedCols.has(colIndex)}
+					{gridSize}
+					onChange={(color) => onCellChange(rowIndex, colIndex, color)}
+				/>
+			{/each}
+		</div>
 	{/each}
 </div>
