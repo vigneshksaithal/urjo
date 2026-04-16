@@ -49,6 +49,8 @@ export type CompleteResponse = {
 	previousSkillLevel: number
 	streak?: StreakData
 	coinReward?: CoinReward
+	isPersonalBest?: boolean
+	personalBestTime?: number
 }
 
 /** A single game record stored in user history */

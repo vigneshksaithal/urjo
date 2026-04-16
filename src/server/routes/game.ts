@@ -464,12 +464,23 @@ gameRouter.post('/api/game/complete', async (c) => {
 		// Check if this is a challenge post and if the player beat the challenge
 		await checkChallengeBeat(postId, userId, timeTaken)
 
+		// Personal best tracking — per user per skill level
+		const pbKey = `user:${userId}:pb:${currentLevel}`
+		const prevPB = await redis.get(pbKey)
+		const prevPBTime = prevPB ? parseInt(prevPB, 10) : null
+		const isPersonalBest = prevPBTime === null || timeTaken < prevPBTime
+		if (isPersonalBest) {
+			await redis.set(pbKey, timeTaken.toString())
+		}
+
 		const response: CompleteResponse = {
 			performanceScore,
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
 			streak,
 			coinReward,
+			isPersonalBest,
+			personalBestTime: isPersonalBest ? timeTaken : (prevPBTime ?? undefined),
 		}
 
 		return c.json(response)

@@ -60,6 +60,8 @@
 	let showShop = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
+	let isPersonalBest = $state(false);
+	let personalBestTime = $state<number | undefined>(undefined);
 	let username = $state<string | undefined>(undefined);
 	let hasSubscribed = $state(false);
 
@@ -127,6 +129,8 @@
 			challengeUrl = null;
 			startTime = Date.now();
 			coinReward = undefined;
+			isPersonalBest = false;
+			personalBestTime = undefined;
 			resetMistakes();
 			setSolution(data.puzzle.solution, data.puzzle.gridSize);
 
@@ -239,6 +243,9 @@
 					coinReward = data.coinReward;
 					coins += data.coinReward.total;
 				}
+				// Personal best
+				isPersonalBest = data.isPersonalBest ?? false;
+				personalBestTime = data.personalBestTime;
 				// Level-up feedback
 				if (
 					data.newSkillLevel &&
@@ -411,6 +418,7 @@
 		{@const gameProps = {
 			grid,
 			gridSize,
+			skillLevel,
 			isCompleted,
 			streakData,
 			hasShared,
@@ -421,6 +429,8 @@
 			mistakes: $mistakeCount,
 			username,
 			hasSubscribed,
+			isPersonalBest,
+			personalBestTime,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,

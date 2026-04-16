@@ -46,14 +46,14 @@ export const HISTORY_SIZE = 20
  * Early levels are easier to promote from; later levels require more sustained performance.
  * Index 0 = level 1, index 8 = level 9.
  */
-export const PROMOTE_THRESHOLDS: readonly number[] = [0.46, 0.48, 0.50, 0.52, 0.54, 0.57, 0.60, 0.63, 0.66] as const
+export const PROMOTE_THRESHOLDS: readonly number[] = [0.35, 0.40, 0.46, 0.50, 0.54, 0.57, 0.60, 0.63, 0.66] as const
 
 /**
  * Number of recent games needed to consider promotion, per level.
  * Early levels promote faster to reduce churn for new players.
  * Index 0 = Level 1.
  */
-export const PROMOTE_WINDOWS: readonly number[] = [8, 8, 10, 10, 12, 12, 15, 15, 15] as const
+export const PROMOTE_WINDOWS: readonly number[] = [2, 3, 5, 8, 10, 12, 15, 15, 15] as const
 
 /** Minimum games needed at current window to consider promotion
  * @deprecated Use PROMOTE_WINDOWS instead

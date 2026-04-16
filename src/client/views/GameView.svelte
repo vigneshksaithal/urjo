@@ -20,6 +20,7 @@
 	type Props = {
 		grid: Grid;
 		gridSize: number;
+		skillLevel?: number;
 		onCellChange: (row: number, col: number, color: CellColor) => void;
 		isCompleted: boolean;
 		onNextChallenge: () => void;
@@ -38,6 +39,8 @@
 		username?: string;
 		hasSubscribed?: boolean;
 		onSubscribe?: () => void;
+		isPersonalBest?: boolean;
+		personalBestTime?: number;
 	};
 
 	let {
@@ -60,22 +63,32 @@
 		username,
 		hasSubscribed = false,
 		onSubscribe,
+		isPersonalBest = false,
+		personalBestTime,
+		skillLevel = 1,
 	}: Props = $props();
 
-	// Streak milestone messages (variable reward — Hooked framework)
-	const STREAK_MILESTONES: Record<number, string> = {
-		3: '🔥 3-day streak! You\'re warming up!',
-		7: '🔥 One week! You\'re on fire!',
-		14: '⚡ Two weeks strong! Impressive!',
-		30: '🏆 30 days! You\'re a legend!',
-		50: '💎 50-day streak! Unreal!',
-		100: '👑 100 days! Urjo King!',
+	// Difficulty label derived from gridSize + skillLevel
+	const DIFFICULTY_LABELS: Record<number, string> = {
+		1: '4×4 · Easy', 2: '6×6 · Easy', 3: '4×4 · Hard',
+		4: '6×6 · Medium', 5: '6×6 · Hard', 6: '4×4 · Expert',
+		7: '6×6 · Hard+', 8: '8×8 · Easy', 9: '8×8 · Medium',
 	};
+	const difficultyLabel = $derived(DIFFICULTY_LABELS[skillLevel] ?? `${gridSize}×${gridSize}`);
 
-	const streakMilestoneMessage = $derived(
-		streakData.currentStreak > 0 && isCompleted
-			? STREAK_MILESTONES[streakData.currentStreak] ?? null
-			: null
+	// Contextual completion message
+	const completionMessage = $derived(
+		!isCompleted ? '' :
+		(isPersonalBest && personalBestTime !== undefined && personalBestTime < 999) ? `⚡ New best: ${personalBestTime}s!` :
+		streakData.currentStreak === 3 ? '🔥 3-day streak! Warming up!' :
+		streakData.currentStreak === 7 ? '🔥 One week! On fire!' :
+		streakData.currentStreak === 14 ? '⚡ Two weeks! Unstoppable!' :
+		streakData.currentStreak === 30 ? '🏆 30 days! Legend!' :
+		streakData.currentStreak === 50 ? '💎 50-day streak! Unreal!' :
+		streakData.currentStreak === 100 ? '👑 100 days! Urjo King!' :
+		(skillLevel === 1 && gridSize === 4) ? '🎯 Nice! Next: 6×6 👀' :
+		(skillLevel >= 2 && (mistakes ?? 0) === 0) ? '✨ Perfect solve!' :
+		'✅ Solved!'
 	);
 
 	let showLeaderboard = $state(false);
@@ -152,8 +165,18 @@
 
 	<!-- Main game area -->
 	<main
-		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative"
+		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 relative"
 	>
+		<!-- Difficulty badge -->
+		{#if !isCompleted}
+			<div class="flex items-center gap-2">
+				<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+					bg-theme-hover border border-theme-border text-theme-text-muted">
+					{difficultyLabel}
+				</span>
+			</div>
+		{/if}
+
 		<!-- Game board -->
 		<GameBoard
 			{grid}
@@ -161,6 +184,8 @@
 			{onCellChange}
 			violatedRows={validation.violatedRows}
 			violatedCols={validation.violatedCols}
+			completedRows={validation.completedRows}
+			completedCols={validation.completedCols}
 		/>
 
 		<!-- Completion overlay -->
@@ -214,20 +239,17 @@
 						</span>
 					{/if}
 
-					<!-- Streak milestone message (variable reward) -->
-					{#if streakMilestoneMessage}
-						<div class="text-sm font-bold text-yellow-300 animate-bounce-in text-center">
-							{streakMilestoneMessage}
+					<!-- Contextual message (PB / streak milestone / hint) -->
+					{#if completionMessage}
+						<div class="text-sm font-bold text-center animate-bounce-in
+							{isPersonalBest ? 'text-yellow-300' : 'text-green-400'}">
+							{completionMessage}
 						</div>
 					{/if}
 
-					<!-- Perfect / mistakes badge -->
-					{#if mistakes === 0}
-						<div class="text-sm font-semibold text-green-400">
-							🎯 Perfect!
-						</div>
-					{:else}
-						<div class="text-sm text-yellow-400">
+					<!-- Mistakes badge -->
+					{#if mistakes !== undefined && mistakes > 0}
+						<div class="text-xs text-yellow-400">
 							⚠️ {mistakes} mistake{mistakes === 1 ? "" : "s"}
 						</div>
 					{/if}
@@ -238,7 +260,7 @@
 						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
 							text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
 					>
-						Next Challenge
+						Next Challenge →
 					</button>
 
 					<!-- User actions row (Reddit interactions) -->

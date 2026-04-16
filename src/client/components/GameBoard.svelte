@@ -8,6 +8,8 @@
 		onCellChange: (row: number, col: number, color: CellColor) => void;
 		violatedRows?: Set<number>;
 		violatedCols?: Set<number>;
+		completedRows?: Set<number>;
+		completedCols?: Set<number>;
 	};
 
 	let {
@@ -16,6 +18,8 @@
 		onCellChange,
 		violatedRows = new Set(),
 		violatedCols = new Set(),
+		completedRows = new Set(),
+		completedCols = new Set(),
 	}: Props = $props();
 
 	const gridStyle = $derived(
@@ -36,8 +40,9 @@
 				{rowIndex}
 				{colIndex}
 				isLoading={cell.isLoading ?? false}
-				hasError={violatedRows.has(rowIndex) ||
-					violatedCols.has(colIndex)}
+				hasError={violatedRows.has(rowIndex) || violatedCols.has(colIndex)}
+				isRowComplete={completedRows.has(rowIndex)}
+				isColComplete={completedCols.has(colIndex)}
 				{gridSize}
 				onChange={(color) => onCellChange(rowIndex, colIndex, color)}
 			/>
