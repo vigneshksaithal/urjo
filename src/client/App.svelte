@@ -329,7 +329,7 @@
 	 */
 	async function handleNextChallengeWithFilter(filter: GridFilter) {
 		hasChallenged = false;
-		challengUrl = null;
+		challengeUrl = null;
 		try {
 			const timeSpent = Math.round((Date.now() - startTime) / 1000);
 			const preferredGridSize = filter === '4x4' ? 4 : filter === '6x6' ? 6 : undefined;
