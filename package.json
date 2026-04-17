@@ -17,7 +17,7 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@devvit/start": "^0.12.18",
+    "@devvit/start": "^0.12.19",
     "@devvit/web": "0.12.18",
     "@hono/node-server": "^1.19.13",
     "@tailwindcss/vite": "^4.2.2",
