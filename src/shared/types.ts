@@ -28,6 +28,7 @@ export type GameState = {
 	skillLevel: number
 	streak?: StreakData
 	username?: string
+	gridFilter?: GridFilter
 }
 
 export type NextChallengeResponse = {

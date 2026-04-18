@@ -7,6 +7,7 @@
 		StreakData,
 		ShareResponse,
 		CoinReward,
+		GridFilter,
 	} from "../shared/types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
@@ -64,6 +65,7 @@
 	let personalBestTime = $state<number | undefined>(undefined);
 	let username = $state<string | undefined>(undefined);
 	let hasSubscribed = $state(false);
+	let gridFilter = $state<GridFilter>('all');
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -108,6 +110,7 @@
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
+			gridFilter = data.gridFilter ?? 'all';
 
 			// Update streak data
 			if (data.streak) {
@@ -379,6 +382,23 @@
 	}
 
 	/**
+	 * Handle grid size filter change.
+	 */
+	async function handleFilterChange(filter: GridFilter) {
+		gridFilter = filter;
+		try {
+			await fetch("/api/game/grid-filter", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ filter }),
+			});
+		} catch {
+			// Non-critical
+		}
+		await handleNextChallenge();
+	}
+
+	/**
 	 * Handle tutorial completion.
 	 */
 	async function handleTutorialComplete() {
@@ -431,6 +451,7 @@
 			hasSubscribed,
 			isPersonalBest,
 			personalBestTime,
+			gridFilter,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
@@ -438,6 +459,7 @@
 			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
 			onSubscribe: handleSubscribe,
+			onFilterChange: handleFilterChange,
 		}}
 		{#if coinReward}
 			<GameView {...gameProps} {coinReward} />

@@ -19,6 +19,7 @@ import type {
 	ChallengeRequest,
 	ChallengeResponse,
 	SerializedPuzzle,
+	GridFilter,
 } from '../../shared/types'
 import { MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
 import { generatePuzzle } from '../lib/generator'
@@ -32,7 +33,7 @@ import {
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
 import { getUserEconomy } from '../lib/economy'
-import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak } from '../lib/helpers'
+import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak, getGridFilter, setGridFilter } from '../lib/helpers'
 
 export const gameRouter = new Hono()
 
@@ -146,6 +147,17 @@ const getHistory = async (userId: string): Promise<GameRecord[]> => {
 const generatePuzzleForLevel = (level: number): SerializedPuzzle => {
 	const config = getLevelConfig(level)
 	return generatePuzzle(config.difficulty, config.gridSize as 4 | 6 | 8)
+}
+
+/**
+ * Generate a puzzle at the user's current skill level, respecting the grid filter.
+ */
+const generatePuzzleForLevelWithFilter = (level: number, filter: GridFilter): SerializedPuzzle => {
+	const config = getLevelConfig(level)
+	let size: 4 | 6 | 8 = config.gridSize
+	if (filter === '4x4') size = 4
+	else if (filter === '6x6') size = 6
+	return generatePuzzle(config.difficulty, size)
 }
 
 /**
@@ -349,6 +361,7 @@ gameRouter.get('/api/game/state', async (c) => {
 
 		const tutorialCompleted = (await redis.get(`user:${userId}:tutorialCompleted`)) === 'true'
 		const streak = await getStreakData(userId)
+		const gridFilter = await getGridFilter(userId)
 
 		// Fetch username for consent dialog display
 		let username: string | undefined
@@ -377,6 +390,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			tutorialCompleted,
 			skillLevel,
 			streak,
+			gridFilter,
 			...(username !== undefined && { username }),
 		}
 
@@ -533,6 +547,19 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
 		}
 
+		// If no explicit preferredGridSize, derive from gridFilter
+		if (preferredGridSize === undefined) {
+			const gridFilter = await getGridFilter(userId)
+			if (gridFilter === '4x4') preferredGridSize = 4
+			else if (gridFilter === '6x6') preferredGridSize = 6
+		}
+
+		const gridFilter: GridFilter = preferredGridSize === 4
+			? '4x4'
+			: preferredGridSize === 6
+				? '6x6'
+				: await getGridFilter(userId)
+
 		let currentLevel = await getSkillLevel(userId)
 		const history = await getHistory(userId)
 
@@ -560,7 +587,9 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 		await redis.set(`user:${userId}:skillLevel`, newLevel.toString())
 		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
 
-		const newPuzzle = generatePuzzleForLevel(newLevel)
+		const newPuzzle = gridFilter !== 'all'
+			? generatePuzzleForLevelWithFilter(newLevel, gridFilter)
+			: generatePuzzleForLevel(newLevel)
 
 		await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
 			colors: newPuzzle.colors,
@@ -579,6 +608,44 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 	} catch (error) {
 		console.error('Error generating next challenge:', error)
 		return c.json({ error: 'Failed to generate next challenge' }, 500)
+	}
+})
+
+// ─── POST /api/game/grid-filter ──────────────────────────────────────────────
+
+gameRouter.post('/api/game/grid-filter', async (c) => {
+	const { postId, userId } = context
+
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const body = await c.req.json<{ filter?: string }>()
+		const filter = body.filter
+
+		// Validate filter
+		if (filter !== 'all' && filter !== '4x4' && filter !== '6x6') {
+			return c.json({ error: 'Invalid filter value' }, 400)
+		}
+
+		await setGridFilter(userId, filter as GridFilter)
+
+		// Generate a new puzzle matching the filter
+		const skillLevel = await getSkillLevel(userId)
+		const newPuzzle = generatePuzzleForLevelWithFilter(skillLevel, filter as GridFilter)
+
+		await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+			colors: newPuzzle.colors,
+			numbers: newPuzzle.numbers,
+			solution: newPuzzle.solution,
+			difficulty: newPuzzle.difficulty,
+			gridSize: newPuzzle.gridSize.toString(),
+		})
+
+		return c.json({ success: true })
+	} catch (error) {
+		console.error('Error setting grid filter:', error)
+		return c.json({ error: 'Failed to set grid filter' }, 500)
 	}
 })
 

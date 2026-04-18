@@ -4,6 +4,7 @@
 		Grid,
 		StreakData,
 		CoinReward,
+		GridFilter,
 	} from "../../shared/types";
 	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
@@ -41,6 +42,8 @@
 		onSubscribe?: () => void;
 		isPersonalBest?: boolean;
 		personalBestTime?: number;
+		gridFilter?: GridFilter;
+		onFilterChange?: (filter: GridFilter) => void;
 	};
 
 	let {
@@ -66,6 +69,8 @@
 		isPersonalBest = false,
 		personalBestTime,
 		skillLevel = 1,
+		gridFilter = 'all' as GridFilter,
+		onFilterChange = undefined,
 	}: Props = $props();
 
 	// Difficulty label derived from gridSize + skillLevel
@@ -174,6 +179,23 @@
 					bg-theme-hover border border-theme-border text-theme-text-muted">
 					{difficultyLabel}
 				</span>
+			</div>
+		{/if}
+
+		<!-- Grid size filter -->
+		{#if !isCompleted && onFilterChange}
+			<div class="flex items-center gap-1.5">
+				{#each ([['all', 'All'], ['4x4', '4×4'], ['6x6', '6×6']] as const) as [value, label] (value)}
+					<button
+						onclick={() => onFilterChange?.(value as GridFilter)}
+						class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide border transition-colors
+							{gridFilter === value
+								? 'bg-urjo-blue border-urjo-blue text-white'
+								: 'bg-theme-hover border-theme-border text-theme-text-muted hover:text-theme-text-secondary'}"
+					>
+						{label}
+					</button>
+				{/each}
 			</div>
 		{/if}
 

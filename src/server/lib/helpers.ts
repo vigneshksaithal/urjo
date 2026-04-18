@@ -5,6 +5,7 @@
 
 import { redis, reddit } from '@devvit/web/server'
 import { DEFAULT_SKILL_LEVEL } from '../../shared/constants'
+import type { GridFilter } from '../../shared/types'
 
 /**
  * Get today's date in UTC as YYYY-MM-DD.
@@ -115,5 +116,23 @@ export const updateLoginStreak = async (userId: string, isDailyFirst: boolean): 
 	})
 
 	return newDays
+}
+
+// ─── Grid Filter ─────────────────────────────────────────────────────────────
+
+/**
+ * Get the user's grid filter preference from Redis.
+ * Returns 'all' if not set.
+ */
+export const getGridFilter = async (userId: string): Promise<GridFilter> => {
+	const filter = await redis.get(`user:${userId}:gridFilter`)
+	return (filter as GridFilter) ?? 'all'
+}
+
+/**
+ * Set the user's grid filter preference in Redis.
+ */
+export const setGridFilter = async (userId: string, filter: GridFilter): Promise<void> => {
+	await redis.set(`user:${userId}:gridFilter`, filter)
 }
 
