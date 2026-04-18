@@ -19,7 +19,7 @@
 		violatedRows = new Set(),
 		violatedCols = new Set(),
 		completedRows = new Set(),
-		completedCols = new Set(),
+		completedCols: _completedCols = new Set(),
 	}: Props = $props();
 
 	const gridStyle = $derived(

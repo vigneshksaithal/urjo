@@ -538,27 +538,30 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 
 	try {
 		let timeSpent = 0
+		let preferredGridSize: 4 | 6 | undefined
 		try {
-			const body = await c.req.json<{ timeSpent?: number }>()
+			const body = await c.req.json<{ timeSpent?: number; preferredGridSize?: number }>()
 			if (typeof body.timeSpent === 'number' && body.timeSpent >= 0) {
 				timeSpent = body.timeSpent
+			}
+			if (body.preferredGridSize === 4 || body.preferredGridSize === 6) {
+				preferredGridSize = body.preferredGridSize
 			}
 		} catch {
 			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
 		}
 
-		// If no explicit preferredGridSize, derive from gridFilter
 		if (preferredGridSize === undefined) {
-			const gridFilter = await getGridFilter(userId)
-			if (gridFilter === '4x4') preferredGridSize = 4
-			else if (gridFilter === '6x6') preferredGridSize = 6
+			const savedGridFilter = await getGridFilter(userId)
+			if (savedGridFilter === '4x4') preferredGridSize = 4
+			else if (savedGridFilter === '6x6') preferredGridSize = 6
 		}
 
 		const gridFilter: GridFilter = preferredGridSize === 4
 			? '4x4'
 			: preferredGridSize === 6
 				? '6x6'
-				: await getGridFilter(userId)
+				: 'all'
 
 		let currentLevel = await getSkillLevel(userId)
 		const history = await getHistory(userId)

@@ -5,6 +5,9 @@
 
 export type CellColor = 'red' | 'blue' | null
 
+/** Filter for which grid sizes to show in the puzzle feed */
+export type GridFilter = 'all' | '4x4' | '6x6'
+
 export type Cell = {
 	color: CellColor
 	number: number | null

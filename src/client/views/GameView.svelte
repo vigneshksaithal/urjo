@@ -37,11 +37,11 @@
 		onOpenShop?: () => void;
 		timeTaken?: number;
 		mistakes?: number;
-		username?: string;
+		username?: string | undefined;
 		hasSubscribed?: boolean;
 		onSubscribe?: () => void;
 		isPersonalBest?: boolean;
-		personalBestTime?: number;
+		personalBestTime?: number | undefined;
 		gridFilter?: GridFilter;
 		onFilterChange?: (filter: GridFilter) => void;
 	};
@@ -52,7 +52,7 @@
 		onCellChange,
 		isCompleted,
 		onNextChallenge,
-		onRestart,
+		onRestart: _onRestart,
 		streakData,
 		hasShared,
 		hasChallenged,
@@ -68,9 +68,9 @@
 		onSubscribe,
 		isPersonalBest = false,
 		personalBestTime,
-		skillLevel = 1,
-		gridFilter = 'all' as GridFilter,
+		gridFilter = 'all',
 		onFilterChange = undefined,
+		skillLevel = 1,
 	}: Props = $props();
 
 	// Difficulty label derived from gridSize + skillLevel
@@ -172,20 +172,9 @@
 	<main
 		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 relative"
 	>
-		<!-- Difficulty badge -->
-		{#if !isCompleted}
-			<div class="flex items-center gap-2">
-				<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
-					bg-theme-hover border border-theme-border text-theme-text-muted">
-					{difficultyLabel}
-				</span>
-			</div>
-		{/if}
-
-		<!-- Grid size filter -->
 		{#if !isCompleted && onFilterChange}
 			<div class="flex items-center gap-1.5">
-				{#each ([['all', 'All'], ['4x4', '4×4'], ['6x6', '6×6']] as const) as [value, label] (value)}
+				{#each [['all', 'All'], ['4x4', '4×4'], ['6x6', '6×6']] as [value, label]}
 					<button
 						onclick={() => onFilterChange?.(value as GridFilter)}
 						class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide border transition-colors
@@ -196,6 +185,16 @@
 						{label}
 					</button>
 				{/each}
+			</div>
+		{/if}
+
+		<!-- Difficulty badge -->
+		{#if !isCompleted}
+			<div class="flex items-center gap-2">
+				<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+					bg-theme-hover border border-theme-border text-theme-text-muted">
+					{difficultyLabel}
+				</span>
 			</div>
 		{/if}
 
