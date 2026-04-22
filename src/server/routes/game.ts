@@ -19,20 +19,33 @@ import type {
 	ChallengeRequest,
 	ChallengeResponse,
 	SerializedPuzzle,
+	GridSizeResponse,
 } from '../../shared/types'
-import { MIN_SKILL_LEVEL, getLevelConfig } from '../../shared/constants'
+import { MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize } from '../../shared/constants'
+import type { GridSize } from '../../shared/constants'
 import { generatePuzzle } from '../lib/generator'
 import {
 	calculatePerformanceScore,
 	determineSkillLevel,
 	addGameRecord,
-	parseHistory,
 	shouldForceDemotion,
 } from '../lib/adaptive'
 import { calculateCoinReward } from '../lib/economy'
 import type { CoinReward } from '../../shared/types'
 import { getUserEconomy } from '../lib/economy'
-import { getTodayUTC, getDayDifference, getSkillLevel, fetchUsername, updateLoginStreak } from '../lib/helpers'
+import {
+	getTodayUTC,
+	getDayDifference,
+	fetchUsername,
+	updateLoginStreak,
+	getGridSizePreference,
+	setGridSizePreference,
+	getGridSkillLevel,
+	setGridSkillLevel,
+	getGridHistory,
+	setGridHistory,
+} from '../lib/helpers'
+import { isUserMigrated, migrateUserToPerGrid } from '../lib/migration'
 
 export const gameRouter = new Hono()
 
@@ -133,19 +146,11 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Get the user's game history from Redis.
+ * Generate a puzzle at the given grid size and per-grid skill level.
  */
-const getHistory = async (userId: string): Promise<GameRecord[]> => {
-	const json = await redis.get(`user:${userId}:history`)
-	return parseHistory(json)
-}
-
-/**
- * Generate a puzzle at the user's current skill level.
- */
-const generatePuzzleForLevel = (level: number): SerializedPuzzle => {
-	const config = getLevelConfig(level)
-	return generatePuzzle(config.difficulty, config.gridSize as 4 | 6 | 8)
+const generatePuzzleForGridLevel = (gridSize: GridSize, level: number): SerializedPuzzle => {
+	const config = getGridLevelConfig(gridSize, level)
+	return generatePuzzle(config.difficulty, config.gridSize)
 }
 
 /**
@@ -252,6 +257,7 @@ type CoinRewardContext = {
 	currentLevel: number
 	streak: StreakData
 	mistakes: number
+	gridSize: GridSize
 }
 
 /**
@@ -273,7 +279,8 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 		ctx.streak.currentStreak,
 		isDailyFirst,
 		ctx.mistakes,
-		consecutiveLoginDays
+		consecutiveLoginDays,
+		ctx.gridSize
 	)
 
 	// Atomic increments for coins (prevents race conditions)
@@ -309,7 +316,14 @@ gameRouter.get('/api/game/state', async (c) => {
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
 	try {
-		const skillLevel = await getSkillLevel(userId)
+		// Run one-time migration for existing users
+		const migrated = await isUserMigrated(userId)
+		if (!migrated) {
+			await migrateUserToPerGrid(userId)
+		}
+
+		// Read grid size preference (set by migration or user selection)
+		const gridSizePreference = await getGridSizePreference(userId)
 
 		let puzzle = await getCurrentPuzzle(postId, userId)
 
@@ -327,6 +341,40 @@ gameRouter.get('/api/game/state', async (c) => {
 				return c.json({ error: 'Game not found' }, 404)
 			}
 		}
+
+		// Determine if this is a challenge post (has baked-in grid size)
+		const postPuzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
+		const isChallenge = Boolean(postPuzzleMeta?.challengeBy)
+
+		// For non-challenge posts, generate a fresh puzzle at the user's preferred grid size
+		// if the stored puzzle doesn't match the preference
+		if (!isChallenge) {
+			const storedGridSize = parseInt(puzzle.gridSize, 10)
+			if (storedGridSize !== gridSizePreference) {
+				const skillLevel = await getGridSkillLevel(userId, gridSizePreference)
+				const newPuzzle = generatePuzzleForGridLevel(gridSizePreference, skillLevel)
+				await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+					colors: newPuzzle.colors,
+					numbers: newPuzzle.numbers,
+					solution: newPuzzle.solution,
+					difficulty: newPuzzle.difficulty,
+					gridSize: newPuzzle.gridSize.toString(),
+				})
+				puzzle = {
+					colors: newPuzzle.colors,
+					numbers: newPuzzle.numbers,
+					solution: newPuzzle.solution,
+					difficulty: newPuzzle.difficulty,
+					gridSize: newPuzzle.gridSize.toString(),
+				}
+			}
+		}
+
+		// Determine skill level: per-grid for non-challenge, from puzzle for challenge
+		const effectiveGridSize = isChallenge
+			? (parseInt(puzzle.gridSize, 10) as GridSize)
+			: gridSizePreference
+		const skillLevel = await getGridSkillLevel(userId, effectiveGridSize)
 
 		const tutorialCompleted = (await redis.get(`user:${userId}:tutorialCompleted`)) === 'true'
 		const streak = await getStreakData(userId)
@@ -349,7 +397,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			colors: puzzle.colors,
 			numbers: puzzle.numbers,
 			solution: puzzle.solution,
-			difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard',
+			difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard' | 'diabolical',
 			gridSize: parseInt(puzzle.gridSize, 10),
 		}
 
@@ -357,6 +405,8 @@ gameRouter.get('/api/game/state', async (c) => {
 			puzzle: serializedPuzzle,
 			tutorialCompleted,
 			skillLevel,
+			gridSizePreference,
+			isChallenge,
 			streak,
 			...(username !== undefined && { username }),
 		}
@@ -365,6 +415,62 @@ gameRouter.get('/api/game/state', async (c) => {
 	} catch (error) {
 		console.error('Error fetching game state:', error)
 		return c.json({ error: 'Failed to fetch game state' }, 500)
+	}
+})
+
+// ─── POST /api/game/grid-size ─────────────────────────────────────────────────
+
+gameRouter.post('/api/game/grid-size', async (c) => {
+	const { postId, userId } = context
+
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+
+	try {
+		const body = await c.req.json().catch(() => null)
+		if (!body || typeof body !== 'object') {
+			return c.json({ error: 'Invalid request body' }, 400)
+		}
+
+		const { gridSize: rawGridSize } = body as Record<string, unknown>
+		const parsed = typeof rawGridSize === 'number' ? rawGridSize : parseInt(String(rawGridSize), 10)
+
+		if (!isValidGridSize(parsed)) {
+			return c.json({ error: 'Invalid grid size. Must be 4, 6, or 8.' }, 400)
+		}
+
+		const gridSize: GridSize = parsed
+
+		// Persist preference
+		await setGridSizePreference(userId, gridSize)
+
+		// Read per-grid skill level
+		const skillLevel = await getGridSkillLevel(userId, gridSize)
+
+		// Generate a new puzzle at the selected grid size and skill level
+		const newPuzzle = generatePuzzleForGridLevel(gridSize, skillLevel)
+
+		// Store puzzle for this user/post
+		if (postId) {
+			await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+				colors: newPuzzle.colors,
+				numbers: newPuzzle.numbers,
+				solution: newPuzzle.solution,
+				difficulty: newPuzzle.difficulty,
+				gridSize: newPuzzle.gridSize.toString(),
+			})
+		}
+
+		const response: GridSizeResponse = {
+			puzzle: newPuzzle,
+			skillLevel,
+			gridSizePreference: gridSize,
+		}
+
+		return c.json(response)
+	} catch (error) {
+		console.error('Error setting grid size:', error)
+		return c.json({ error: 'Failed to set grid size' }, 500)
 	}
 })
 
@@ -397,7 +503,6 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const { mistakes = 0 } = body
 
 		// Server-side time tracking (security fix)
-		// Calculate timeTaken from stored start time instead of trusting client
 		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
 		const startTimeStr = await redis.get(startTimeKey)
 		let timeTaken: number
@@ -406,7 +511,6 @@ gameRouter.post('/api/game/complete', async (c) => {
 			timeTaken = Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000)
 			await redis.del(startTimeKey)
 		} else {
-			// Fallback to client value if no server start time (shouldn't happen in production)
 			const clientTime = body.timeTaken
 			if (typeof clientTime !== 'number' || clientTime <= 0) {
 				return c.json({ error: 'Invalid timeTaken' }, 400)
@@ -418,10 +522,15 @@ gameRouter.post('/api/game/complete', async (c) => {
 			return c.json({ error: 'Invalid timeTaken' }, 400)
 		}
 
-		const currentLevel = await getSkillLevel(userId)
-		const history = await getHistory(userId)
+		// Read grid size from the completed puzzle
+		const puzzle = await getCurrentPuzzle(postId, userId)
+		const rawGridSize = puzzle ? parseInt(puzzle.gridSize, 10) : 4
+		const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
 
-		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel, mistakes)
+		const currentLevel = await getGridSkillLevel(userId, gridSize)
+		const history = await getGridHistory(userId, gridSize)
+
+		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel, mistakes, gridSize)
 
 		const record: GameRecord = {
 			level: currentLevel,
@@ -432,22 +541,23 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const newSkillLevel = determineSkillLevel(currentLevel, updatedHistory)
 		const streak = await updateStreak(userId)
 
-		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak, mistakes })
+		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak, mistakes, gridSize })
 
 		const today = getTodayUTC()
 		await Promise.all([
 			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
-			redis.zAdd(`leaderboard:speed:${today}`, { score: timeTaken, member: userId }),
-			redis.expire(`leaderboard:speed:${today}`, 2592000), // 30-day TTL
+			redis.zAdd(`leaderboard:speed:${today}:${gridSize}`, { score: timeTaken, member: userId }),
+			redis.expire(`leaderboard:speed:${today}:${gridSize}`, 2592000), // 30-day TTL
 		])
 
-		await redis.set(`user:${userId}:skillLevel`, newSkillLevel.toString())
-		// Reset history when level changes — fresh slate for new difficulty
-		await redis.set(
-			`user:${userId}:history`,
-			newSkillLevel !== currentLevel ? JSON.stringify([]) : JSON.stringify(updatedHistory)
+		// Update per-grid skill level and history
+		await setGridSkillLevel(userId, gridSize, newSkillLevel)
+		await setGridHistory(
+			userId,
+			gridSize,
+			newSkillLevel !== currentLevel ? [] : updatedHistory
 		)
-		await redis.set(`user:${userId}:consecutiveSkips`, '0')
+		await redis.set(`user:${userId}:consecutiveSkips:${gridSize}`, '0')
 
 		// Track attempts on challenge posts (once per user)
 		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
@@ -498,8 +608,10 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
 		}
 
-		let currentLevel = await getSkillLevel(userId)
-		const history = await getHistory(userId)
+		// Use grid size preference for per-grid tracking
+		const gridSizePreference = await getGridSizePreference(userId)
+		let currentLevel = await getGridSkillLevel(userId, gridSizePreference)
+		const history = await getGridHistory(userId, gridSizePreference)
 
 		const skipRecord: GameRecord = {
 			level: currentLevel,
@@ -509,7 +621,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 		}
 		const updatedHistory = addGameRecord(history, skipRecord)
 
-		const skipCountKey = `user:${userId}:consecutiveSkips`
+		const skipCountKey = `user:${userId}:consecutiveSkips:${gridSizePreference}`
 		const prevSkips = await redis.get(skipCountKey)
 		const consecutiveSkips = (prevSkips ? parseInt(prevSkips, 10) : 0) + 1
 		await redis.set(skipCountKey, consecutiveSkips.toString())
@@ -522,10 +634,10 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 			newLevel = determineSkillLevel(currentLevel, updatedHistory)
 		}
 
-		await redis.set(`user:${userId}:skillLevel`, newLevel.toString())
-		await redis.set(`user:${userId}:history`, JSON.stringify(updatedHistory))
+		await setGridSkillLevel(userId, gridSizePreference, newLevel)
+		await setGridHistory(userId, gridSizePreference, updatedHistory)
 
-		const newPuzzle = generatePuzzleForLevel(newLevel)
+		const newPuzzle = generatePuzzleForGridLevel(gridSizePreference, newLevel)
 
 		await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
 			colors: newPuzzle.colors,
@@ -538,6 +650,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 		const response: NextChallengeResponse = {
 			puzzle: newPuzzle,
 			skillLevel: newLevel,
+			gridSizePreference,
 		}
 
 		return c.json(response)
@@ -575,7 +688,9 @@ gameRouter.get('/api/game/leaderboard', async (c) => {
 			entries = await Promise.all(entriesPromises)
 		} else if (type === 'speed') {
 			const today = getTodayUTC()
-			const topUsers = await redis.zRange(`leaderboard:speed:${today}`, 0, 9, { by: 'rank' })
+			// Speed leaderboard is scoped by the user's grid size preference
+			const gridSizePreference = userId ? await getGridSizePreference(userId) : 4
+			const topUsers = await redis.zRange(`leaderboard:speed:${today}:${gridSizePreference}`, 0, 9, { by: 'rank' })
 
 			const entriesPromises = topUsers.map(async (item, i) => {
 				const memberId = item.member
@@ -641,8 +756,9 @@ gameRouter.post('/api/game/share', async (c) => {
 		const emojiGrid = rows.join('\n')
 
 		const perfTag = mistakes === 0 ? 'Perfect! ✨' : `⚠️ ${mistakes} mistake${mistakes === 1 ? '' : 's'}`
+		const gridLabel = `${gridSize}×${gridSize}`
 		const statsLine = `⏱️ ${timeTaken}s · 🎯 Level ${skillLevel} · 🔥 ${streak} day streak · ${perfTag}`
-		const commentText = `u/${sharerUsername} solved it!\n\n${emojiGrid}\n\n${statsLine}\nPlay → r/urjo`
+		const commentText = `u/${sharerUsername} solved the ${gridLabel} puzzle!\n\n${emojiGrid}\n\n${statsLine}\nPlay → r/urjo`
 
 		// Must reply to the sticky scores comment — required by Reddit user actions policy.
 		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
@@ -720,18 +836,19 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			// fallback to Anon
 		}
 
-		// Build title — rotating high-CTR templates
+		// Build title — rotating high-CTR templates with grid size context
 		const perfectTag = mistakes === 0 ? ' (perfect!)' : ''
 		const perfectBadge = mistakes === 0 ? ' (zero mistakes)' : ''
+		const gridLabel = `${puzzle.gridSize}×${puzzle.gridSize}`
 		const titleTemplates = [
-			`Only top players beat ${timeTaken}s at Level ${skillLevel}. u/${username} just did it${perfectBadge}. Your turn 🎯`,
-			`u/${username} solved Level ${skillLevel} in ${timeTaken}s${perfectTag} — can YOU beat it? 🏆`,
-			`Level ${skillLevel} cleared in ${timeTaken}s by u/${username}${perfectBadge}. Think you're faster? 👀`,
-			`New challenge dropped: Level ${skillLevel}, ${timeTaken}s to beat. u/${username} set the bar${perfectBadge} 🔥`,
+			`Only top players beat ${timeTaken}s on a ${gridLabel} at Level ${skillLevel}. u/${username} just did it${perfectBadge}. Your turn 🎯`,
+			`u/${username} solved a ${gridLabel} Level ${skillLevel} in ${timeTaken}s${perfectTag} — can YOU beat it? 🏆`,
+			`${gridLabel} Level ${skillLevel} cleared in ${timeTaken}s by u/${username}${perfectBadge}. Think you're faster? 👀`,
+			`New ${gridLabel} challenge dropped: Level ${skillLevel}, ${timeTaken}s to beat. u/${username} set the bar${perfectBadge} 🔥`,
 		]
 		// Rotate template based on hour to spread variety without randomness (deterministic)
 		const templateIndex = new Date().getUTCHours() % titleTemplates.length
-		const title = titleTemplates[templateIndex]
+		const title = titleTemplates[templateIndex] ?? titleTemplates[0]!
 
 		if (!subredditName) return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' })
 

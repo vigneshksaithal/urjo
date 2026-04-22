@@ -12,8 +12,6 @@
 
 import type { GameRecord } from '../../shared/types'
 import {
-	MIN_SKILL_LEVEL,
-	MAX_SKILL_LEVEL,
 	HISTORY_SIZE,
 	PROMOTE_THRESHOLDS,
 	PROMOTE_WINDOWS,
@@ -22,8 +20,11 @@ import {
 	SKIP_BASE_PENALTY,
 	SKIP_MAX_EXTRA_PENALTY,
 	CONSECUTIVE_SKIP_THRESHOLD,
-	getLevelConfig,
+	PER_GRID_MAX_LEVEL,
+	PER_GRID_MIN_LEVEL,
+	getGridLevelConfig,
 } from '../../shared/constants'
+import type { GridSize } from '../../shared/constants'
 
 /**
  * Calculate performance score for a single completed game.
@@ -37,8 +38,8 @@ import {
  * Mistake penalty: each mistake costs 0.20 points (capped at 1.0 total penalty).
  * Final score: max(0, timeScore - mistakePenalty)
  */
-export const calculatePerformanceScore = (timeTaken: number, level: number, mistakes: number = 0): number => {
-	const config = getLevelConfig(level)
+export const calculatePerformanceScore = (timeTaken: number, level: number, mistakes: number = 0, gridSize: GridSize = 4): number => {
+	const config = getGridLevelConfig(gridSize, level)
 	const expectedTime = config.expectedTime
 	const timeScore = Math.max(0, Math.min(1, 1.0 - timeTaken / (expectedTime * 2)))
 	const mistakePenalty = Math.min(1, mistakes * 0.20)
@@ -59,8 +60,8 @@ export const calculatePerformanceScore = (timeTaken: number, level: number, mist
  * - Skip at 25% of expected time → -0.35
  * - Skip at 50%+ of expected time → -0.2
  */
-export const calculateSkipScore = (timeSpent: number, level: number): number => {
-	const config = getLevelConfig(level)
+export const calculateSkipScore = (timeSpent: number, level: number, gridSize: GridSize = 4): number => {
+	const config = getGridLevelConfig(gridSize, level)
 	const expectedTime = config.expectedTime
 	const quicknessFactor = Math.max(0, Math.min(1, 1 - timeSpent / (expectedTime * 0.5)))
 	return SKIP_BASE_PENALTY + SKIP_MAX_EXTRA_PENALTY * quicknessFactor
@@ -93,6 +94,8 @@ export const calculateAverageScore = (history: GameRecord[]): number => {
  *
  * Per-level promotion thresholds (harder to promote at higher levels).
  * Demotion threshold is fixed at DEMOTE_THRESHOLD (0.18).
+ *
+ * Level is clamped to [PER_GRID_MIN_LEVEL, PER_GRID_MAX_LEVEL].
  */
 export const determineSkillLevel = (currentLevel: number, history: GameRecord[]): number => {
 	if (history.length === 0) return currentLevel
@@ -101,7 +104,7 @@ export const determineSkillLevel = (currentLevel: number, history: GameRecord[])
 	if (history.length >= DEMOTE_WINDOW) {
 		const recentShort = history.slice(-DEMOTE_WINDOW)
 		const avgShort = calculateAverageScore(recentShort)
-		if (avgShort <= DEMOTE_THRESHOLD && currentLevel > MIN_SKILL_LEVEL) {
+		if (avgShort <= DEMOTE_THRESHOLD && currentLevel > PER_GRID_MIN_LEVEL) {
 			return currentLevel - 1
 		}
 	}
@@ -112,7 +115,7 @@ export const determineSkillLevel = (currentLevel: number, history: GameRecord[])
 		const recentLong = history.slice(-promoteWindow)
 		const avgLong = calculateAverageScore(recentLong)
 		const promoteThreshold = PROMOTE_THRESHOLDS[currentLevel - 1] ?? 0.55
-		if (avgLong >= promoteThreshold && currentLevel < MAX_SKILL_LEVEL) {
+		if (avgLong >= promoteThreshold && currentLevel < PER_GRID_MAX_LEVEL) {
 			return currentLevel + 1
 		}
 	}

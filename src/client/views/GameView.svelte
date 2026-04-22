@@ -12,6 +12,7 @@
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
 	import HowToPlayModal from "../components/HowToPlayModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
+	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import Share2 from "lucide-svelte/icons/share-2";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
@@ -38,6 +39,8 @@
 		username?: string;
 		hasSubscribed?: boolean;
 		onSubscribe?: () => void;
+		isChallenge?: boolean;
+		onGridSizeChange?: (size: number) => void;
 	};
 
 	let {
@@ -60,6 +63,8 @@
 		username,
 		hasSubscribed = false,
 		onSubscribe,
+		isChallenge = false,
+		onGridSizeChange,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -78,6 +83,9 @@
 	});
 
 	const validation = $derived(validateGrid(grid, gridSize));
+	const boardSizeStyle = $derived(
+		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: 100%;`,
+	);
 
 	function confirmShare() {
 		showShareConfirm = false;
@@ -95,25 +103,26 @@
 	}
 </script>
 
-<div class="h-full w-full flex flex-col p-4 overflow-hidden">
-	<!-- Header -->
-	<header class="flex-none h-10 flex items-center justify-between px-2 gap-2">
+<div class="h-full w-full flex flex-col p-3 gap-2 overflow-hidden">
+	<!-- Header: help | streak · coins · trophy | shuffle -->
+	<header class="flex-none flex items-center justify-between gap-3">
 		<button
 			onclick={() => (showHowToPlay = true)}
-			class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
 			aria-label="How to Play"
 		>
 			<CircleHelp class="w-5 h-5 text-urjo-blue" />
 		</button>
 
-		<div class="flex items-center gap-2 flex-1 justify-center">
+		<!-- Centre cluster -->
+		<div class="flex items-center gap-3 flex-1 justify-center">
 			<StreakBadge streak={streakData} />
 			{#if coins !== undefined && onOpenShop}
 				<CoinDisplay {coins} onClick={onOpenShop} />
 			{/if}
 			<button
 				onclick={() => (showLeaderboard = true)}
-				class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+				class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
 				aria-label="View leaderboard"
 			>
 				<Trophy class="w-5 h-5 text-yellow-400" />
@@ -123,33 +132,44 @@
 		{#if !isCompleted}
 			<button
 				onclick={onNextChallenge}
-				class="flex items-center justify-center min-w-[44px] min-h-[44px] rounded-lg hover:bg-theme-hover transition-colors flex-shrink-0"
+				class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
 				aria-label="New Puzzle"
 			>
 				<Shuffle class="w-5 h-5 text-urjo-blue" />
 			</button>
 		{:else}
-			<div class="min-w-[44px] flex-shrink-0"></div>
+			<div class="w-9 shrink-0"></div>
 		{/if}
 	</header>
 
+	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
+	{#if !isChallenge && onGridSizeChange}
+		<div class="flex-none flex justify-center">
+			<GridSizeSelector {gridSize} {onGridSizeChange} />
+		</div>
+	{/if}
+
 	<!-- Main game area -->
 	<main
-		class="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 relative"
+		class="flex-1 min-h-0 flex flex-col items-center justify-center relative"
 	>
-		<!-- Game board -->
-		<GameBoard
-			{grid}
-			{gridSize}
-			{onCellChange}
-			violatedRows={validation.violatedRows}
-			violatedCols={validation.violatedCols}
-		/>
+		<!-- Board: square, never taller than available height -->
+		<div class="w-full min-h-0 flex items-center justify-center flex-1">
+			<div class="aspect-square" style={boardSizeStyle}>
+				<GameBoard
+					{grid}
+					{gridSize}
+					{onCellChange}
+					violatedRows={validation.violatedRows}
+					violatedCols={validation.violatedCols}
+				/>
+			</div>
+		</div>
 
 		<!-- Completion overlay -->
 		{#if isCompleted}
 			<div
-				class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-theme-overlay backdrop-blur-sm"
+				class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-theme-overlay backdrop-blur-sm rounded-xl"
 			>
 				<div class="flex flex-col items-center gap-3 max-w-sm w-full">
 					<!-- Coin reward with inline streak badge -->
@@ -170,23 +190,21 @@
 								{/if}
 							</div>
 							<div class="flex gap-2 text-xs text-gray-400">
-								{#if coinReward.streakBonus > 0}
-									<span>🔥 +{coinReward.streakBonus}</span>
-								{/if}
-								{#if coinReward.speedBonus > 0}
-									<span>⚡ +{coinReward.speedBonus}</span>
-								{/if}
-								{#if coinReward.dailyBonus > 0}
-									<span>📅 +{coinReward.dailyBonus}</span>
-								{/if}
-								{#if coinReward.perfectBonus > 0}
-									<span>🎯 +{coinReward.perfectBonus}</span>
-								{/if}
-								{#if coinReward.loginBonus > 0}
-									<span
+								{#if coinReward.streakBonus > 0}<span
+										>🔥 +{coinReward.streakBonus}</span
+									>{/if}
+								{#if coinReward.speedBonus > 0}<span
+										>⚡ +{coinReward.speedBonus}</span
+									>{/if}
+								{#if coinReward.dailyBonus > 0}<span
+										>📅 +{coinReward.dailyBonus}</span
+									>{/if}
+								{#if coinReward.perfectBonus > 0}<span
+										>🎯 +{coinReward.perfectBonus}</span
+									>{/if}
+								{#if coinReward.loginBonus > 0}<span
 										>🎁 +{coinReward.loginBonus} login bonus</span
-									>
-								{/if}
+									>{/if}
 							</div>
 						</div>
 					{:else if streakData.currentStreak > 0}
@@ -211,29 +229,26 @@
 					<!-- Primary CTA -->
 					<button
 						onclick={onNextChallenge}
-						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
-							text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
+						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
 					>
 						Next Challenge
 					</button>
 
-					<!-- User actions row (Reddit interactions) -->
+					<!-- User actions row -->
 					<div class="flex gap-3 w-full">
 						<button
 							onclick={() => {
 								if (!hasShared) showShareConfirm = true;
 							}}
 							disabled={hasShared}
-							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
-								text-sm hover:bg-theme-hover active:scale-95 transition-all
-								disabled:opacity-50 disabled:cursor-not-allowed
-								flex items-center justify-center gap-2"
+							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
 						>
 							{#if hasShared}
 								<span>✅ Commented!</span>
 							{:else}
-								<Share2 class="w-4 h-4" />
-								<span>Comment Score</span>
+								<Share2 class="w-4 h-4" /><span
+									>Comment Score</span
+								>
 							{/if}
 						</button>
 						<button
@@ -241,26 +256,17 @@
 								if (!hasChallenged) showChallengeConfirm = true;
 							}}
 							disabled={hasChallenged}
-							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
-								text-sm hover:bg-theme-hover active:scale-95 transition-all
-								disabled:opacity-50 disabled:cursor-not-allowed
-								flex items-center justify-center gap-2"
+							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
 						>
-							{#if hasChallenged}
-								<span>⚔️ Challenged!</span>
-							{:else}
-								<span>⚔️ Challenge</span>
-							{/if}
+							{#if hasChallenged}<span>⚔️ Challenged!</span
+								>{:else}<span>⚔️ Challenge</span>{/if}
 						</button>
 					</div>
 
-					<!-- Subreddit subscribe CTA -->
 					{#if onSubscribe && !hasSubscribed}
 						<button
 							onclick={() => (showSubscribeConfirm = true)}
-							class="px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg
-								text-sm hover:bg-theme-hover active:scale-95 transition-all w-full
-								flex items-center justify-center gap-2"
+							class="px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all w-full flex items-center justify-center gap-2"
 						>
 							🔔 Join r/urjo for daily puzzles
 						</button>
@@ -270,21 +276,17 @@
 		{/if}
 	</main>
 
-	<!-- Footer instructions -->
-	<footer class="flex-none h-10 flex items-center justify-center">
-		{#if isCompleted}
-			<p class="text-xs text-theme-text-muted text-center">
+	<!-- Footer -->
+	<footer class="flex-none flex items-center justify-center h-8">
+		<p class="text-xs text-theme-text-muted text-center">
+			{#if isCompleted}
 				Solved in {timeTaken ?? 0}s
-			</p>
-		{:else}
-			<p class="text-xs text-theme-text-muted text-center">
-				{#if mistakes === 0}
-					✓ Perfect so far
-				{:else}
-					Mistakes: {mistakes}
-				{/if}
-			</p>
-		{/if}
+			{:else if mistakes === 0}
+				✓ Perfect so far
+			{:else}
+				Mistakes: {mistakes}
+			{/if}
+		</p>
 	</footer>
 </div>
 

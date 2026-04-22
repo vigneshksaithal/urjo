@@ -21,12 +21,9 @@
 	const gridStyle = $derived(
 		`grid-template-columns: repeat(${gridSize}, 1fr)`,
 	);
-	const maxWidth = $derived(
-		gridSize === 8 ? "max-w-[480px]" : gridSize === 6 ? "max-w-[400px]" : "max-w-[340px]",
-	);
 </script>
 
-<div class="grid gap-0 w-full mx-auto {maxWidth}" style={gridStyle}>
+<div class="grid gap-1 w-full h-full" style={gridStyle}>
 	{#each grid as row, rowIndex}
 		{#each row as cell, colIndex}
 			<Cell

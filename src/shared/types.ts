@@ -26,6 +26,8 @@ export type GameState = {
 	puzzle: SerializedPuzzle
 	tutorialCompleted: boolean
 	skillLevel: number
+	gridSizePreference: number
+	isChallenge?: boolean
 	streak?: StreakData
 	username?: string
 }
@@ -33,6 +35,7 @@ export type GameState = {
 export type NextChallengeResponse = {
 	puzzle: SerializedPuzzle
 	skillLevel: number
+	gridSizePreference: number
 }
 
 export type CompleteRequest = {
@@ -146,6 +149,7 @@ export type CoinReward = {
 	dailyBonus: number
 	perfectBonus: number
 	loginBonus: number
+	gridSizeMultiplier: number
 	total: number
 }
 
@@ -187,4 +191,18 @@ export type EquipTitleRequest = {
 export type EquipTitleResponse = {
 	success: boolean
 	error?: string
+}
+
+// ─── Grid Size Types ───────────────────────────────────────────────────────────
+
+/** Grid size selection request */
+export type GridSizeRequest = {
+	gridSize: number // 4, 6, or 8
+}
+
+/** Grid size selection response */
+export type GridSizeResponse = {
+	puzzle: SerializedPuzzle
+	skillLevel: number
+	gridSizePreference: number
 }

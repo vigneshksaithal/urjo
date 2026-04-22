@@ -4,7 +4,9 @@
  */
 
 import { redis, reddit } from '@devvit/web/server'
-import { DEFAULT_SKILL_LEVEL } from '../../shared/constants'
+import { DEFAULT_SKILL_LEVEL, DEFAULT_GRID_SIZE, isValidGridSize } from '../../shared/constants'
+import type { GridSize } from '../../shared/constants'
+import type { GameRecord } from '../../shared/types'
 
 /**
  * Get today's date in UTC as YYYY-MM-DD.
@@ -117,3 +119,65 @@ export const updateLoginStreak = async (userId: string, isDailyFirst: boolean): 
 	return newDays
 }
 
+
+// ─── Grid Size Preference ───────────────────────────────────────────────────
+
+/**
+ * Get the user's grid size preference from Redis.
+ * Defaults to DEFAULT_GRID_SIZE (4) if not set.
+ */
+export const getGridSizePreference = async (userId: string): Promise<GridSize> => {
+	const value = await redis.get(`user:${userId}:gridSizePreference`)
+	if (value === undefined) return DEFAULT_GRID_SIZE
+	const parsed = parseInt(value, 10)
+	return isValidGridSize(parsed) ? parsed : DEFAULT_GRID_SIZE
+}
+
+/**
+ * Persist the user's grid size preference to Redis.
+ * Only accepts valid GridSize values (4, 6, 8).
+ */
+export const setGridSizePreference = async (userId: string, gridSize: GridSize): Promise<void> => {
+	await redis.set(`user:${userId}:gridSizePreference`, gridSize.toString())
+}
+
+// ─── Per-Grid Skill Level ───────────────────────────────────────────────────
+
+/**
+ * Get the user's skill level for a specific grid size.
+ * Defaults to 1 if not set.
+ */
+export const getGridSkillLevel = async (userId: string, gridSize: GridSize): Promise<number> => {
+	const value = await redis.get(`user:${userId}:skillLevel:${gridSize}`)
+	return value !== undefined ? parseInt(value, 10) : 1
+}
+
+/**
+ * Persist the user's skill level for a specific grid size.
+ */
+export const setGridSkillLevel = async (userId: string, gridSize: GridSize, level: number): Promise<void> => {
+	await redis.set(`user:${userId}:skillLevel:${gridSize}`, level.toString())
+}
+
+// ─── Per-Grid Game History ──────────────────────────────────────────────────
+
+/**
+ * Get the user's game history for a specific grid size.
+ * Returns an empty array if no history is stored.
+ */
+export const getGridHistory = async (userId: string, gridSize: GridSize): Promise<GameRecord[]> => {
+	const value = await redis.get(`user:${userId}:history:${gridSize}`)
+	if (value === undefined) return []
+	try {
+		return JSON.parse(value) as GameRecord[]
+	} catch {
+		return []
+	}
+}
+
+/**
+ * Persist the user's game history for a specific grid size.
+ */
+export const setGridHistory = async (userId: string, gridSize: GridSize, history: GameRecord[]): Promise<void> => {
+	await redis.set(`user:${userId}:history:${gridSize}`, JSON.stringify(history))
+}

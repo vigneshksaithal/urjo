@@ -145,9 +145,11 @@
 	{#if number !== null}
 		<span
 			class="absolute inset-0 flex items-center justify-center
-				text-white font-bold {gridSize === 6
-				? 'text-xl'
-				: 'text-3xl'} z-10 select-none pointer-events-none
+				text-white font-bold {gridSize === 8
+				? 'text-sm'
+				: gridSize === 6
+					? 'text-xl'
+					: 'text-3xl'} z-10 select-none pointer-events-none
 				drop-shadow-md"
 		>
 			{number}

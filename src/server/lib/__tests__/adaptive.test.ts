@@ -10,11 +10,11 @@ import {
 } from '../adaptive'
 import {
     MIN_SKILL_LEVEL,
-    MAX_SKILL_LEVEL,
     HISTORY_SIZE,
     CONSECUTIVE_SKIP_THRESHOLD,
     PROMOTE_WINDOW,
     DEMOTE_WINDOW,
+    PER_GRID_MAX_LEVEL,
 } from '../../../shared/constants'
 import type { GameRecord } from '../../../shared/types'
 
@@ -270,11 +270,12 @@ describe('Skip score bounded output — Property 3', () => {
 describe('Skill level never escapes valid range — Property 4', () => {
     /**
      * Property 4: Skill level never escapes valid range
-     * For any currentLevel and any GameRecord array, result is in [MIN_SKILL_LEVEL, MAX_SKILL_LEVEL]
+     * For any currentLevel in [1, PER_GRID_MAX_LEVEL] and any GameRecord array,
+     * result is in [MIN_SKILL_LEVEL, PER_GRID_MAX_LEVEL]
      * Validates: Requirements 3.7, 3.8
      */
-    it('determineSkillLevel always returns a level in [MIN_SKILL_LEVEL, MAX_SKILL_LEVEL]', () => {
-        const levels = [1, 2, 3, 4, 5, 6]
+    it('determineSkillLevel always returns a level in [MIN_SKILL_LEVEL, PER_GRID_MAX_LEVEL]', () => {
+        const levels = [1, 2, 3, 4]
         const histories = [
             [],
             fastHistory(1, 3),
@@ -285,7 +286,7 @@ describe('Skill level never escapes valid range — Property 4', () => {
             for (const history of histories) {
                 const result = determineSkillLevel(level, history)
                 expect(result).toBeGreaterThanOrEqual(MIN_SKILL_LEVEL)
-                expect(result).toBeLessThanOrEqual(MAX_SKILL_LEVEL)
+                expect(result).toBeLessThanOrEqual(PER_GRID_MAX_LEVEL)
             }
         }
     })
@@ -361,5 +362,77 @@ describe('Parse history robustness — Property 7', () => {
             expect(typeof record.timeTaken).toBe('number')
             expect(typeof record.timestamp).toBe('number')
         }
+    })
+})
+
+// ─── Task 4.6: Per-grid adaptive tests ───────────────────────────────────────
+
+describe('calculatePerformanceScore — per-grid expected times', () => {
+    /**
+     * Validates: Requirements 5.4, 5.5
+     * 6×6 level 1 has expectedTime=120 (not 45 like 4×4 level 1).
+     * Solving in 120s on 6×6 level 1 should score 0.5 (at expected time).
+     * Solving in 120s on 4×4 level 1 should score 0.0 (2× expected time of 45 = 90, so 120 > 90 → 0).
+     */
+    it('uses 6×6 expectedTime=120 for level 1 (not 4×4 expectedTime=45)', () => {
+        // At timeTaken=120 on 6×6 level 1: score = 1 - 120/(120*2) = 1 - 0.5 = 0.5
+        expect(calculatePerformanceScore(120, 1, 0, 6)).toBeCloseTo(0.5)
+        // At timeTaken=120 on 4×4 level 1: score = max(0, 1 - 120/(45*2)) = max(0, 1 - 1.33) = 0
+        expect(calculatePerformanceScore(120, 1, 0, 4)).toBe(0.0)
+    })
+
+    it('uses 8×8 expectedTime=300 for level 1', () => {
+        // At timeTaken=300 on 8×8 level 1: score = 1 - 300/(300*2) = 0.5
+        expect(calculatePerformanceScore(300, 1, 0, 8)).toBeCloseTo(0.5)
+        // At timeTaken=300 on 4×4 level 1: score = max(0, 1 - 300/90) = 0
+        expect(calculatePerformanceScore(300, 1, 0, 4)).toBe(0.0)
+    })
+
+    it('defaults to 4×4 grid when gridSize is omitted (backward compatibility)', () => {
+        // timeTaken=45 on 4×4 level 1 → score = 1 - 45/90 = 0.5
+        expect(calculatePerformanceScore(45, 1)).toBeCloseTo(0.5)
+        expect(calculatePerformanceScore(45, 1, 0, 4)).toBeCloseTo(0.5)
+    })
+})
+
+describe('calculateSkipScore — per-grid expected times', () => {
+    /**
+     * Validates: Requirements 5.4, 5.5
+     * 6×6 level 1 has expectedTime=120; threshold for slow skip = 120 * 0.5 = 60s.
+     */
+    it('uses 6×6 expectedTime=120 for skip threshold at level 1', () => {
+        // timeSpent=60 on 6×6 level 1: quicknessFactor = max(0, 1 - 60/60) = 0 → score = -0.2
+        expect(calculateSkipScore(60, 1, 6)).toBe(-0.2)
+        // timeSpent=0 on 6×6 level 1: quicknessFactor = 1 → score = -0.5
+        expect(calculateSkipScore(0, 1, 6)).toBe(-0.5)
+    })
+
+    it('defaults to 4×4 grid when gridSize is omitted (backward compatibility)', () => {
+        // timeSpent=0 on 4×4 level 1 → -0.5
+        expect(calculateSkipScore(0, 1)).toBe(-0.5)
+        expect(calculateSkipScore(0, 1, 4)).toBe(-0.5)
+    })
+})
+
+describe('determineSkillLevel — capped at PER_GRID_MAX_LEVEL (4)', () => {
+    /**
+     * Validates: Requirements 5.5
+     * determineSkillLevel should not promote beyond PER_GRID_MAX_LEVEL=4.
+     */
+    it('does NOT promote beyond PER_GRID_MAX_LEVEL=4', () => {
+        // At level 4 with many fast solves, should stay at 4
+        const result = determineSkillLevel(4, fastHistory(4, 15))
+        expect(result).toBe(4)
+        expect(result).toBeLessThanOrEqual(PER_GRID_MAX_LEVEL)
+    })
+
+    it('promotes from level 3 to level 4 with sustained fast solves', () => {
+        const result = determineSkillLevel(3, fastHistory(3, 15))
+        expect(result).toBe(4)
+    })
+
+    it('demotes from level 4 to level 3 with sustained slow solves', () => {
+        const result = determineSkillLevel(4, slowHistory(4, DEMOTE_WINDOW))
+        expect(result).toBe(3)
     })
 })

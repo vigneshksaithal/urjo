@@ -211,3 +211,70 @@ export const STREAK_FREEZE_COST = 50
 
 /** Maximum streak freezes a user can hold */
 export const MAX_STREAK_FREEZES = 3
+
+// ─── Per-Grid Difficulty Ladder ───────────────────────────────────────────────
+
+/** Valid grid sizes */
+export type GridSize = 4 | 6 | 8
+
+export const VALID_GRID_SIZES: readonly GridSize[] = [4, 6, 8] as const
+
+export const DEFAULT_GRID_SIZE: GridSize = 4
+
+/** A single difficulty level entry within a specific grid size */
+export type GridDifficultyLevel = {
+	level: number
+	gridSize: GridSize
+	difficulty: Difficulty
+	expectedTime: number // seconds
+}
+
+/** Per-grid difficulty ladder: each grid size has 4 independent levels */
+export const PER_GRID_LADDER: Record<GridSize, readonly GridDifficultyLevel[]> = {
+	4: [
+		{ level: 1, gridSize: 4, difficulty: 'easy', expectedTime: 45 },
+		{ level: 2, gridSize: 4, difficulty: 'medium', expectedTime: 90 },
+		{ level: 3, gridSize: 4, difficulty: 'hard', expectedTime: 150 },
+		{ level: 4, gridSize: 4, difficulty: 'diabolical', expectedTime: 210 },
+	],
+	6: [
+		{ level: 1, gridSize: 6, difficulty: 'easy', expectedTime: 120 },
+		{ level: 2, gridSize: 6, difficulty: 'medium', expectedTime: 210 },
+		{ level: 3, gridSize: 6, difficulty: 'hard', expectedTime: 360 },
+		{ level: 4, gridSize: 6, difficulty: 'diabolical', expectedTime: 480 },
+	],
+	8: [
+		{ level: 1, gridSize: 8, difficulty: 'easy', expectedTime: 300 },
+		{ level: 2, gridSize: 8, difficulty: 'medium', expectedTime: 480 },
+		{ level: 3, gridSize: 8, difficulty: 'hard', expectedTime: 720 },
+		{ level: 4, gridSize: 8, difficulty: 'diabolical', expectedTime: 960 },
+	],
+} as const
+
+/** Maximum level within any per-grid ladder */
+export const PER_GRID_MAX_LEVEL = 4
+
+/** Minimum level within any per-grid ladder */
+export const PER_GRID_MIN_LEVEL = 1
+
+/** Coin reward multipliers by grid size */
+export const GRID_SIZE_MULTIPLIERS: Record<GridSize, number> = {
+	4: 1.0,
+	6: 1.5,
+	8: 2.0,
+} as const
+
+/**
+ * Get the difficulty config for a given (gridSize, level) pair.
+ * Level is clamped to [PER_GRID_MIN_LEVEL, PER_GRID_MAX_LEVEL].
+ */
+export const getGridLevelConfig = (gridSize: GridSize, level: number): GridDifficultyLevel => {
+	const clamped = Math.max(PER_GRID_MIN_LEVEL, Math.min(PER_GRID_MAX_LEVEL, level))
+	return PER_GRID_LADDER[gridSize][clamped - 1]!
+}
+
+/**
+ * Type guard: returns true if value is a valid GridSize (4, 6, or 8).
+ */
+export const isValidGridSize = (value: unknown): value is GridSize =>
+	value === 4 || value === 6 || value === 8

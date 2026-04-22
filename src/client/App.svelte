@@ -7,6 +7,7 @@
 		StreakData,
 		ShareResponse,
 		CoinReward,
+		GridSizeResponse,
 	} from "../shared/types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
@@ -62,6 +63,8 @@
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
 	let hasSubscribed = $state(false);
+	let gridSizePreference = $state(4);
+	let isChallenge = $state(false);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -106,6 +109,8 @@
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
+			gridSizePreference = data.gridSizePreference ?? 4;
+			isChallenge = data.isChallenge ?? false;
 
 			// Update streak data
 			if (data.streak) {
@@ -372,6 +377,52 @@
 	}
 
 	/**
+	 * Handle grid size selection change.
+	 * Calls POST /api/game/grid-size, updates puzzle state from response.
+	 * Reverts to previous size on failure (non-disruptive).
+	 */
+	async function handleGridSizeChange(newSize: number) {
+		const previousSize = gridSizePreference;
+		gridSizePreference = newSize;
+
+		try {
+			const response = await fetch("/api/game/grid-size", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ gridSize: newSize }),
+			});
+
+			if (!response.ok) throw new Error("Failed to set grid size");
+
+			const data: GridSizeResponse = await response.json();
+
+			puzzleColors = data.puzzle.colors;
+			puzzleNumbers = data.puzzle.numbers;
+			puzzleSolution = data.puzzle.solution;
+			gridSize = data.puzzle.gridSize;
+			skillLevel = data.skillLevel;
+			gridSizePreference = data.gridSizePreference;
+			grid = deserializeGrid(
+				data.puzzle.colors,
+				data.puzzle.numbers,
+				data.puzzle.colors,
+				data.puzzle.gridSize,
+			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
+			isCompleted = false;
+			hasShared = false;
+			hasChallenged = false;
+			challengeUrl = null;
+			startTime = Date.now();
+			coinReward = undefined;
+			resetMistakes();
+			setSolution(data.puzzle.solution, data.puzzle.gridSize);
+		} catch {
+			// Revert to previous size on failure (non-disruptive)
+			gridSizePreference = previousSize;
+		}
+	}
+
+	/**
 	 * Handle tutorial completion.
 	 */
 	async function handleTutorialComplete() {
@@ -419,8 +470,8 @@
 			coins,
 			timeTaken,
 			mistakes: $mistakeCount,
-			username,
 			hasSubscribed,
+			isChallenge,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
@@ -428,6 +479,8 @@
 			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
 			onSubscribe: handleSubscribe,
+			onGridSizeChange: handleGridSizeChange,
+			...(username !== undefined && { username }),
 		}}
 		{#if coinReward}
 			<GameView {...gameProps} {coinReward} />

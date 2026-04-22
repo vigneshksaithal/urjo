@@ -16,7 +16,9 @@ import {
 	getLevelConfig,
 	getCoinBaseForLevel,
 	getDailyLoginBonus,
+	GRID_SIZE_MULTIPLIERS,
 } from '../../shared/constants'
+import type { GridSize } from '../../shared/constants'
 import { fetchUsername } from './helpers'
 
 const ECONOMY_KEY_PREFIX = 'user'
@@ -73,7 +75,8 @@ export const calculateCoinReward = (
 	currentStreak: number,
 	isDailyFirst: boolean,
 	mistakes: number = 0,
-	consecutiveLoginDays: number = 0
+	consecutiveLoginDays: number = 0,
+	gridSize: GridSize = 4
 ): CoinReward => {
 	const config = getLevelConfig(level)
 	const parTime = config.expectedTime * PAR_TIME_MULTIPLIER
@@ -84,18 +87,20 @@ export const calculateCoinReward = (
 		? getDailyLoginBonus(consecutiveLoginDays)
 		: 0
 
-	const reward: CoinReward = {
-		base: getCoinBaseForLevel(level),
+	const base = getCoinBaseForLevel(level)
+	const gridSizeMultiplier = GRID_SIZE_MULTIPLIERS[gridSize]
+	const bonuses = currentStreak * COIN_STREAK_MULTIPLIER + speedBonus + (isDailyFirst ? COIN_DAILY_BONUS : 0) + perfectBonus + loginBonus
+
+	return {
+		base,
 		streakBonus: currentStreak * COIN_STREAK_MULTIPLIER,
 		speedBonus,
 		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,
 		perfectBonus,
 		loginBonus,
-		total: 0,
+		gridSizeMultiplier,
+		total: Math.round(base * gridSizeMultiplier + bonuses),
 	}
-
-	reward.total = reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus
-	return reward
 }
 
 /**
