@@ -5,6 +5,7 @@
 		StreakData,
 		CoinReward,
 	} from "../../shared/types";
+	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -13,6 +14,11 @@
 	import HowToPlayModal from "../components/HowToPlayModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
+	import MissionsPanel from "../components/MissionsPanel.svelte";
+	import AchievementsPanel from "../components/AchievementsPanel.svelte";
+	import ProfilePanel from "../components/ProfilePanel.svelte";
+	import MysteryBoxAnimation from "../components/MysteryBoxAnimation.svelte";
+	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import Share2 from "lucide-svelte/icons/share-2";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
@@ -41,6 +47,8 @@
 		onSubscribe?: () => void;
 		isChallenge?: boolean;
 		onGridSizeChange?: (size: number) => void;
+		engagement?: EngagementCompletionData;
+		onEngagementDismissed?: () => void;
 	};
 
 	let {
@@ -65,6 +73,8 @@
 		onSubscribe,
 		isChallenge = false,
 		onGridSizeChange,
+		engagement,
+		onEngagementDismissed,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -73,12 +83,35 @@
 	let showChallengeConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
 	let hasFiredConfetti = $state(false);
+	let showMissions = $state(false);
+	let showAchievements = $state(false);
+	let showProfile = $state(false);
+	let showMysteryBox = $state(false);
+	let showStreakMilestone = $state(false);
+	let mysteryBoxDismissed = $state(false);
+	let milestoneDismissed = $state(false);
 
 	$effect(() => {
 		if (isCompleted && !hasFiredConfetti) {
 			hasFiredConfetti = true;
 		} else if (!isCompleted) {
 			hasFiredConfetti = false;
+			mysteryBoxDismissed = false;
+			milestoneDismissed = false;
+		}
+	});
+
+	// Show mystery box animation when engagement data arrives with a box reward
+	$effect(() => {
+		if (engagement?.variableReward.mysteryBox && !mysteryBoxDismissed) {
+			showMysteryBox = true;
+		}
+	});
+
+	// Show streak milestone overlay when a milestone is reached
+	$effect(() => {
+		if (engagement?.streakMilestone && !milestoneDismissed) {
+			showStreakMilestone = true;
 		}
 	});
 
@@ -100,6 +133,16 @@
 	function confirmSubscribe() {
 		showSubscribeConfirm = false;
 		onSubscribe?.();
+	}
+
+	function dismissMysteryBox() {
+		showMysteryBox = false;
+		mysteryBoxDismissed = true;
+	}
+
+	function dismissMilestone() {
+		showStreakMilestone = false;
+		milestoneDismissed = true;
 	}
 </script>
 
@@ -181,6 +224,13 @@
 								<span class="text-2xl font-bold text-yellow-400"
 									>+{coinReward.total} 🪙</span
 								>
+								{#if coinReward.multiplier}
+									<span
+										class="px-2 py-0.5 rounded-full bg-yellow-500/20 border border-yellow-500/50 text-xs font-bold text-yellow-400"
+									>
+										{coinReward.multiplier}× BONUS!
+									</span>
+								{/if}
 								{#if streakData.currentStreak > 0}
 									<span
 										class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
@@ -213,6 +263,22 @@
 						>
 							🔥 {streakData.currentStreak}
 						</span>
+					{/if}
+
+					<!-- New achievement unlocks -->
+					{#if engagement?.newAchievements && engagement.newAchievements.length > 0}
+						<div class="flex flex-col items-center gap-1">
+							{#each engagement.newAchievements as achievement}
+								<div
+									class="flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-xs"
+								>
+									<span>{achievement.emoji}</span>
+									<span class="text-yellow-400 font-semibold"
+										>{achievement.label} unlocked!</span
+									>
+								</div>
+							{/each}
+						</div>
 					{/if}
 
 					<!-- Perfect / mistakes badge -->
@@ -271,6 +337,28 @@
 							🔔 Join r/urjo for daily puzzles
 						</button>
 					{/if}
+
+					<!-- Engagement navigation -->
+					<div class="flex gap-2 w-full">
+						<button
+							onclick={() => (showMissions = true)}
+							class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+						>
+							🎯 Missions
+						</button>
+						<button
+							onclick={() => (showAchievements = true)}
+							class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+						>
+							🏅 Achievements
+						</button>
+						<button
+							onclick={() => (showProfile = true)}
+							class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+						>
+							📊 Profile
+						</button>
+					</div>
 				</div>
 			</div>
 		{/if}
@@ -412,3 +500,28 @@
 	onClose={() => (showHowToPlay = false)}
 	{gridSize}
 />
+
+<!-- Engagement modals -->
+<MissionsPanel isOpen={showMissions} onClose={() => (showMissions = false)} />
+<AchievementsPanel
+	isOpen={showAchievements}
+	onClose={() => (showAchievements = false)}
+/>
+<ProfilePanel isOpen={showProfile} onClose={() => (showProfile = false)} />
+
+<!-- Mystery box animation -->
+{#if showMysteryBox && engagement?.variableReward.mysteryBox}
+	<MysteryBoxAnimation
+		reward={engagement.variableReward.mysteryBox}
+		onDismiss={dismissMysteryBox}
+	/>
+{/if}
+
+<!-- Streak milestone overlay -->
+{#if showStreakMilestone && engagement?.streakMilestone}
+	<StreakMilestoneOverlay
+		threshold={engagement.streakMilestone.threshold}
+		bonus={engagement.streakMilestone.bonus}
+		onDismiss={dismissMilestone}
+	/>
+{/if}

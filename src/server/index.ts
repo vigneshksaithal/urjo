@@ -13,6 +13,12 @@ import { Hono } from 'hono'
 import { createPost, URJO_PUZZLE_POST_TYPE as _URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY as _URJO_POST_TYPE_KEY } from './post'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
+import { engagementRouter } from './routes/engagement'
+import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
+import { selectDailyMissions } from './lib/missions'
+import { getTodayUTC, getISOWeek } from './lib/helpers'
+import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
+import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-types'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 
@@ -82,8 +88,12 @@ const formatLeaderboardSection = (
 
 // Build a stats comment for the daily puzzle post.
 // Pulls top 3 streak leaders, yesterday's top 3 speed, and top 3 coin leaders from Redis.
+// Also includes engagement data: active players, collective streaks, mission preview, highlights.
 const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0] ?? ''
+  const today = getTodayUTC()
+  const isoWeek = getISOWeek()
+  const isMonday = new Date().getUTCDay() === 1
 
   const [streakTop, speedTop, coinsTop] = await Promise.all([
     redis.zRange('leaderboard:streak', 0, 2, { reverse: true, by: 'rank' }),
@@ -97,8 +107,98 @@ const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
     resolveUsernames(coinsTop),
   ])
 
+  // ─── Active player count (with 5-second timeout fallback) ─────────────────
+  let activePlayers = 0
+  try {
+    const cached = await redis.get('stats:activePlayers:7d')
+    if (cached !== undefined) {
+      activePlayers = parseInt(cached, 10)
+    } else {
+      const timeoutPromise = new Promise<number>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), 5000)
+      )
+      const countPromise = (async () => {
+        // Count users with streak:lastDate within last 7 days
+        const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0] ?? ''
+        const allStreakEntries = await redis.zRange('leaderboard:streak', 0, -1, { by: 'rank' })
+        let count = 0
+        for (const entry of allStreakEntries) {
+          const lastDate = await redis.get(`user:${entry.member}:streak:lastDate`)
+          if (lastDate !== undefined && lastDate >= cutoff) count++
+        }
+        return count
+      })()
+      activePlayers = await Promise.race([countPromise, timeoutPromise])
+      await redis.set('stats:activePlayers:7d', activePlayers.toString())
+    }
+  } catch {
+    const cached = await redis.get('stats:activePlayers:7d')
+    activePlayers = cached !== undefined ? parseInt(cached, 10) : 0
+    console.warn('[Scheduler] Active player count timed out, using cached value')
+  }
+
+  // ─── Collective streaks ────────────────────────────────────────────────────
+  let collectiveStreaks = 0
+  try {
+    const allStreakEntries = await redis.zRange('leaderboard:streak', 0, -1, { by: 'rank' })
+    collectiveStreaks = allStreakEntries.reduce((sum, e) => sum + e.score, 0)
+    await redis.set('stats:collectiveStreaks', collectiveStreaks.toString())
+  } catch {
+    const cached = await redis.get('stats:collectiveStreaks')
+    collectiveStreaks = cached !== undefined ? parseInt(cached, 10) : 0
+  }
+
+  // ─── Mission preview ───────────────────────────────────────────────────────
+  const todayMissions = selectDailyMissions(today, DAILY_MISSION_TEMPLATES)
+  const missionPreview = buildMissionPreview(todayMissions)
+
+  // ─── Yesterday's Stars ─────────────────────────────────────────────────────
+  const topStreakEntry = streakLeaders[0]
+  const fastestSolves = speedLeaders.map((l, i) => ({
+    gridSize: 4, // simplified — full impl would track per-grid
+    username: l.username,
+    titleEmoji: '⚡',
+    timeTaken: speedTop[i]?.score ?? 0,
+  }))
+  const topCoinsEntry = coinsLeaders[0]
+
+  const highlightData: HighlightData = {
+    topStreak: topStreakEntry
+      ? { username: topStreakEntry.username, titleEmoji: '🔥', streak: streakTop[0]?.score ?? 0 }
+      : null,
+    fastestSolves,
+    mostCoins: topCoinsEntry
+      ? { username: topCoinsEntry.username, titleEmoji: '💰', coins: coinsTop[0]?.score ?? 0 }
+      : null,
+  }
+  const highlightsSection = buildHighlightsComment(highlightData)
+
+  // ─── Player of the Week (Mondays only) ────────────────────────────────────
+  let playerOfWeekSection = ''
+  if (isMonday) {
+    const weeklyTop = await redis.zRange(`leaderboard:weekly:${isoWeek}`, 0, 0, { reverse: true, by: 'rank' })
+    const weeklyTopEntry = weeklyTop[0]
+    let topPlayer: WeeklyHighlightData['topPlayer'] = null
+    if (weeklyTopEntry) {
+      try {
+        const user = await reddit.getUserById(weeklyTopEntry.member as `t2_${string}`)
+        if (user?.username) {
+          topPlayer = { username: user.username, titleEmoji: '🏆', completions: weeklyTopEntry.score }
+        }
+      } catch { /* skip */ }
+    }
+    playerOfWeekSection = buildPlayerOfTheWeekComment({ topPlayer, isoWeek })
+  }
+
   return [
     `🧩 **Puzzle #${puzzleNumber}** is live! Tap to play 👆`,
+    '',
+    `👥 **${activePlayers} active players** · 🔥 **${collectiveStreaks} collective streak days**`,
+    '',
+    missionPreview,
+    '',
+    highlightsSection,
+    ...(playerOfWeekSection ? ['', playerOfWeekSection] : []),
     '',
     ...formatLeaderboardSection('🔥 **Top Streaks**', streakLeaders, (s) => `${s} days`),
     ...formatLeaderboardSection('⚡ **Fastest Yesterday**', speedLeaders, (s) => `${s}s`),
@@ -158,6 +258,7 @@ app.post('/internal/on-post-create', async (c: Context) => {
 // Register game API routes
 app.route('/', gameRouter)
 app.route('/', economyRouter)
+app.route('/', engagementRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports

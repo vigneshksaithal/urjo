@@ -23,8 +23,8 @@ const MAX_GENERATION_ATTEMPTS = 300
 /** All 8 surrounding directions (orthogonal + diagonal). */
 const ALL_DIRECTIONS: ReadonlyArray<[number, number]> = [
 	[-1, -1], [-1, 0], [-1, 1],
-	[ 0, -1],          [ 0, 1],
-	[ 1, -1], [ 1, 0], [ 1, 1],
+	[0, -1], [0, 1],
+	[1, -1], [1, 0], [1, 1],
 ]
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -271,6 +271,11 @@ function generateSolution(gridSize: number): Grid {
 /**
  * Check if placing a color at (row, col) could still lead to a valid solution.
  * Used by the brute-force solver for pruning.
+ *
+ * Pruning verified correct by tests in generator.test.ts:
+ * - countSolutions correctly enumerates 2 solutions for X-wing patterns
+ * - countSolutions correctly returns 1 for unique puzzles
+ * - All generated puzzles verified to have exactly 1 solution (Property 4)
  */
 function couldBeValid(grid: Grid, row: number, col: number, gridSize: number): boolean {
 	const half = gridSize / 2
@@ -369,7 +374,7 @@ function couldBeValid(grid: Grid, row: number, col: number, gridSize: number): b
  * Count solutions for a puzzle grid (early termination at maxCount).
  * Works directly with the grid's embedded number constraints.
  */
-function countSolutions(puzzleGrid: Grid, gridSize: number, maxCount: number = 2): number {
+export function countSolutions(puzzleGrid: Grid, gridSize: number, maxCount: number = 2): number {
 	const grid = deepCopyGrid(puzzleGrid)
 
 	// Find empty cells (cells the player would need to fill)
@@ -695,22 +700,22 @@ type DifficultyTarget = {
  */
 const DIFFICULTY_TARGETS: Record<number, Record<string, DifficultyTarget>> = {
 	4: {
-		easy:       { minClues: 6,  minNumbers: 3 },
-		medium:     { minClues: 5,  minNumbers: 2 },
-		hard:       { minClues: 4,  minNumbers: 1 },
-		diabolical: { minClues: 3,  minNumbers: 1 },
+		easy: { minClues: 6, minNumbers: 3 },
+		medium: { minClues: 5, minNumbers: 2 },
+		hard: { minClues: 4, minNumbers: 1 },
+		diabolical: { minClues: 3, minNumbers: 1 },
 	},
 	6: {
-		easy:       { minClues: 14, minNumbers: 6 },
-		medium:     { minClues: 11, minNumbers: 4 },
-		hard:       { minClues: 9,  minNumbers: 2 },
-		diabolical: { minClues: 7,  minNumbers: 1 },
+		easy: { minClues: 14, minNumbers: 6 },
+		medium: { minClues: 11, minNumbers: 4 },
+		hard: { minClues: 9, minNumbers: 2 },
+		diabolical: { minClues: 7, minNumbers: 1 },
 	},
 	8: {
-		easy:       { minClues: 24, minNumbers: 10 },
-		medium:     { minClues: 20, minNumbers: 7  },
-		hard:       { minClues: 16, minNumbers: 4  },
-		diabolical: { minClues: 12, minNumbers: 2  },
+		easy: { minClues: 24, minNumbers: 10 },
+		medium: { minClues: 20, minNumbers: 7 },
+		hard: { minClues: 16, minNumbers: 4 },
+		diabolical: { minClues: 12, minNumbers: 2 },
 	},
 }
 

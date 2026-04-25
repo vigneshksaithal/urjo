@@ -3,6 +3,8 @@
  * Shared between client and server
  */
 
+import type { EngagementCompletionData, MysteryBoxReward } from './engagement-types'
+
 export type CellColor = 'red' | 'blue' | null
 
 export type Cell = {
@@ -49,6 +51,7 @@ export type CompleteResponse = {
 	previousSkillLevel: number
 	streak?: StreakData
 	coinReward?: CoinReward
+	engagement?: EngagementCompletionData | undefined
 }
 
 /** A single game record stored in user history */
@@ -151,6 +154,8 @@ export type CoinReward = {
 	loginBonus: number
 	gridSizeMultiplier: number
 	total: number
+	multiplier?: number | undefined
+	mysteryBox?: MysteryBoxReward | undefined
 }
 
 /** Shop item with ownership/unlock status */

@@ -278,3 +278,23 @@ export const getGridLevelConfig = (gridSize: GridSize, level: number): GridDiffi
  */
 export const isValidGridSize = (value: unknown): value is GridSize =>
 	value === 4 || value === 6 || value === 8
+
+// ─── Engagement Constants (re-exports) ─────────────────────────────────────────
+export {
+	DAILY_MISSION_TEMPLATES,
+	WEEKLY_MISSION_TEMPLATES,
+	ACHIEVEMENT_DEFS,
+	FLAIR_TIER_DEFS,
+	BONUS_MULTIPLIER_WEIGHTS,
+	MYSTERY_BOX_WEIGHTS,
+	MYSTERY_BOX_BASE_DROP_RATE,
+	MYSTERY_BOX_STREAK_BONUS,
+	MYSTERY_BOX_MAX_DROP_RATE,
+	MYSTERY_BOX_COIN_RANGE,
+	MYSTERY_BOX_TITLE_SUBSTITUTE_COINS,
+	STREAK_MILESTONES,
+	REFERRAL_BONUS,
+	REFERRAL_CAP_PER_POST,
+	ALL_DAILY_BONUS,
+	ALL_WEEKLY_BONUS,
+} from './engagement-constants'

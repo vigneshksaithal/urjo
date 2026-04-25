@@ -44,8 +44,14 @@ import {
 	setGridSkillLevel,
 	getGridHistory,
 	setGridHistory,
+	getISOWeek,
 } from '../lib/helpers'
 import { isUserMigrated, migrateUserToPerGrid } from '../lib/migration'
+import { getMissionState, saveMissionState, updateMissionProgress } from '../lib/missions'
+import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
+import { rollVariableRewards } from '../lib/variable-rewards'
+import { checkAndAwardReferral } from '../lib/referrals'
+import type { EngagementCompletionData, MissionEvent, UserStats } from '../../shared/engagement-types'
 
 export const gameRouter = new Hono()
 
@@ -574,12 +580,125 @@ gameRouter.post('/api/game/complete', async (c) => {
 		// Check if this is a challenge post and if the player beat the challenge
 		await checkChallengeBeat(postId, userId, timeTaken)
 
+		// ─── Engagement Logic ──────────────────────────────────────────────────
+		let engagement: EngagementCompletionData | undefined
+		try {
+			const isoWeek = getISOWeek()
+
+			// Roll variable rewards (bonus multiplier + mystery box)
+			const economy = await getUserEconomy(userId)
+			const variableReward = rollVariableRewards(
+				userId,
+				postId,
+				Date.now(),
+				streak.currentStreak,
+				economy.ownedTitles
+			)
+
+			// Apply bonus multiplier to coin reward
+			if (variableReward.bonusMultiplier !== null) {
+				const multipliedBase = coinReward.base * variableReward.bonusMultiplier
+				const bonus = multipliedBase - coinReward.base
+				await redis.hIncrBy(`user:${userId}:economy`, 'coins', bonus)
+				await redis.hIncrBy(`user:${userId}:economy`, 'totalCoins', bonus)
+				coinReward.multiplier = variableReward.bonusMultiplier
+			}
+
+			// Apply mystery box reward
+			if (variableReward.mysteryBox !== null) {
+				const box = variableReward.mysteryBox
+				if (box.type === 'coins') {
+					await redis.hIncrBy(`user:${userId}:economy`, 'coins', box.value)
+					await redis.hIncrBy(`user:${userId}:economy`, 'totalCoins', box.value)
+				} else if (box.type === 'streak_freeze') {
+					await redis.hIncrBy(`user:${userId}:economy`, 'streakFreezes', 1)
+				} else if (box.type === 'cosmetic_title' && box.titleId) {
+					const updatedEconomy = await getUserEconomy(userId)
+					if (!updatedEconomy.ownedTitles.includes(box.titleId)) {
+						const newTitles = [...updatedEconomy.ownedTitles, box.titleId]
+						await redis.hSet(`user:${userId}:economy`, { ownedTitles: JSON.stringify(newTitles) })
+					}
+				}
+				coinReward.mysteryBox = box
+			}
+
+			// Update mission progress
+			const missionEvent: MissionEvent = {
+				type: 'puzzle_complete',
+				timeTaken,
+				mistakes,
+				gridSize,
+				skillLevel: currentLevel,
+				coinsEarned: coinReward.total,
+				currentStreak: streak.currentStreak,
+			}
+
+			const [dailyState, weeklyState] = await Promise.all([
+				getMissionState(userId, 'daily'),
+				getMissionState(userId, 'weekly'),
+			])
+			const updatedDaily = updateMissionProgress(dailyState, missionEvent)
+			const updatedWeekly = updateMissionProgress(weeklyState, missionEvent)
+			await Promise.all([
+				saveMissionState(userId, 'daily', updatedDaily),
+				saveMissionState(userId, 'weekly', updatedWeekly),
+			])
+
+			// Increment weekly leaderboard for community highlights
+			await redis.zAdd(`leaderboard:weekly:${isoWeek}`, { score: 1, member: userId })
+
+			// Check for newly unlocked achievements
+			const updatedEconomy = await getUserEconomy(userId)
+			const unlockedIds = await getUnlockedAchievements(userId)
+			const userStats: UserStats = {
+				totalSolves: updatedEconomy.totalSolves,
+				currentStreak: streak.currentStreak,
+				longestStreak: streak.longestStreak,
+				speedSolves: updatedEconomy.speedSolves,
+				totalCoinsEarned: updatedEconomy.totalCoins,
+				maxGridLevel: newSkillLevel,
+				allGridsMaxed: false, // simplified — full check would require reading all grid levels
+				sharesCount: 0,
+				challengesCreated: 0,
+				challengeBeats: 0,
+			}
+			const newAchievements = checkAchievements(userStats, unlockedIds.map((u) => u.id))
+			if (newAchievements.length > 0) {
+				await unlockAchievements(userId, newAchievements)
+			}
+
+			// Check streak milestones
+			const allUnlockedIds = [...unlockedIds.map((u) => u.id), ...newAchievements.map((a) => a.id)]
+			const streakMilestone = checkStreakMilestone(streak.currentStreak, allUnlockedIds)
+			if (streakMilestone !== null) {
+				await redis.hIncrBy(`user:${userId}:economy`, 'coins', streakMilestone.bonus)
+				await redis.hIncrBy(`user:${userId}:economy`, 'totalCoins', streakMilestone.bonus)
+			}
+
+			// Check referral eligibility for challenge posts
+			const puzzleMetaForReferral = await redis.hGetAll(`game:${postId}:puzzle`)
+			if (puzzleMetaForReferral?.challengeBy) {
+				await checkAndAwardReferral(postId, userId, puzzleMetaForReferral.challengeBy)
+			}
+
+			engagement = {
+				variableReward,
+				newAchievements,
+				streakMilestone,
+				missionsUpdated: true,
+			}
+		} catch (engagementErr) {
+			// Engagement logic is non-blocking — failures don't prevent completion from succeeding
+			console.error('Engagement logic error (non-critical):', engagementErr)
+		}
+
 		const response: CompleteResponse = {
 			performanceScore,
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
 			streak,
 			coinReward,
+			...(engagement !== undefined && { engagement }),
 		}
 
 		return c.json(response)

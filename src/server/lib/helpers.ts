@@ -15,6 +15,25 @@ export const getTodayUTC = (): string =>
 	new Date().toISOString().split('T')[0] ?? ''
 
 /**
+ * Get the current ISO week string in YYYY-Wnn format (e.g., "2025-W03").
+ * Uses UTC date to determine the ISO week number.
+ */
+export const getISOWeek = (): string => {
+	const now = new Date()
+	// Create a copy set to the nearest Thursday (ISO week date algorithm)
+	const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+	// Set to nearest Thursday: current date + 4 - current day number (Monday=1, Sunday=7)
+	const dayNum = target.getUTCDay() || 7
+	target.setUTCDate(target.getUTCDate() + 4 - dayNum)
+	// Get first day of year
+	const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1))
+	// Calculate week number
+	const weekNum = Math.ceil(((target.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+	const ww = String(weekNum).padStart(2, '0')
+	return `${target.getUTCFullYear()}-W${ww}`
+}
+
+/**
  * Get yesterday's date in UTC as YYYY-MM-DD.
  */
 export const getYesterdayUTC = (): string => {

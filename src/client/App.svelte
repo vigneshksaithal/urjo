@@ -9,16 +9,18 @@
 		CoinReward,
 		GridSizeResponse,
 	} from "../shared/types";
+	import type { EngagementCompletionData } from "../shared/engagement-types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
-	import { deserializeGrid, serializeGrid } from "./lib/utils";
+	import { deserializeGrid } from "./lib/utils";
+	import { isGridComplete } from "./lib/validation";
 	import {
 		mistakeCount,
 		onCellChange,
 		onPuzzleComplete,
 		resetMistakes,
-		setSolution,
+		setPuzzleData,
 	} from "./stores/mistakes";
 
 	type EconomyResponse = {
@@ -65,6 +67,7 @@
 	let hasSubscribed = $state(false);
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
+	let engagement = $state<EngagementCompletionData | undefined>(undefined);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -133,7 +136,7 @@
 			startTime = Date.now();
 			coinReward = undefined;
 			resetMistakes();
-			setSolution(data.puzzle.solution, data.puzzle.gridSize);
+			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
 			if (!data.tutorialCompleted) {
 				currentView = "tutorial";
@@ -197,7 +200,7 @@
 		if (cell.locked) return;
 
 		// Track mistakes: check previous cell when moving to a new one
-		onCellChange(row, col, color, (r, c) => grid[r]?.[c]?.color ?? null);
+		onCellChange(row, col, color, grid, gridSize);
 
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
@@ -210,13 +213,12 @@
 				: r,
 		);
 
-		// Check completion client-side
-		const boardString = serializeGrid(grid);
-		if (boardString === puzzleSolution) {
+		// Check completion client-side using full constraint validation
+		if (isGridComplete(grid, gridSize)) {
 			isCompleted = true;
 			timeTaken = Math.round((Date.now() - startTime) / 1000);
 			// Check last active cell before reporting
-			onPuzzleComplete((r, c) => grid[r]?.[c]?.color ?? null);
+			onPuzzleComplete(grid, gridSize);
 			reportCompletion(timeTaken);
 		}
 	}
@@ -242,7 +244,23 @@
 				}
 				if (data.coinReward) {
 					coinReward = data.coinReward;
-					coins += data.coinReward.total;
+					// Apply variable reward multiplier to displayed coins
+					if (data.coinReward.multiplier) {
+						const bonus =
+							data.coinReward.base *
+							(data.coinReward.multiplier - 1);
+						coins += data.coinReward.total + bonus;
+					} else {
+						coins += data.coinReward.total;
+					}
+					// Apply mystery box coin reward
+					if (data.coinReward.mysteryBox?.type === "coins") {
+						coins += data.coinReward.mysteryBox.value;
+					}
+				}
+				// Store engagement data for UI display
+				if (data.engagement) {
+					engagement = data.engagement as EngagementCompletionData;
 				}
 				// Level-up feedback
 				if (
@@ -352,7 +370,7 @@
 			isCompleted = false;
 			startTime = Date.now();
 			resetMistakes();
-			setSolution(data.puzzle.solution, data.puzzle.gridSize);
+			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 		} catch (error) {
 			errorMessage =
 				error instanceof Error
@@ -373,7 +391,7 @@
 		isCompleted = false;
 		startTime = Date.now();
 		resetMistakes();
-		setSolution(puzzleSolution, gridSize);
+		setPuzzleData(puzzleNumbers, gridSize);
 	}
 
 	/**
@@ -415,7 +433,7 @@
 			startTime = Date.now();
 			coinReward = undefined;
 			resetMistakes();
-			setSolution(data.puzzle.solution, data.puzzle.gridSize);
+			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 		} catch {
 			// Revert to previous size on failure (non-disruptive)
 			gridSizePreference = previousSize;
@@ -481,6 +499,7 @@
 			onSubscribe: handleSubscribe,
 			onGridSizeChange: handleGridSizeChange,
 			...(username !== undefined && { username }),
+			...(engagement !== undefined && { engagement }),
 		}}
 		{#if coinReward}
 			<GameView {...gameProps} {coinReward} />

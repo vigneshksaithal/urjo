@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
 	generatePuzzle,
 	countSameColorNeighbors,
+	countSolutions,
 	isBalanced,
 	hasAdjacentIdenticalRows,
 	hasAdjacentIdenticalColumns,
@@ -241,5 +242,97 @@ describe('puzzle diversity', () => {
 			solutions.add(puzzle.solution)
 		}
 		expect(solutions.size).toBeGreaterThan(1)
+	})
+})
+
+describe('generatePuzzle — Property 4: Preservation - Unique Puzzle Generation Unchanged', () => {
+	it('every generated puzzle has exactly 1 solution', () => {
+		// Validates: Requirements 3.3
+		// Property: for any puzzle produced by generatePuzzle, countSolutions returns 1.
+		// This preserves the uniqueness guarantee for correctly generated puzzles.
+		for (let i = 0; i < 10; i++) {
+			for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+				const puzzle = generatePuzzle(difficulty)
+				const grid = deserializeGrid(puzzle.colors, puzzle.numbers, puzzle.gridSize, puzzle.colors)
+				expect(countSolutions(grid, puzzle.gridSize)).toBe(1)
+			}
+		}
+	})
+})
+
+describe('countSolutions', () => {
+	// Puzzle with 4 empty cells forming an X-wing in the top-left 2×2 block.
+	//
+	// The locked cells fix rows 2–3 completely and columns 2–3 of rows 0–1,
+	// leaving (0,0), (0,1), (1,0), (1,1) empty. Both of these completions
+	// satisfy all constraints:
+	//   Solution A: (0,0)=r (0,1)=b (1,0)=b (1,1)=r
+	//   Solution B: (0,0)=b (0,1)=r (1,0)=r (1,1)=b
+	//
+	// Requirements: 2.3, 3.3
+	it('returns 2 for a 4×4 grid with a known X-wing pattern (2 valid solutions)', () => {
+		const puzzleGrid = [
+			[
+				{ color: null, number: null, locked: false },
+				{ color: null, number: null, locked: false },
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+			],
+			[
+				{ color: null, number: null, locked: false },
+				{ color: null, number: null, locked: false },
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+			],
+			[
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+			],
+			[
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+			],
+		]
+
+		expect(countSolutions(puzzleGrid, 4)).toBe(2)
+	})
+
+	// Adding a clue at (0,0) = red forces Solution A and eliminates Solution B,
+	// leaving exactly one valid completion.
+	//
+	// Requirements: 2.3, 3.3
+	it('returns 1 for a 4×4 grid where a clue breaks the X-wing symmetry (unique solution)', () => {
+		const uniquePuzzleGrid = [
+			[
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: null, number: null, locked: false },
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+			],
+			[
+				{ color: null, number: null, locked: false },
+				{ color: null, number: null, locked: false },
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+			],
+			[
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+			],
+			[
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+				{ color: 'blue' as const, number: null, locked: true },
+				{ color: 'red' as const, number: null, locked: true },
+			],
+		]
+
+		expect(countSolutions(uniquePuzzleGrid, 4)).toBe(1)
 	})
 })
