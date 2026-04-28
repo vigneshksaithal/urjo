@@ -10,8 +10,10 @@
 		GridSizeResponse,
 	} from "../shared/types";
 	import type { EngagementCompletionData } from "../shared/engagement-types";
+	import type { SeasonInfo } from "../shared/growth-types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
+	import FirstScreen from "./components/FirstScreen.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import { deserializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
@@ -33,7 +35,7 @@
 		dailyFirstSolve: string | null;
 	};
 
-	type View = "game" | "tutorial" | "error";
+	type View = "game" | "tutorial" | "first-screen" | "error";
 
 	const PLACEHOLDER_COLORS = "brbbrbbrbrbbrbrbbrbbrbbrbrbbrbrbbrbbrbbrbbrb";
 	const PLACEHOLDER_NUMBERS = "----------------";
@@ -68,6 +70,15 @@
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
+	let puzzleNumber = $state(0);
+	let communityStats = $state<{
+		activePlayers: number;
+		collectiveStreakDays: number;
+	}>({ activePlayers: 0, collectiveStreakDays: 0 });
+	let currentSeason = $state<SeasonInfo | undefined>(undefined);
+	let isFirstTimeUser = $state(false);
+	let seasonRank = $state<number | null>(null);
+	let seasonPoints = $state(0);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -104,7 +115,22 @@
 			const response = await fetch("/api/game/state");
 			if (!response.ok) throw new Error("Failed to load game");
 
-			const data: GameState = await response.json();
+			const data: GameState & {
+				firstScreen?: {
+					samplePuzzle: {
+						colors: string;
+						numbers: string;
+						solution: string;
+						difficulty: string;
+						gridSize: number;
+					};
+					instruction: string;
+					communityStats: {
+						activePlayers: number;
+						collectiveStreakDays: number;
+					};
+				};
+			} = await response.json();
 
 			puzzleColors = data.puzzle.colors;
 			puzzleNumbers = data.puzzle.numbers;
@@ -114,6 +140,15 @@
 			skillLevel = data.skillLevel;
 			gridSizePreference = data.gridSizePreference ?? 4;
 			isChallenge = data.isChallenge ?? false;
+			isFirstTimeUser = data.isFirstTimeUser ?? false;
+			puzzleNumber = data.puzzleNumber ?? 0;
+
+			if (data.communityStats) {
+				communityStats = data.communityStats;
+			}
+			if (data.currentSeason) {
+				currentSeason = data.currentSeason;
+			}
 
 			// Update streak data
 			if (data.streak) {
@@ -135,11 +170,18 @@
 			challengeUrl = null;
 			startTime = Date.now();
 			coinReward = undefined;
+			seasonRank = null;
+			seasonPoints = 0;
 			resetMistakes();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
 			if (!data.tutorialCompleted) {
 				currentView = "tutorial";
+			} else if (data.isFirstTimeUser && data.tutorialCompleted) {
+				// Tutorial done but never solved a puzzle — show first screen
+				currentView = "first-screen";
+			} else {
+				currentView = "game";
 			}
 
 			// Load economy data
@@ -274,6 +316,13 @@
 					setTimeout(() => {
 						showLevelUp = false;
 					}, 3500);
+				}
+				// Season rank and points from completion response
+				if (data.seasonRank !== undefined) {
+					seasonRank = data.seasonRank;
+				}
+				if (data.seasonPoints !== undefined) {
+					seasonPoints = data.seasonPoints;
 				}
 			}
 		} catch {
@@ -451,7 +500,21 @@
 		}
 
 		tutorialCompleted = true;
+		// After tutorial, check if first-time user
+		if (isFirstTimeUser) {
+			currentView = "first-screen";
+		} else {
+			currentView = "game";
+		}
+	}
+
+	/**
+	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
+	 */
+	function handleFirstScreenPlay() {
+		isFirstTimeUser = false;
 		currentView = "game";
+		startTime = Date.now();
 	}
 </script>
 
@@ -476,6 +539,12 @@
 			onComplete={handleTutorialComplete}
 			isReplay={tutorialCompleted}
 		/>
+	{:else if currentView === "first-screen"}
+		<FirstScreen
+			{puzzleNumber}
+			{communityStats}
+			onPlay={handleFirstScreenPlay}
+		/>
 	{:else if currentView === "game"}
 		{@const gameProps = {
 			grid,
@@ -498,6 +567,12 @@
 			onOpenShop: () => (showShop = true),
 			onSubscribe: handleSubscribe,
 			onGridSizeChange: handleGridSizeChange,
+			puzzleColors,
+			skillLevel,
+			puzzleNumber,
+			seasonRank,
+			seasonPoints,
+			currentSeason,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}

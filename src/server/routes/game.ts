@@ -51,7 +51,30 @@ import { getMissionState, saveMissionState, updateMissionProgress } from '../lib
 import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
+import { trackPostOpen, trackFirstAction, trackCompletion } from '../lib/analytics'
+import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
+import { serializeResultCard } from '../../shared/result-card'
+import type { ResultCardData } from '../../shared/growth-types'
 import type { EngagementCompletionData, MissionEvent, UserStats } from '../../shared/engagement-types'
+
+// ─── Par Time Defaults ───────────────────────────────────────────────────────
+
+/** Default par times by grid size (seconds) for season score calculation */
+const PAR_TIME_BY_GRID_SIZE: Record<number, number> = {
+	4: 60,
+	6: 120,
+	8: 180,
+}
+
+const getParTimeForGrid = (gridSize: number): number =>
+	PAR_TIME_BY_GRID_SIZE[gridSize] ?? 60
+
+// ─── Result Comment Dedup Key ────────────────────────────────────────────────
+
+const RESULT_COMMENT_TTL = 172800 // 48 hours
+
+const resultCommentDedupKey = (userId: string, postId: string): string =>
+	`user:${userId}:resultCommented:${postId}`
 
 export const gameRouter = new Hono()
 
@@ -407,6 +430,69 @@ gameRouter.get('/api/game/state', async (c) => {
 			gridSize: parseInt(puzzle.gridSize, 10),
 		}
 
+		// ─── Analytics: track post open (non-blocking) ────────────────────────
+		try {
+			const { subredditId } = context
+			const today = getTodayUTC()
+			await trackPostOpen(today, postId, userId, subredditId)
+		} catch (err) {
+			console.error('[Analytics] Post open tracking failed (non-critical):', err)
+		}
+
+		// ─── First-screen data for new users ───────────────────────────────────
+		let firstScreen: {
+			samplePuzzle: SerializedPuzzle
+			instruction: string
+			communityStats: { activePlayers: number; collectiveStreakDays: number }
+		} | undefined
+
+		const economy = await getUserEconomy(userId)
+		const isFirstTimeUser = economy.totalSolves === 0
+
+		if (isFirstTimeUser) {
+			const samplePuzzle = generatePuzzleForGridLevel(4 as GridSize, 1)
+			let activePlayers = 0
+			let collectiveStreakDays = 0
+			try {
+				const cachedActive = await redis.get('stats:activePlayers:7d')
+				activePlayers = cachedActive !== undefined ? parseInt(cachedActive, 10) : 0
+				const cachedStreaks = await redis.get('stats:collectiveStreaks')
+				collectiveStreakDays = cachedStreaks !== undefined ? parseInt(cachedStreaks, 10) : 0
+			} catch {
+				// non-critical — defaults to 0
+			}
+			firstScreen = {
+				samplePuzzle,
+				instruction: 'Tap cells to color them. Fill the grid so each row and column has equal reds and blues.',
+				communityStats: { activePlayers, collectiveStreakDays },
+			}
+		}
+
+		// ─── Puzzle number ─────────────────────────────────────────────────────
+		let puzzleNumber: number | undefined
+		try {
+			const counterStr = await redis.get('stats:puzzleCounter')
+			puzzleNumber = counterStr !== undefined ? parseInt(counterStr, 10) : undefined
+		} catch {
+			// non-critical
+		}
+
+		// ─── Community stats (for all users) ───────────────────────────────────
+		let communityStats: { activePlayers: number; collectiveStreakDays: number } | undefined
+		try {
+			const cachedActive = await redis.get('stats:activePlayers:7d')
+			const cachedStreaks = await redis.get('stats:collectiveStreaks')
+			communityStats = {
+				activePlayers: cachedActive !== undefined ? parseInt(cachedActive, 10) : 0,
+				collectiveStreakDays: cachedStreaks !== undefined ? parseInt(cachedStreaks, 10) : 0,
+			}
+		} catch {
+			// non-critical
+		}
+
+		// ─── Current season info ───────────────────────────────────────────────
+		const currentSeason = getCurrentSeason()
+
 		const gameState: GameState = {
 			puzzle: serializedPuzzle,
 			tutorialCompleted,
@@ -415,9 +501,13 @@ gameRouter.get('/api/game/state', async (c) => {
 			isChallenge,
 			streak,
 			...(username !== undefined && { username }),
+			isFirstTimeUser,
+			...(puzzleNumber !== undefined && { puzzleNumber }),
+			...(communityStats !== undefined && { communityStats }),
+			currentSeason,
 		}
 
-		return c.json(gameState)
+		return c.json({ ...gameState, ...(firstScreen !== undefined && { firstScreen }) })
 	} catch (error) {
 		console.error('Error fetching game state:', error)
 		return c.json({ error: 'Failed to fetch game state' }, 500)
@@ -477,6 +567,24 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 	} catch (error) {
 		console.error('Error setting grid size:', error)
 		return c.json({ error: 'Failed to set grid size' }, 500)
+	}
+})
+
+// ─── POST /api/game/first-action ──────────────────────────────────────────────
+
+gameRouter.post('/api/game/first-action', async (c) => {
+	const { postId, userId, subredditId } = context
+
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const today = getTodayUTC()
+		const isNew = await trackFirstAction(today, postId, userId, subredditId)
+		return c.json({ tracked: isNew })
+	} catch (error) {
+		console.error('[Analytics] First action tracking failed:', error)
+		return c.json({ tracked: false })
 	}
 })
 
@@ -692,6 +800,39 @@ gameRouter.post('/api/game/complete', async (c) => {
 			console.error('Engagement logic error (non-critical):', engagementErr)
 		}
 
+		// ─── Analytics: track completion (non-blocking) ────────────────────────
+		try {
+			const { subredditId } = context
+			const today = getTodayUTC()
+			await trackCompletion(today, postId, userId, subredditId)
+		} catch (err) {
+			console.error('[Analytics] Completion tracking failed (non-critical):', err)
+		}
+
+		// ─── Season scoring (non-blocking) ─────────────────────────────────────
+		let seasonRank: number | null = null
+		let seasonPoints = 0
+		try {
+			const season = getCurrentSeason()
+			if (season.isActive) {
+				const parTime = getParTimeForGrid(gridSize)
+				const score = calculateSeasonScore(timeTaken, parTime, mistakes)
+				await recordSeasonScore(season.seasonId, userId, score)
+
+				// Read back the player's updated score and rank
+				const leaderboardKey = `season:${season.seasonId}:leaderboard`
+				const playerScore = await redis.zScore(leaderboardKey, userId)
+				seasonPoints = playerScore ?? 0
+
+				if (playerScore !== undefined && playerScore !== null) {
+					const higherEntries = await redis.zRange(leaderboardKey, playerScore + 1, Number.MAX_SAFE_INTEGER, { by: 'score' })
+					seasonRank = higherEntries.length + 1
+				}
+			}
+		} catch (err) {
+			console.error('[Seasons] Score recording failed (non-critical):', err)
+		}
+
 		const response: CompleteResponse = {
 			performanceScore,
 			newSkillLevel,
@@ -699,6 +840,8 @@ gameRouter.post('/api/game/complete', async (c) => {
 			streak,
 			coinReward,
 			...(engagement !== undefined && { engagement }),
+			...(seasonRank !== null && { seasonRank }),
+			...(seasonPoints > 0 && { seasonPoints }),
 		}
 
 		return c.json(response)
@@ -904,6 +1047,86 @@ gameRouter.post('/api/game/share', async (c) => {
 	} catch (error) {
 		console.error('Error sharing score:', error)
 		return c.json({ error: 'Failed to share score' }, 500)
+	}
+})
+
+// ─── POST /api/game/result-comment ───────────────────────────────────────────
+
+gameRouter.post('/api/game/result-comment', async (c) => {
+	const { postId, userId } = context
+
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		// Check dedup — one result comment per user per post
+		const dedupKey = resultCommentDedupKey(userId, postId)
+		const alreadyCommented = await redis.get(dedupKey)
+		if (alreadyCommented !== undefined) {
+			return c.json({ error: 'Result already shared on this post' }, 400)
+		}
+
+		const body = await c.req.json().catch(() => null)
+		if (!body || typeof body !== 'object') {
+			return c.json({ error: 'Invalid request body' }, 400)
+		}
+
+		const {
+			puzzleNumber,
+			gridSize,
+			skillLevel,
+			timeTaken,
+			mistakes,
+			streak,
+			colorGrid,
+		} = body as Record<string, unknown>
+
+		if (
+			typeof puzzleNumber !== 'number' || puzzleNumber < 1 ||
+			typeof gridSize !== 'number' || ![4, 6, 8].includes(gridSize) ||
+			typeof skillLevel !== 'number' || skillLevel < 1 || skillLevel > 9 ||
+			typeof timeTaken !== 'number' || timeTaken <= 0 ||
+			typeof mistakes !== 'number' || mistakes < 0 ||
+			typeof streak !== 'number' || streak < 0 ||
+			!Array.isArray(colorGrid)
+		) {
+			return c.json({ error: 'Invalid result card data' }, 400)
+		}
+
+		const resultData: ResultCardData = {
+			puzzleNumber,
+			gridSize: gridSize as 4 | 6 | 8,
+			skillLevel,
+			colorGrid: colorGrid as ('red' | 'blue')[][],
+			timeTaken,
+			mistakes,
+			streak,
+		}
+
+		const resultText = serializeResultCard(resultData)
+
+		// Find the sticky comment to reply to
+		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
+		const stickyCommentId = postMeta['stickyCommentId']
+
+		if (!stickyCommentId) {
+			return c.json({ error: 'No sticky comment available' }, 400)
+		}
+
+		await reddit.submitComment({
+			id: stickyCommentId as `t1_${string}`,
+			text: resultText,
+			runAs: 'USER',
+		})
+
+		// Set dedup flag
+		await redis.set(dedupKey, '1')
+		await redis.expire(dedupKey, RESULT_COMMENT_TTL)
+
+		return c.json({ success: true })
+	} catch (error) {
+		console.error('Error posting result comment:', error)
+		return c.json({ error: 'Failed to post result comment' }, 500)
 	}
 })
 

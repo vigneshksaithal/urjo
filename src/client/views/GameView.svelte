@@ -6,6 +6,7 @@
 		CoinReward,
 	} from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
+	import type { SeasonInfo } from "../../shared/growth-types";
 	import { validateGrid } from "../lib/validation";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -19,8 +20,9 @@
 	import ProfilePanel from "../components/ProfilePanel.svelte";
 	import MysteryBoxAnimation from "../components/MysteryBoxAnimation.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
+	import ResultCard from "../components/ResultCard.svelte";
+	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
-	import Share2 from "lucide-svelte/icons/share-2";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
 
@@ -49,6 +51,12 @@
 		onGridSizeChange?: (size: number) => void;
 		engagement?: EngagementCompletionData;
 		onEngagementDismissed?: () => void;
+		puzzleColors?: string;
+		skillLevel?: number;
+		puzzleNumber?: number;
+		seasonRank?: number | null;
+		seasonPoints?: number;
+		currentSeason?: SeasonInfo | undefined;
 	};
 
 	let {
@@ -75,6 +83,12 @@
 		onGridSizeChange,
 		engagement,
 		onEngagementDismissed,
+		puzzleColors,
+		skillLevel = 1,
+		puzzleNumber = 0,
+		seasonRank = null,
+		seasonPoints = 0,
+		currentSeason,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -90,6 +104,8 @@
 	let showStreakMilestone = $state(false);
 	let mysteryBoxDismissed = $state(false);
 	let milestoneDismissed = $state(false);
+	let showSeasonLeaderboard = $state(false);
+	let hasCommentedResult = $state(false);
 
 	$effect(() => {
 		if (isCompleted && !hasFiredConfetti) {
@@ -118,6 +134,13 @@
 	const validation = $derived(validateGrid(grid, gridSize));
 	const boardSizeStyle = $derived(
 		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: 100%;`,
+	);
+
+	// Tomorrow's streak bonus: current streak + 1 day worth of bonus coins
+	const tomorrowStreakBonus = $derived(
+		streakData.currentStreak > 0
+			? Math.min(streakData.currentStreak + 1, 30)
+			: 1,
 	);
 
 	function confirmShare() {
@@ -212,9 +235,11 @@
 		<!-- Completion overlay -->
 		{#if isCompleted}
 			<div
-				class="absolute inset-0 flex flex-col items-center justify-center z-20 gap-3 p-4 bg-theme-overlay backdrop-blur-sm rounded-xl"
+				class="fixed inset-0 flex flex-col items-center z-20 p-3 bg-theme-overlay backdrop-blur-sm overflow-y-auto"
 			>
-				<div class="flex flex-col items-center gap-3 max-w-sm w-full">
+				<div
+					class="flex flex-col items-center gap-2 max-w-sm w-full my-auto"
+				>
 					<!-- Coin reward with inline streak badge -->
 					{#if coinReward && coinReward.total > 0}
 						<div
@@ -292,42 +317,63 @@
 						</div>
 					{/if}
 
-					<!-- Primary CTA -->
+					<!-- Season rank and points -->
+					{#if currentSeason?.isActive && (seasonRank !== null || seasonPoints > 0)}
+						<div
+							class="flex items-center gap-2 text-xs text-theme-text-muted"
+						>
+							<span>🏆 Season {currentSeason.seasonNumber}</span>
+							{#if seasonRank !== null}
+								<span class="font-semibold text-yellow-400"
+									>Rank #{seasonRank}</span
+								>
+							{/if}
+							{#if seasonPoints > 0}
+								<span>· {seasonPoints} pts</span>
+							{/if}
+						</div>
+					{/if}
+
+					<!-- Result card preview -->
+					{#if puzzleColors}
+						<ResultCard
+							{puzzleColors}
+							{gridSize}
+							{skillLevel}
+							{puzzleNumber}
+							streak={streakData.currentStreak}
+							timeTaken={timeTaken ?? 0}
+							{mistakes}
+							hasCommented={hasCommentedResult}
+							onCommentResult={() => (hasCommentedResult = true)}
+						/>
+					{/if}
+
+					<!-- Tomorrow's streak bonus preview -->
+					<div class="text-xs text-theme-text-muted text-center">
+						🔥 Return tomorrow for +{tomorrowStreakBonus} streak bonus
+						coins
+					</div>
+
+					<!-- Challenge a Friend -->
+					<button
+						onclick={() => {
+							if (!hasChallenged) showChallengeConfirm = true;
+						}}
+						disabled={hasChallenged}
+						class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+					>
+						{#if hasChallenged}<span>⚔️ Challenged!</span
+							>{:else}<span>⚔️ Challenge a Friend</span>{/if}
+					</button>
+
+					<!-- Next Puzzle -->
 					<button
 						onclick={onNextChallenge}
 						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
 					>
-						Next Challenge
+						Next Puzzle
 					</button>
-
-					<!-- User actions row -->
-					<div class="flex gap-3 w-full">
-						<button
-							onclick={() => {
-								if (!hasShared) showShareConfirm = true;
-							}}
-							disabled={hasShared}
-							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-						>
-							{#if hasShared}
-								<span>✅ Commented!</span>
-							{:else}
-								<Share2 class="w-4 h-4" /><span
-									>Comment Score</span
-								>
-							{/if}
-						</button>
-						<button
-							onclick={() => {
-								if (!hasChallenged) showChallengeConfirm = true;
-							}}
-							disabled={hasChallenged}
-							class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-						>
-							{#if hasChallenged}<span>⚔️ Challenged!</span
-								>{:else}<span>⚔️ Challenge</span>{/if}
-						</button>
-					</div>
 
 					{#if onSubscribe && !hasSubscribed}
 						<button
@@ -358,6 +404,14 @@
 						>
 							📊 Profile
 						</button>
+						{#if currentSeason?.isActive}
+							<button
+								onclick={() => (showSeasonLeaderboard = true)}
+								class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+							>
+								🏆 Season
+							</button>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -525,3 +579,9 @@
 		onDismiss={dismissMilestone}
 	/>
 {/if}
+
+<!-- Season leaderboard modal -->
+<SeasonLeaderboard
+	isOpen={showSeasonLeaderboard}
+	onClose={() => (showSeasonLeaderboard = false)}
+/>

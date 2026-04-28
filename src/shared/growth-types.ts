@@ -1,0 +1,161 @@
+/**
+ * Growth Roadmap Types
+ * Shared between client and server
+ */
+
+// ─── Result Card ───────────────────────────────────────────────────────────────
+
+/** Data needed to generate a shareable result card */
+export type ResultCardData = {
+    puzzleNumber: number
+    gridSize: 4 | 6 | 8
+    skillLevel: number
+    colorGrid: ('red' | 'blue')[][]
+    timeTaken: number
+    mistakes: number
+    streak: number
+}
+
+// ─── Analytics ─────────────────────────────────────────────────────────────────
+
+/** Daily funnel metrics for a single date */
+export type DailyMetrics = {
+    date: string
+    postOpens: number
+    firstActions: number
+    completions: number
+    resultCopies: number
+    firstActionRate: number
+    completionRate: number
+    d1ReturnRate: number
+    estimatedDQE: number
+}
+
+/** 7-day rolling averages for key growth metrics */
+export type RollingMetrics = {
+    dqe7d: number
+    firstActionRate7d: number
+    completionRate7d: number
+    d1ReturnRate7d: number
+}
+
+// ─── Dashboard ─────────────────────────────────────────────────────────────────
+
+/** Alert triggered by a kill or scale rule evaluation */
+export type Alert = {
+    ruleId: string
+    type: 'kill' | 'scale'
+    message: string
+    metricValue: number
+    threshold: number
+}
+
+/** Current roadmap phase with suggested actions */
+export type CurrentPhase = {
+    phase: number
+    label: string
+    dayNumber: number
+    isComplete: boolean
+    suggestedActions: readonly string[]
+}
+
+/** Full dashboard data for a single date */
+export type DashboardData = {
+    date: string
+    daily: DailyMetrics
+    rolling: RollingMetrics
+    alerts: Alert[]
+    currentPhase: CurrentPhase
+    seasonParticipants: number
+}
+
+// ─── Seasons ───────────────────────────────────────────────────────────────────
+
+/** Metadata for a single 7-day competitive season */
+export type SeasonInfo = {
+    seasonId: string
+    seasonNumber: number
+    startDate: string
+    endDate: string
+    isActive: boolean
+}
+
+/** Single entry in a season leaderboard */
+export type SeasonLeaderboardEntry = {
+    rank: number
+    userId: string
+    username: string
+    score: number
+}
+
+/** Full season leaderboard response */
+export type SeasonLeaderboardResponse = {
+    season: SeasonInfo
+    entries: SeasonLeaderboardEntry[]
+    playerRank: number | null
+    playerScore: number
+}
+
+/** Season recap data for end-of-season summary */
+export type SeasonRecap = {
+    seasonId: string
+    topPlayers: { userId: string; username: string; score: number }[]
+    totalParticipants: number
+}
+
+// ─── Subreddit Config ──────────────────────────────────────────────────────────
+
+/** How often puzzle posts are created */
+export type PostFrequency = 'once_daily' | 'twice_daily' | 'thrice_daily'
+
+/** Per-subreddit configuration stored in Redis */
+export type SubredditConfig = {
+    postFrequency: PostFrequency
+    defaultGridSize: 4 | 6 | 8
+    brandingEmoji: string
+    welcomeMessage: string
+}
+
+/** Installation record for a subreddit */
+export type InstallationInfo = {
+    subredditId: string
+    subredditName: string
+    installedAt: number
+    installedBy: string
+    dqeLast7Days?: number[] | undefined
+}
+
+// ─── Constants Types ───────────────────────────────────────────────────────────
+
+/** Kill rule: metric threshold that triggers a "stop investing" alert */
+export type KillRule = {
+    readonly id: string
+    readonly metric: string
+    readonly threshold: number
+    readonly comparison: 'below' | 'above'
+    readonly message: string
+}
+
+/** Scale rule: metric threshold that triggers a "double down" alert */
+export type ScaleRule = {
+    readonly id: string
+    readonly metric: string
+    readonly threshold: number
+    readonly comparison: 'below' | 'above'
+    readonly message: string
+}
+
+/** Roadmap phase definition with day boundaries and suggested actions */
+export type RoadmapPhase = {
+    readonly phase: number
+    readonly startDay: number
+    readonly endDay: number
+    readonly label: string
+    readonly suggestedActions: readonly string[]
+}
+
+/** Season reward for a top-ranked player */
+export type SeasonTopReward = {
+    readonly rank: number
+    readonly coins: number
+}

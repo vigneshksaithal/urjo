@@ -24,6 +24,11 @@ export type SerializedPuzzle = {
 	gridSize: number // 4 or 6
 }
 
+export type CommunityStats = {
+	activePlayers: number
+	collectiveStreakDays: number
+}
+
 export type GameState = {
 	puzzle: SerializedPuzzle
 	tutorialCompleted: boolean
@@ -32,6 +37,16 @@ export type GameState = {
 	isChallenge?: boolean
 	streak?: StreakData
 	username?: string
+	isFirstTimeUser?: boolean
+	puzzleNumber?: number
+	communityStats?: CommunityStats
+	currentSeason?: {
+		seasonId: string
+		seasonNumber: number
+		startDate: string
+		endDate: string
+		isActive: boolean
+	}
 }
 
 export type NextChallengeResponse = {

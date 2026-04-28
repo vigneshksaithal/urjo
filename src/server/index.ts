@@ -14,9 +14,15 @@ import { createPost, URJO_PUZZLE_POST_TYPE as _URJO_PUZZLE_POST_TYPE, URJO_POST_
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
 import { engagementRouter } from './routes/engagement'
+import { analyticsRouter } from './routes/analytics'
+import { adminRouter } from './routes/admin'
+import { seasonRouter } from './routes/season'
 import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
 import { selectDailyMissions } from './lib/missions'
-import { getTodayUTC, getISOWeek } from './lib/helpers'
+import { getTodayUTC, getISOWeek, getYesterdayUTC } from './lib/helpers'
+import { computeDashboard, formatDashboardMarkdown } from './lib/dashboard'
+import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
+import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
 import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
 import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-types'
 
@@ -45,7 +51,41 @@ const createPostHandler = async (c: Context) => {
   }
 }
 
-app.post('/internal/on-app-install', createPostHandler)
+// On app install: create default config, record installation, set roadmap start, create first post
+app.post('/internal/on-app-install', async (c: Context) => {
+  try {
+    const subredditId = context.subredditId
+    const subredditName = context.subredditName
+    const userId = context.userId ?? 'unknown'
+
+    // Create default subreddit config (creates defaults if none exists)
+    await getSubredditConfig(subredditId)
+
+    // Record installation in sorted set and metadata hash
+    await recordInstallation(subredditId, subredditName, userId)
+
+    // Set roadmap:startDate if not already set
+    const existingStartDate = await redis.get('roadmap:startDate')
+    if (existingStartDate === undefined) {
+      await redis.set('roadmap:startDate', getTodayUTC())
+    }
+
+    // Create first puzzle post for immediate content
+    const post = await createPost()
+
+    return c.json({
+      navigateTo: `https://reddit.com/r/${subredditName}/comments/${post.id}`
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error
+      ? error.message
+      : 'Failed to handle app install'
+    return c.json(
+      { status: 'error', message: errorMessage },
+      HTTP_STATUS_BAD_REQUEST
+    )
+  }
+})
 app.post('/internal/menu/post-create', createPostHandler)
 
 type LeaderEntry = { medal: '🥇' | '🥈' | '🥉'; username: string; score: number }
@@ -208,24 +248,70 @@ const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
   ].join('\n')
 }
 
+// Build a season recap comment for the previous week's season
+const buildSeasonRecapComment = async (previousSeasonId: string): Promise<string> => {
+  const recap = await getSeasonRecap(previousSeasonId)
+
+  const lines: string[] = ['## 🏆 Season Recap']
+  lines.push(`**Season ${previousSeasonId}** has ended!`)
+  lines.push(`**${recap.totalParticipants}** players competed this season.`)
+  lines.push('')
+
+  if (recap.topPlayers.length > 0) {
+    lines.push('**Top Players:**')
+    const medals = ['🥇', '🥈', '🥉'] as const
+    for (let i = 0; i < Math.min(recap.topPlayers.length, 3); i++) {
+      const player = recap.topPlayers[i]!
+      const medal = medals[i] ?? '🏅'
+      lines.push(`${medal} u/${player.username} — ${player.score} pts`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
 // Scheduler endpoint for twice-daily puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
   await c.req.json<TaskRequest>()
   try {
+    // Store roadmap:startDate on first run if not already set
+    const existingStartDate = await redis.get('roadmap:startDate')
+    const today = getTodayUTC()
+    if (existingStartDate === undefined) {
+      await redis.set('roadmap:startDate', today)
+    }
+
+    const yesterday = getYesterdayUTC()
+
+    // Compute and store previous day's dashboard (non-blocking)
+    let dashboardMarkdown = ''
+    try {
+      const dashboardData = await computeDashboard(yesterday)
+      dashboardMarkdown = formatDashboardMarkdown(dashboardData)
+    } catch (dashErr) {
+      console.error('[Scheduler] Dashboard computation failed (non-critical):', dashErr)
+    }
+
+    // Read subreddit config for branding emoji
+    const subredditConfig = await getSubredditConfig(context.subredditId)
+    const brandingEmoji = subredditConfig.brandingEmoji
+
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
-    const title = `🧩 Urjo Puzzle #${puzzleNumber} — Can you solve it?`
+    const title = `${brandingEmoji} Urjo Puzzle #${puzzleNumber} — Can you solve it?`
 
     console.log(`[Scheduler] Creating post: ${title}`)
 
     const post = await createPost(title)
 
     // Build a stats comment from yesterday's data
+    let stickyCommentId: string | undefined
     try {
       const statsComment = await buildStatsComment(puzzleNumber)
       if (statsComment) {
         const stickyComment = await reddit.submitComment({ id: post.id as `t3_${string}`, text: statsComment })
         // Store sticky comment ID so score shares can reply under it
         if (stickyComment?.id) {
+          stickyCommentId = stickyComment.id
           await redis.hSet(`game:${post.id}:meta`, {
             stickyCommentId: stickyComment.id,
           })
@@ -233,6 +319,43 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       }
     } catch (commentErr) {
       console.error('[Scheduler] Stats comment failed (non-critical):', commentErr)
+    }
+
+    // Append developer analytics as collapsed reply to sticky comment
+    if (stickyCommentId && dashboardMarkdown) {
+      try {
+        const analyticsReply = [
+          '<details>',
+          '<summary>📊 Developer Analytics</summary>',
+          '',
+          dashboardMarkdown,
+          '',
+          '</details>',
+        ].join('\n')
+        await reddit.submitComment({ id: stickyCommentId as `t1_${string}`, text: analyticsReply })
+      } catch (analyticsErr) {
+        console.error('[Scheduler] Analytics reply failed (non-critical):', analyticsErr)
+      }
+    }
+
+    // On Mondays: generate season recap and award season rewards
+    const isMonday = new Date().getUTCDay() === 1
+    if (isMonday) {
+      try {
+        // Get previous week's season (yesterday was Sunday)
+        const lastSunday = new Date()
+        lastSunday.setUTCDate(lastSunday.getUTCDate() - 1)
+        const previousSeason = getSeasonForDate(lastSunday)
+
+        // Award season rewards to top 3
+        await awardSeasonRewards(previousSeason.seasonId)
+
+        // Post season recap as a comment
+        const recapComment = await buildSeasonRecapComment(previousSeason.seasonId)
+        await reddit.submitComment({ id: post.id as `t3_${string}`, text: recapComment })
+      } catch (seasonErr) {
+        console.error('[Scheduler] Season recap failed (non-critical):', seasonErr)
+      }
     }
 
     console.log(`[Scheduler] Post created successfully: ${post.id}`)
@@ -259,6 +382,9 @@ app.post('/internal/on-post-create', async (c: Context) => {
 app.route('/', gameRouter)
 app.route('/', economyRouter)
 app.route('/', engagementRouter)
+app.route('/', analyticsRouter)
+app.route('/', adminRouter)
+app.route('/', seasonRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports
