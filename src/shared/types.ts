@@ -40,6 +40,7 @@ export type GameState = {
 	isFirstTimeUser?: boolean
 	puzzleNumber?: number
 	communityStats?: CommunityStats
+	isMod?: boolean
 	currentSeason?: {
 		seasonId: string
 		seasonNumber: number

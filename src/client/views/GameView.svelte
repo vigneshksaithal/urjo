@@ -25,6 +25,7 @@
 	import Trophy from "lucide-svelte/icons/trophy";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
+	import BarChart2 from "lucide-svelte/icons/bar-chart-2";
 
 	type Props = {
 		grid: Grid;
@@ -42,6 +43,8 @@
 		coinReward?: CoinReward;
 		coins?: number;
 		onOpenShop?: () => void;
+		onOpenAnalytics?: () => void;
+		isMod?: boolean;
 		timeTaken?: number;
 		mistakes?: number;
 		username?: string;
@@ -74,6 +77,8 @@
 		coinReward,
 		coins,
 		onOpenShop,
+		onOpenAnalytics,
+		isMod = false,
 		timeTaken,
 		mistakes = 0,
 		username,
@@ -193,6 +198,15 @@
 			>
 				<Trophy class="w-5 h-5 text-yellow-400" />
 			</button>
+			{#if isMod && onOpenAnalytics}
+				<button
+					onclick={onOpenAnalytics}
+					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
+					aria-label="Analytics dashboard"
+				>
+					<BarChart2 class="w-5 h-5 text-blue-400" />
+				</button>
+			{/if}
 		</div>
 
 		{#if !isCompleted}

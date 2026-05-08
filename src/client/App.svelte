@@ -15,6 +15,7 @@
 	import TutorialView from "./views/TutorialView.svelte";
 	import FirstScreen from "./components/FirstScreen.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
+	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
 	import { deserializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
 	import {
@@ -63,6 +64,7 @@
 	let hasChallenged = $state(false);
 	let challengeUrl = $state<string | null>(null);
 	let showShop = $state(false);
+	let showAnalytics = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
@@ -79,6 +81,7 @@
 	let isFirstTimeUser = $state(false);
 	let seasonRank = $state<number | null>(null);
 	let seasonPoints = $state(0);
+	let isMod = $state(false);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -142,6 +145,7 @@
 			isChallenge = data.isChallenge ?? false;
 			isFirstTimeUser = data.isFirstTimeUser ?? false;
 			puzzleNumber = data.puzzleNumber ?? 0;
+			isMod = data.isMod ?? false;
 
 			if (data.communityStats) {
 				communityStats = data.communityStats;
@@ -565,6 +569,8 @@
 			onShare: handleShare,
 			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
+			onOpenAnalytics: () => (showAnalytics = true),
+			isMod,
 			onSubscribe: handleSubscribe,
 			onGridSizeChange: handleGridSizeChange,
 			puzzleColors,
@@ -585,6 +591,10 @@
 </div>
 
 <ShopModal isOpen={showShop} onClose={() => (showShop = false)} />
+<AnalyticsDashboard
+	isOpen={showAnalytics}
+	onClose={() => (showAnalytics = false)}
+/>
 
 {#if showLevelUp}
 	<div class="level-up-overlay" role="status" aria-live="polite">

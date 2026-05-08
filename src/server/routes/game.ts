@@ -52,6 +52,7 @@ import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlocke
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
 import { trackPostOpen, trackFirstAction, trackCompletion } from '../lib/analytics'
+import { isModeratorCached } from '../lib/moderator'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
 import { serializeResultCard } from '../../shared/result-card'
 import type { ResultCardData } from '../../shared/growth-types'
@@ -493,6 +494,17 @@ gameRouter.get('/api/game/state', async (c) => {
 		// ─── Current season info ───────────────────────────────────────────────
 		const currentSeason = getCurrentSeason()
 
+		// ─── Moderator check (non-critical, used to show analytics UI) ─────────
+		let isMod = false
+		try {
+			const { subredditId } = context
+			if (subredditId) {
+				isMod = await isModeratorCached(subredditId, userId)
+			}
+		} catch {
+			// non-critical — defaults to false
+		}
+
 		const gameState: GameState = {
 			puzzle: serializedPuzzle,
 			tutorialCompleted,
@@ -504,6 +516,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			isFirstTimeUser,
 			...(puzzleNumber !== undefined && { puzzleNumber }),
 			...(communityStats !== undefined && { communityStats }),
+			isMod,
 			currentSeason,
 		}
 
