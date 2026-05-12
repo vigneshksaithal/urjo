@@ -10,7 +10,7 @@ import { serve } from '@hono/node-server'
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 
-import { createPost, URJO_PUZZLE_POST_TYPE as _URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY as _URJO_POST_TYPE_KEY } from './post'
+import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from './post'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
 import { engagementRouter } from './routes/engagement'
@@ -29,6 +29,16 @@ import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-ty
 const HTTP_STATUS_BAD_REQUEST = 400
 
 export const app = new Hono()
+
+type PostCreatePayload = {
+  post?: { id?: string; title?: string }
+  author?: { name?: string }
+}
+
+const REDDIT_GAMES_SUBREDDIT = 'RedditGames'
+
+const normalizePostId = (postId: string): `t3_${string}` =>
+  postId.startsWith('t3_') ? postId as `t3_${string}` : `t3_${postId}`
 
 const createPostHandler = async (c: Context) => {
   try {
@@ -373,9 +383,45 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
   }
 })
 
-// Trigger handler: no-op for post-create events
+// Crosspost app-created puzzle posts into r/RedditGames once.
 app.post('/internal/on-post-create', async (c: Context) => {
-  return c.json({ status: 'ok' }, 200)
+  const input = await c.req.json<PostCreatePayload>().catch(() => null)
+  const post = input?.post
+  if (!post?.id) return c.json({ status: 'ok' }, 200)
+
+  const postId = normalizePostId(post.id)
+  const metaKey = `game:${postId}:meta`
+  const meta = await redis.hGetAll(metaKey)
+
+  if (meta[URJO_POST_TYPE_KEY] !== URJO_PUZZLE_POST_TYPE) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  if (meta.redditGamesCrosspostId !== undefined) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  const appUser = await reddit.getAppUser()
+  if (input?.author?.name !== appUser?.username) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  try {
+    const crosspost = await reddit.crosspost({
+      subredditName: REDDIT_GAMES_SUBREDDIT,
+      postId,
+      title: post.title ?? 'Urjo Puzzle - Can you solve it?',
+    })
+
+    if (crosspost?.id) {
+      await redis.hSet(metaKey, { redditGamesCrosspostId: crosspost.id })
+    }
+
+    return c.json({ status: 'ok' }, 200)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to crosspost'
+    return c.json({ status: 'error', message }, 500)
+  }
 })
 
 // Register game API routes

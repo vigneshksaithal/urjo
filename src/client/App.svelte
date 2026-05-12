@@ -48,7 +48,6 @@
 	let errorMessage = $state("");
 	let puzzleColors = $state(PLACEHOLDER_COLORS);
 	let puzzleNumbers = $state(PLACEHOLDER_NUMBERS);
-	let puzzleSolution = $state("");
 	let tutorialCompleted = $state(false);
 	let startTime = $state(0);
 	let streakData = $state<StreakData>({
@@ -137,7 +136,6 @@
 
 			puzzleColors = data.puzzle.colors;
 			puzzleNumbers = data.puzzle.numbers;
-			puzzleSolution = data.puzzle.solution;
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
@@ -411,7 +409,6 @@
 
 			puzzleColors = data.puzzle.colors;
 			puzzleNumbers = data.puzzle.numbers;
-			puzzleSolution = data.puzzle.solution;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
 			grid = deserializeGrid(
@@ -469,7 +466,6 @@
 
 			puzzleColors = data.puzzle.colors;
 			puzzleNumbers = data.puzzle.numbers;
-			puzzleSolution = data.puzzle.solution;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
 			gridSizePreference = data.gridSizePreference;

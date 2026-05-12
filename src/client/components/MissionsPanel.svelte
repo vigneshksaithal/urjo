@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import { focusTrap } from "../lib/focus-trap";
     import X from "lucide-svelte/icons/x";
     import Loader2 from "lucide-svelte/icons/loader-2";

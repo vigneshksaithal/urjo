@@ -4,6 +4,7 @@ import { runWithContext } from '@devvit/server'
 import { expect, vi } from 'vitest'
 
 import { app } from '../index'
+import { REFERRAL_BONUS } from '../../shared/engagement-constants'
 
 // ─── Shared test context ──────────────────────────────────────────────────────
 
@@ -202,21 +203,50 @@ test('checkChallengeBeat: dedup prevents double-counting the same winner', async
     expect(stats['beats']).toBe('1')
 })
 
-test('checkChallengeBeat: DM URL uses /comments/ path not fullname', async () => {
+test('checkChallengeBeat: posts one public beat reply under leaderboard comment', async () => {
     const postId = 't3_beat6'
     await seedChallengePuzzle(postId, 't2_challenger', 60)
     await seedStartTime('t2_winner', postId, 30)
 
     vi.spyOn(reddit, 'getCommentById').mockResolvedValue({ edit: vi.fn() } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'WinnerUser' } as never)
-    const dmSpy = vi.spyOn(reddit, 'sendPrivateMessage').mockResolvedValue(undefined as never)
+    const submitCommentSpy = vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_beat_reply' } as never)
 
     await withContext(postId, 't2_winner', completeRequest)
+    await seedStartTime('t2_winner', postId, 25)
+    await withContext(postId, 't2_winner', completeRequest)
 
-    expect(dmSpy).toHaveBeenCalled()
-    const dmArg = (dmSpy.mock.calls[0] as [{ text: string }])[0]
-    expect(dmArg?.text).toContain('https://reddit.com/comments/beat6')
-    expect(dmArg?.text).not.toContain('https://reddit.com/t3_')
+    const beatReplies = submitCommentSpy.mock.calls.filter(([arg]) =>
+        typeof arg === 'object' &&
+        arg !== null &&
+        'id' in arg &&
+        arg.id === 't1_leaderboard'
+    )
+    expect(beatReplies).toHaveLength(1)
+
+    const replyArg = beatReplies[0]?.[0] as { text?: string } | undefined
+    expect(replyArg?.text).toContain('beat the challenge')
+    expect(replyArg?.text).toContain('https://reddit.com/comments/beat6')
+    expect(replyArg?.text).not.toContain('https://reddit.com/t3_')
+})
+
+test('referral: awards creator when a first-time player completes their challenge', async () => {
+    const postId = 't3_referral1'
+    await seedChallengePuzzle(postId, 't2_challenger', 60)
+    await seedStartTime('t2_winner', postId, 30)
+
+    vi.spyOn(reddit, 'getCommentById').mockResolvedValue({ edit: vi.fn() } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'WinnerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_reply' } as never)
+
+    const res = await withContext(postId, 't2_winner', completeRequest)
+    expect(res.status).toBe(200)
+
+    const creatorCoins = await redis.hGet('user:t2_challenger:economy', 'coins')
+    const creatorReferrals = await redis.hGet('user:t2_challenger:economy', 'totalReferrals')
+
+    expect(parseInt(creatorCoins ?? '0', 10)).toBe(REFERRAL_BONUS)
+    expect(creatorReferrals).toBe('1')
 })
 
 // ─── attempts counter ─────────────────────────────────────────────────────────
@@ -295,6 +325,31 @@ challengeTest('challenge route: stores postType and leaderboardCommentId in a si
     // Both fields must coexist — double hSet bug would wipe postType
     expect(meta['postType']).toBe('urjo-puzzle')
     expect(meta['leaderboardCommentId']).toBe('t1_leaderboard')
+    expect(meta['stickyCommentId']).toBe('t1_leaderboard')
+})
+
+challengeTest('challenge route: returns comments URL and increments challengesCreated', async () => {
+    const sourcePostId = 't3_sourcepost_url'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+
+    vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_newposturl' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_url' } as never)
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
+    )
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { success: boolean; postUrl?: string }
+    const social = await redis.hGetAll('user:t2_challenger:social')
+
+    expect(body.success).toBe(true)
+    expect(body.postUrl).toBe('https://reddit.com/comments/newposturl')
+    expect(social['challengesCreated']).toBe('1')
 })
 
 challengeTest('challenge route: initializes stats with attempts=0 and beats=0', async () => {

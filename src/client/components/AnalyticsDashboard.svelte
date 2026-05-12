@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import type { DashboardData } from "../../shared/growth-types";
     import { focusTrap } from "../lib/focus-trap";
     import X from "lucide-svelte/icons/x";

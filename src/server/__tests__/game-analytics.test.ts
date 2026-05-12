@@ -273,6 +273,13 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
         }),
     )
 
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    const resultCopies = await withCtx(CTX, () => redis.get(`analytics:${today}:result_copies`))
+    const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
+
+    expect(resultCopies).toBe('1')
+    expect(social['sharesCount']).toBe('1')
+
     vi.restoreAllMocks()
 })
 
@@ -318,4 +325,45 @@ testResultComment('POST /api/game/result-comment returns 400 with invalid body',
 
     const body = await res.json() as { error: string }
     expect(body.error).toBe('Invalid result card data')
+})
+
+// ─── POST /api/game/share — legacy share route metrics ───────────────────────
+
+const testShare = createDevvitTest({
+    userId: 't2_player1',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+    postId: 't3_testpost',
+})
+
+testShare('POST /api/game/share tracks result copy and share count on success', async () => {
+    vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_share' } as never)
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'test_player' } as never)
+
+    await withCtx(CTX, () => seedStickyComment('t3_testpost'))
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/share', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                timeTaken: 23,
+                streak: 5,
+                puzzleColors: 'rbrbbrbrrbbbbrbr',
+                gridSize: 4,
+                skillLevel: 3,
+                mistakes: 0,
+            }),
+        }),
+    )
+    expect(res.status).toBe(200)
+
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    const resultCopies = await withCtx(CTX, () => redis.get(`analytics:${today}:result_copies`))
+    const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
+
+    expect(resultCopies).toBe('1')
+    expect(social['sharesCount']).toBe('1')
+
+    vi.restoreAllMocks()
 })

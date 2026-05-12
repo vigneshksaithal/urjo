@@ -19,6 +19,21 @@ testNotNew('returns { awarded: false, reason: "not_new_player" } when totalSolve
     expect(result).toEqual({ awarded: false, reason: 'not_new_player' })
 })
 
+testNotNew('uses explicit pre-completion solve count when provided', async () => {
+    await redis.hSet('user:player1:economy', { totalSolves: '1' })
+    const result = await checkAndAwardReferral('post1', 'player1', 'creator1', {
+        newPlayerTotalSolves: 0,
+    })
+    expect(result).toEqual({ awarded: true })
+})
+
+const testSelfReferral = createDevvitTest()
+
+testSelfReferral('returns { awarded: false, reason: "self_referral" } when creator completes own challenge', async () => {
+    const result = await checkAndAwardReferral('post1', 'creator1', 'creator1')
+    expect(result).toEqual({ awarded: false, reason: 'self_referral' })
+})
+
 // ─── successful award ─────────────────────────────────────────────────────────
 
 const testNewPlayer = createDevvitTest()
@@ -75,8 +90,8 @@ testAlreadyReferred('returns { awarded: false, reason: "already_referred" } on d
 
 const testCapReached = createDevvitTest()
 
-testCapReached('returns { awarded: false, reason: "cap_reached" } when totalReferrals >= 10', async () => {
-    await redis.hSet('user:creator1:economy', { totalReferrals: String(REFERRAL_CAP_PER_POST) })
+testCapReached('returns { awarded: false, reason: "cap_reached" } when post referral cap is reached', async () => {
+    await redis.set('referral:post1:count', String(REFERRAL_CAP_PER_POST))
     const result = await checkAndAwardReferral('post1', 'player1', 'creator1')
     expect(result).toEqual({ awarded: false, reason: 'cap_reached' })
 })

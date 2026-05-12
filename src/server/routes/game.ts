@@ -51,9 +51,10 @@ import { getMissionState, saveMissionState, updateMissionProgress } from '../lib
 import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
-import { trackPostOpen, trackFirstAction, trackCompletion } from '../lib/analytics'
+import { trackPostOpen, trackFirstAction, trackCompletion, trackResultCopy } from '../lib/analytics'
 import { isModeratorCached } from '../lib/moderator'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
+import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, incrementSharesCount } from '../lib/social'
 import { serializeResultCard } from '../../shared/result-card'
 import type { ResultCardData } from '../../shared/growth-types'
 import type { EngagementCompletionData, MissionEvent, UserStats } from '../../shared/engagement-types'
@@ -76,6 +77,9 @@ const RESULT_COMMENT_TTL = 172800 // 48 hours
 
 const resultCommentDedupKey = (userId: string, postId: string): string =>
 	`user:${userId}:resultCommented:${postId}`
+
+const redditCommentsUrl = (postId: string): string =>
+	`https://reddit.com/comments/${postId.replace(/^t3_/, '')}`
 
 export const gameRouter = new Hono()
 
@@ -160,17 +164,45 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 
 		// Update the leaderboard comment
 		await updateLeaderboardComment(postId)
+		await incrementChallengeBeats(challengerId)
 
 		// Mark beat as recorded — after stats are written so partial failure doesn't lose data
 		await redis.set(notifyKey, 'true')
 		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
 
-
-
-
+		try {
+			await postChallengeBeatReply(postId, winnerId, challengerId, timeTaken)
+		} catch (replyErr) {
+			console.error('Failed to post challenge beat reply:', replyErr)
+		}
 	} catch (err) {
 		console.error('checkChallengeBeat error:', err)
 	}
+}
+
+const postChallengeBeatReply = async (
+	postId: string,
+	winnerId: string,
+	challengerId: string,
+	timeTaken: number
+): Promise<void> => {
+	const meta = await redis.hGetAll(`game:${postId}:meta`)
+	const leaderboardCommentId = meta['leaderboardCommentId']
+	if (!leaderboardCommentId) return
+
+	const [winnerName, challengerName] = await Promise.all([
+		fetchUsername(winnerId),
+		fetchUsername(challengerId),
+	])
+
+	await reddit.submitComment({
+		id: leaderboardCommentId as `t1_${string}`,
+		text: [
+			`u/${winnerName} beat the challenge from u/${challengerName} in ${timeTaken}s.`,
+			'',
+			`Jump in: ${redditCommentsUrl(postId)}`,
+		].join('\n'),
+	})
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -667,6 +699,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const updatedHistory = addGameRecord(history, record)
 		const newSkillLevel = determineSkillLevel(currentLevel, updatedHistory)
 		const streak = await updateStreak(userId)
+		const preCompletionEconomy = await getUserEconomy(userId)
 
 		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak, mistakes, gridSize })
 
@@ -770,6 +803,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 			// Check for newly unlocked achievements
 			const updatedEconomy = await getUserEconomy(userId)
+			const socialStats = await getSocialStats(userId)
 			const unlockedIds = await getUnlockedAchievements(userId)
 			const userStats: UserStats = {
 				totalSolves: updatedEconomy.totalSolves,
@@ -779,9 +813,9 @@ gameRouter.post('/api/game/complete', async (c) => {
 				totalCoinsEarned: updatedEconomy.totalCoins,
 				maxGridLevel: newSkillLevel,
 				allGridsMaxed: false, // simplified — full check would require reading all grid levels
-				sharesCount: 0,
-				challengesCreated: 0,
-				challengeBeats: 0,
+				sharesCount: socialStats.sharesCount,
+				challengesCreated: socialStats.challengesCreated,
+				challengeBeats: socialStats.challengeBeats,
 			}
 			const newAchievements = checkAchievements(userStats, unlockedIds.map((u) => u.id))
 			if (newAchievements.length > 0) {
@@ -799,7 +833,9 @@ gameRouter.post('/api/game/complete', async (c) => {
 			// Check referral eligibility for challenge posts
 			const puzzleMetaForReferral = await redis.hGetAll(`game:${postId}:puzzle`)
 			if (puzzleMetaForReferral?.challengeBy) {
-				await checkAndAwardReferral(postId, userId, puzzleMetaForReferral.challengeBy)
+				await checkAndAwardReferral(postId, userId, puzzleMetaForReferral.challengeBy, {
+					newPlayerTotalSolves: preCompletionEconomy.totalSolves,
+				})
 			}
 
 			engagement = {
@@ -1050,6 +1086,10 @@ gameRouter.post('/api/game/share', async (c) => {
 		})
 
 		await redis.set(sharedKey, 'true')
+		await Promise.all([
+			trackResultCopy(getTodayUTC()),
+			incrementSharesCount(userId),
+		])
 
 		const response: ShareResponse = {
 			success: true,
@@ -1135,6 +1175,10 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 		// Set dedup flag
 		await redis.set(dedupKey, '1')
 		await redis.expire(dedupKey, RESULT_COMMENT_TTL)
+		await Promise.all([
+			trackResultCopy(getTodayUTC()),
+			incrementSharesCount(userId),
+		])
 
 		return c.json({ success: true })
 	} catch (error) {
@@ -1260,9 +1304,14 @@ Think you can beat it? Play above! 🎯`,
 		await redis.hSet(`game:${newPost.id}:meta`, {
 			postType: 'urjo-puzzle',
 			leaderboardCommentId: leaderboardComment.id,
+			stickyCommentId: leaderboardComment.id,
+			sourcePostId: postId,
+			challengeCreatorId: userId,
+			createdAt: Date.now().toString(),
 		})
+		await incrementChallengesCreated(userId)
 
-		return c.json<ChallengeResponse>({ success: true, postUrl: `https://reddit.com/${newPost.id}` })
+		return c.json<ChallengeResponse>({ success: true, postUrl: redditCommentsUrl(newPost.id) })
 	} catch (error) {
 		console.error('Challenge post error:', error)
 		return c.json<ChallengeResponse>({ success: false, error: 'Failed to create challenge' })

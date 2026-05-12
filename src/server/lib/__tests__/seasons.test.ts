@@ -19,6 +19,12 @@ import {
     SEASON_TOP_REWARDS,
 } from '../../../shared/growth-constants'
 
+const seasonDateArb = (): fc.Arbitrary<Date> =>
+    fc.date({
+        min: new Date('2020-01-01T00:00:00Z'),
+        max: new Date('2030-12-31T23:59:59Z'),
+    }).filter((date) => !Number.isNaN(date.getTime()))
+
 // ─── calculateSeasonScore (pure) ──────────────────────────────────────────────
 
 describe('calculateSeasonScore', () => {
@@ -123,10 +129,7 @@ describe('Season Boundary Computation — Property 4', () => {
      * and the input date falls within [start, end].
      */
     it('start is always a Monday 00:00 UTC', () => {
-        const dateArb = fc.date({
-            min: new Date('2020-01-01T00:00:00Z'),
-            max: new Date('2030-12-31T23:59:59Z'),
-        })
+        const dateArb = seasonDateArb()
 
         fc.assert(
             fc.property(dateArb, (date) => {
@@ -144,10 +147,7 @@ describe('Season Boundary Computation — Property 4', () => {
     })
 
     it('end is always a Sunday', () => {
-        const dateArb = fc.date({
-            min: new Date('2020-01-01T00:00:00Z'),
-            max: new Date('2030-12-31T23:59:59Z'),
-        })
+        const dateArb = seasonDateArb()
 
         fc.assert(
             fc.property(dateArb, (date) => {
@@ -161,10 +161,7 @@ describe('Season Boundary Computation — Property 4', () => {
     })
 
     it('span between start and end is exactly 7 days minus 1 second', () => {
-        const dateArb = fc.date({
-            min: new Date('2020-01-01T00:00:00Z'),
-            max: new Date('2030-12-31T23:59:59Z'),
-        })
+        const dateArb = seasonDateArb()
 
         fc.assert(
             fc.property(dateArb, (date) => {
@@ -180,10 +177,7 @@ describe('Season Boundary Computation — Property 4', () => {
     })
 
     it('input date always falls within [start, end]', () => {
-        const dateArb = fc.date({
-            min: new Date('2020-01-01T00:00:00Z'),
-            max: new Date('2030-12-31T23:59:59Z'),
-        })
+        const dateArb = seasonDateArb()
 
         fc.assert(
             fc.property(dateArb, (date) => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { navigateTo } from "@devvit/web/client";
 	import type {
 		CellColor,
 		Grid,
@@ -26,6 +27,8 @@
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
 	import BarChart2 from "lucide-svelte/icons/bar-chart-2";
+	import ExternalLink from "lucide-svelte/icons/external-link";
+	import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
 
 	type Props = {
 		grid: Grid;
@@ -68,10 +71,9 @@
 		onCellChange,
 		isCompleted,
 		onNextChallenge,
-		onRestart,
 		streakData,
-		hasShared,
 		hasChallenged,
+		challengeUrl,
 		onShare,
 		onChallenge,
 		coinReward,
@@ -87,7 +89,6 @@
 		isChallenge = false,
 		onGridSizeChange,
 		engagement,
-		onEngagementDismissed,
 		puzzleColors,
 		skillLevel = 1,
 		puzzleNumber = 0,
@@ -111,6 +112,7 @@
 	let milestoneDismissed = $state(false);
 	let showSeasonLeaderboard = $state(false);
 	let hasCommentedResult = $state(false);
+	let showMoreActions = $state(false);
 
 	$effect(() => {
 		if (isCompleted && !hasFiredConfetti) {
@@ -119,6 +121,7 @@
 			hasFiredConfetti = false;
 			mysteryBoxDismissed = false;
 			milestoneDismissed = false;
+			showMoreActions = false;
 		}
 	});
 
@@ -156,6 +159,11 @@
 	function confirmChallenge() {
 		showChallengeConfirm = false;
 		onChallenge();
+	}
+
+	function openChallenge() {
+		if (!challengeUrl) return;
+		navigateTo(challengeUrl);
 	}
 
 	function confirmSubscribe() {
@@ -307,7 +315,7 @@
 					<!-- New achievement unlocks -->
 					{#if engagement?.newAchievements && engagement.newAchievements.length > 0}
 						<div class="flex flex-col items-center gap-1">
-							{#each engagement.newAchievements as achievement}
+							{#each engagement.newAchievements as achievement (achievement.id)}
 								<div
 									class="flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-xs"
 								>
@@ -370,21 +378,31 @@
 					</div>
 
 					<!-- Challenge a Friend -->
-					<button
-						onclick={() => {
-							if (!hasChallenged) showChallengeConfirm = true;
-						}}
-						disabled={hasChallenged}
-						class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-					>
-						{#if hasChallenged}<span>⚔️ Challenged!</span
-							>{:else}<span>⚔️ Challenge a Friend</span>{/if}
-					</button>
+					{#if hasChallenged && challengeUrl}
+						<button
+							onclick={openChallenge}
+							class="w-full px-4 py-2 bg-urjo-blue text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
+						>
+							<ExternalLink class="w-4 h-4" />
+							<span>Open Challenge</span>
+						</button>
+					{:else}
+						<button
+							onclick={() => {
+								if (!hasChallenged) showChallengeConfirm = true;
+							}}
+							disabled={hasChallenged}
+							class="w-full px-4 py-2 bg-urjo-blue text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+						>
+							{#if hasChallenged}<span>Challenged!</span
+								>{:else}<span>Challenge Friends</span>{/if}
+						</button>
+					{/if}
 
 					<!-- Next Puzzle -->
 					<button
 						onclick={onNextChallenge}
-						class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all w-full shadow-lg"
+						class="px-8 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all w-full"
 					>
 						Next Puzzle
 					</button>
@@ -399,34 +417,56 @@
 					{/if}
 
 					<!-- Engagement navigation -->
-					<div class="flex gap-2 w-full">
-						<button
-							onclick={() => (showMissions = true)}
-							class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-						>
-							🎯 Missions
-						</button>
-						<button
-							onclick={() => (showAchievements = true)}
-							class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-						>
-							🏅 Achievements
-						</button>
-						<button
-							onclick={() => (showProfile = true)}
-							class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-						>
-							📊 Profile
-						</button>
-						{#if currentSeason?.isActive}
+					<button
+						onclick={() => (showMoreActions = !showMoreActions)}
+						class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
+					>
+						<MoreHorizontal class="w-4 h-4" />
+						<span>More</span>
+					</button>
+
+					{#if showMoreActions}
+						<div class="grid grid-cols-2 gap-2 w-full">
 							<button
-								onclick={() => (showSeasonLeaderboard = true)}
-								class="flex-1 px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+								onclick={() => {
+									showMoreActions = false;
+									showMissions = true;
+								}}
+								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
 							>
-								🏆 Season
+								Missions
 							</button>
-						{/if}
-					</div>
+							<button
+								onclick={() => {
+									showMoreActions = false;
+									showAchievements = true;
+								}}
+								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+							>
+								Achievements
+							</button>
+							<button
+								onclick={() => {
+									showMoreActions = false;
+									showProfile = true;
+								}}
+								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+							>
+								Profile
+							</button>
+							{#if currentSeason?.isActive}
+								<button
+									onclick={() => {
+										showMoreActions = false;
+										showSeasonLeaderboard = true;
+									}}
+									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+								>
+									Season
+								</button>
+							{/if}
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
