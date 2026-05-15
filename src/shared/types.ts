@@ -48,6 +48,8 @@ export type GameState = {
 		endDate: string
 		isActive: boolean
 	}
+	notifyOptIn?: boolean
+	hintsDismissed?: { numberConstraint: boolean; adjacencyViolation: boolean }
 }
 
 export type NextChallengeResponse = {

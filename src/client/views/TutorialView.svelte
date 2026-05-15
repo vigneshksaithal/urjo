@@ -11,10 +11,17 @@
 
 	type Props = {
 		onComplete: () => void;
+		onDismiss?: () => void;
 		isReplay?: boolean;
+		mode?: "mandatory" | "opt-in";
 	};
 
-	let { onComplete, isReplay = false }: Props = $props();
+	let {
+		onComplete,
+		onDismiss,
+		isReplay = false,
+		mode = "mandatory",
+	}: Props = $props();
 
 	const GRID_SIZE = 4;
 
@@ -127,9 +134,31 @@
 		currentStepIndex = 0;
 		tutorialDone = false;
 	}
+
+	/** Label for the primary completion CTA based on mode and context. */
+	const completionLabel = $derived(
+		mode === "opt-in"
+			? "Back to Game"
+			: isReplay
+				? "Back to Game"
+				: "Next Challenge",
+	);
 </script>
 
 <div class="h-full w-full flex flex-col p-4 overflow-hidden">
+	<!-- Header: dismiss button in opt-in mode -->
+	{#if mode === "opt-in"}
+		<div class="flex-none flex justify-end mb-1">
+			<button
+				onclick={onDismiss}
+				class="px-3 py-1 text-xs text-theme-text-muted border border-theme-border rounded-lg hover:bg-theme-hover active:scale-95 transition-all"
+				aria-label="Close tutorial"
+			>
+				✕ Close
+			</button>
+		</div>
+	{/if}
+
 	<!-- Instruction text at top with white border box -->
 	<div
 		class="flex-none min-h-[60px] flex items-center justify-center px-2 mb-2"
@@ -201,7 +230,7 @@
 							class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
 								text-base hover:opacity-90 active:scale-95 transition-all shadow-lg"
 						>
-							{isReplay ? "Back to Game" : "Next Challenge"}
+							{completionLabel}
 						</button>
 						<button
 							onclick={handleRestart}

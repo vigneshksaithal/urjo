@@ -17,9 +17,18 @@ import { engagementRouter } from './routes/engagement'
 import { analyticsRouter } from './routes/analytics'
 import { adminRouter } from './routes/admin'
 import { seasonRouter } from './routes/season'
+import { notifyRouter } from './routes/notify'
+import {
+  computeDailyMentionBatch,
+  getOptInUserIds,
+  getCompleterUserIdsForDate,
+  getMentionedUserIdsForDate,
+  tryMarkUserMentioned,
+  buildMentionCommentText,
+} from './lib/notify'
 import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
 import { selectDailyMissions } from './lib/missions'
-import { getTodayUTC, getISOWeek, getYesterdayUTC } from './lib/helpers'
+import { getTodayUTC, getISOWeek, getYesterdayUTC, fetchUsername, readUserStreak } from './lib/helpers'
 import { computeDashboard, formatDashboardMarkdown } from './lib/dashboard'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
@@ -368,6 +377,43 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       }
     }
 
+    // At 16:00 UTC: post daily mention comments for opted-in completers
+    if (new Date().getUTCHours() === 16) {
+      try {
+        const yesterday = getYesterdayUTC()
+        const todayDate = getTodayUTC()
+
+        const [optInUserIds, yesterdayCompleterUserIds, alreadyMentionedUserIds] = await Promise.all([
+          getOptInUserIds(),
+          getCompleterUserIdsForDate(yesterday),
+          getMentionedUserIdsForDate(todayDate),
+        ])
+
+        const batch = computeDailyMentionBatch(
+          optInUserIds,
+          yesterdayCompleterUserIds,
+          alreadyMentionedUserIds,
+        )
+
+        for (const userId of batch) {
+          const claimed = await tryMarkUserMentioned(todayDate, userId)
+          if (!claimed) continue
+
+          try {
+            const username = await fetchUsername(userId)
+            const streak = await readUserStreak(userId)
+            const text = buildMentionCommentText(username, streak, post.id)
+            await reddit.submitComment({ id: post.id as `t3_${string}`, text })
+          } catch (commentErr) {
+            console.error('[Mention] Failed for user', userId, commentErr)
+            // Dedup key remains set — prevents retry storms (Req 15.7)
+          }
+        }
+      } catch (mentionErr) {
+        console.error('[Mention] Scheduler step failed (non-critical):', mentionErr)
+      }
+    }
+
     console.log(`[Scheduler] Post created successfully: ${post.id}`)
 
     return c.json<TaskResponse>({ status: 'ok' }, 200)
@@ -431,6 +477,7 @@ app.route('/', engagementRouter)
 app.route('/', analyticsRouter)
 app.route('/', adminRouter)
 app.route('/', seasonRouter)
+app.route('/', notifyRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports

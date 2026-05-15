@@ -5,11 +5,17 @@
 		isOpen: boolean;
 		onClose: () => void;
 		gridSize?: number;
+		onOpenTutorial?: () => void;
 	};
 
-	let { isOpen, onClose, gridSize }: Props = $props();
+	let { isOpen, onClose, gridSize, onOpenTutorial }: Props = $props();
 
 	const colorCount = $derived(Math.floor((gridSize ?? 4) / 2));
+
+	function handleOpenTutorial(): void {
+		onClose();
+		onOpenTutorial?.();
+	}
 </script>
 
 {#if isOpen}
@@ -69,6 +75,15 @@
 			>
 				Got it!
 			</button>
+
+			{#if onOpenTutorial}
+				<button
+					onclick={handleOpenTutorial}
+					class="mt-2 w-full border border-theme-border text-theme-text-secondary py-2 rounded-lg hover:bg-theme-hover active:scale-95 transition-all text-sm"
+				>
+					📖 Open Tutorial
+				</button>
+			{/if}
 		</div>
 	</div>
 {/if}

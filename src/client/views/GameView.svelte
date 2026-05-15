@@ -9,8 +9,11 @@
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
 	import { validateGrid } from "../lib/validation";
+	import { hintShownStore, markShown } from "../stores/hints";
+	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
+	import InlineHint from "../components/InlineHint.svelte";
 	import StreakBadge from "../components/StreakBadge.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
 	import HowToPlayModal from "../components/HowToPlayModal.svelte";
@@ -23,6 +26,7 @@
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 	import ResultCard from "../components/ResultCard.svelte";
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
+	import TutorialView from "../views/TutorialView.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
@@ -63,6 +67,11 @@
 		seasonRank?: number | null;
 		seasonPoints?: number;
 		currentSeason?: SeasonInfo | undefined;
+		notifyOptIn?: boolean;
+		hintsDismissed?: {
+			numberConstraint: boolean;
+			adjacencyViolation: boolean;
+		};
 	};
 
 	let {
@@ -95,6 +104,12 @@
 		seasonRank = null,
 		seasonPoints = 0,
 		currentSeason,
+		notifyOptIn = false,
+		// hintsDismissed is accepted for forward-compat; wired in task 13.3
+		hintsDismissed: _hintsDismissed = {
+			numberConstraint: false,
+			adjacencyViolation: false,
+		},
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -113,6 +128,23 @@
 	let showSeasonLeaderboard = $state(false);
 	let hasCommentedResult = $state(false);
 	let showMoreActions = $state(false);
+	let showOptInTutorial = $state(false);
+
+	// Notify toggle — initialised from prop, updated optimistically on tap (Reqs 13.1–13.5)
+	// Using a function initialiser avoids the Svelte "captures initial value" warning
+	// while still seeding from the server-provided prop on first render.
+	let localNotifyOptIn = $state((() => notifyOptIn)());
+	let notifySubmitting = $state(false);
+	let notifyError = $state<string | null>(null);
+
+	// ─── Inline hint visibility flags ────────────────────────────────────────
+	// These control whether the InlineHint bubble is currently mounted.
+	// The hintShownStore flags prevent re-display within the same session.
+	let showNumberHint = $state(false);
+	let showAdjacencyHint = $state(false);
+
+	// Tracks whether the help-tap POST has already fired this session (Req 11.1).
+	let helpTapFired = $state(false);
 
 	$effect(() => {
 		if (isCompleted && !hasFiredConfetti) {
@@ -139,6 +171,72 @@
 		}
 	});
 
+	// ─── Inline hint trigger logic ───────────────────────────────────────────
+	// Wraps the parent's onCellChange to intercept taps and surface inline hints.
+	// The number-constraint hint fires when the tapped cell has a non-null number
+	// (Req 8.1). The adjacency-violation hint fires when validateGrid detects a
+	// violated row or column after the mutation (Req 9.1). Both are shown at most
+	// once per session via the hintShownStore flags (Reqs 8.4, 9.4).
+
+	function handleCellChange(
+		row: number,
+		col: number,
+		color: CellColor,
+	): void {
+		// Capture the tapped cell's number BEFORE the parent mutates the grid,
+		// so we can decide whether to show the number-constraint hint.
+		const tappedCell = grid[row]?.[col];
+		const tappedCellHasNumber =
+			tappedCell !== undefined && tappedCell.number !== null;
+
+		// Delegate to parent — this triggers a grid prop update on the next tick.
+		onCellChange(row, col, color);
+
+		// Number-constraint hint: show once per session when a numbered cell is tapped.
+		const hints = get(hintShownStore);
+		if (tappedCellHasNumber && !hints.numberConstraintShown) {
+			markShown("numberConstraint");
+			showNumberHint = true;
+		}
+
+		// Adjacency-violation hint: show once per session when validateGrid detects
+		// a violated row or column. We re-run validateGrid on the updated grid
+		// synchronously — the parent's grid prop update may not have propagated yet,
+		// so we compute it ourselves using the new color value.
+		const updatedGrid: Grid = grid.map((r, ri) =>
+			ri === row
+				? r.map((c, ci) =>
+						ci === col
+							? { color, number: c.number, locked: c.locked }
+							: c,
+					)
+				: r,
+		);
+		const updatedValidation = validateGrid(updatedGrid, gridSize);
+		const hasViolation =
+			updatedValidation.violatedRows.size > 0 ||
+			updatedValidation.violatedCols.size > 0;
+
+		const hintsAfter = get(hintShownStore);
+		if (hasViolation && !hintsAfter.adjacencyViolationShown) {
+			markShown("adjacencyViolation");
+			showAdjacencyHint = true;
+		}
+	}
+
+	// ─── Help-tap tracking ────────────────────────────────────────────────────
+	// POST to /api/game/help-tap on the first Help icon tap per session (Req 11.1).
+	// Fire-and-forget — failures are silently ignored so gameplay is never blocked.
+
+	function handleHelpTap(): void {
+		showHowToPlay = true;
+		if (helpTapFired) return;
+		helpTapFired = true;
+		fetch("/api/game/help-tap", { method: "POST" }).catch(() => {
+			// Non-blocking: tracking failure does not affect gameplay
+		});
+	}
+
 	const validation = $derived(validateGrid(grid, gridSize));
 	const boardSizeStyle = $derived(
 		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: 100%;`,
@@ -151,34 +249,76 @@
 			: 1,
 	);
 
-	function confirmShare() {
+	function confirmShare(): void {
 		showShareConfirm = false;
 		onShare();
 	}
 
-	function confirmChallenge() {
+	function confirmChallenge(): void {
 		showChallengeConfirm = false;
 		onChallenge();
 	}
 
-	function openChallenge() {
+	function openChallenge(): void {
 		if (!challengeUrl) return;
 		navigateTo(challengeUrl);
 	}
 
-	function confirmSubscribe() {
+	function confirmSubscribe(): void {
 		showSubscribeConfirm = false;
 		onSubscribe?.();
 	}
 
-	function dismissMysteryBox() {
+	function dismissMysteryBox(): void {
 		showMysteryBox = false;
 		mysteryBoxDismissed = true;
 	}
 
-	function dismissMilestone() {
+	function dismissMilestone(): void {
 		showStreakMilestone = false;
 		milestoneDismissed = true;
+	}
+
+	// Notify toggle handler — optimistic update, revert on failure (Req 13.5)
+	async function handleNotifyToggle(): Promise<void> {
+		if (notifySubmitting) return;
+		notifySubmitting = true;
+		notifyError = null;
+		const previous = localNotifyOptIn;
+		localNotifyOptIn = !previous;
+		const endpoint = previous
+			? "/api/game/notify/opt-out"
+			: "/api/game/notify/opt-in";
+		try {
+			const res = await fetch(endpoint, { method: "POST" });
+			if (!res.ok) throw new Error("Request failed");
+			const json = (await res.json()) as { optedIn: boolean };
+			localNotifyOptIn = json.optedIn;
+		} catch {
+			// Revert on failure and show inline error (Req 13.5)
+			localNotifyOptIn = previous;
+			notifyError =
+				"Could not update notification preference. Try again.";
+		} finally {
+			notifySubmitting = false;
+		}
+	}
+
+	function handleOpenOptInTutorial(): void {
+		showOptInTutorial = true;
+	}
+
+	async function handleOptInTutorialComplete(): Promise<void> {
+		showOptInTutorial = false;
+		try {
+			await fetch("/api/game/tutorial-complete", { method: "POST" });
+		} catch {
+			// Non-critical — tutorial flag is informational only
+		}
+	}
+
+	function handleOptInTutorialDismiss(): void {
+		showOptInTutorial = false;
 	}
 </script>
 
@@ -186,7 +326,7 @@
 	<!-- Header: help | streak · coins · trophy | shuffle -->
 	<header class="flex-none flex items-center justify-between gap-3">
 		<button
-			onclick={() => (showHowToPlay = true)}
+			onclick={handleHelpTap}
 			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
 			aria-label="How to Play"
 		>
@@ -247,7 +387,7 @@
 				<GameBoard
 					{grid}
 					{gridSize}
-					{onCellChange}
+					onCellChange={handleCellChange}
 					violatedRows={validation.violatedRows}
 					violatedCols={validation.violatedCols}
 				/>
@@ -356,7 +496,7 @@
 						</div>
 					{/if}
 
-					<!-- Result card preview -->
+					<!-- (1) Result card preview + Copy -->
 					{#if puzzleColors}
 						<ResultCard
 							{puzzleColors}
@@ -377,29 +517,28 @@
 						coins
 					</div>
 
-					<!-- Challenge a Friend -->
-					{#if hasChallenged && challengeUrl}
+					<!-- (2) Notify Toggle (Reqs 13.1–13.5) -->
+					<div class="w-full flex flex-col items-center gap-1">
 						<button
-							onclick={openChallenge}
-							class="w-full px-4 py-2 bg-urjo-blue text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
+							onclick={handleNotifyToggle}
+							disabled={notifySubmitting}
+							aria-pressed={localNotifyOptIn}
+							class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm font-semibold hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
 						>
-							<ExternalLink class="w-4 h-4" />
-							<span>Open Challenge</span>
+							{#if localNotifyOptIn}
+								🔕 Notifications on — tap to turn off
+							{:else}
+								🔔 Notify me tomorrow
+							{/if}
 						</button>
-					{:else}
-						<button
-							onclick={() => {
-								if (!hasChallenged) showChallengeConfirm = true;
-							}}
-							disabled={hasChallenged}
-							class="w-full px-4 py-2 bg-urjo-blue text-white rounded-lg text-sm font-bold hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-						>
-							{#if hasChallenged}<span>Challenged!</span
-								>{:else}<span>Challenge Friends</span>{/if}
-						</button>
-					{/if}
+						{#if notifyError}
+							<p class="text-xs text-red-400 text-center">
+								{notifyError}
+							</p>
+						{/if}
+					</div>
 
-					<!-- Next Puzzle -->
+					<!-- (3) Next Puzzle -->
 					<button
 						onclick={onNextChallenge}
 						class="px-8 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all w-full"
@@ -407,6 +546,7 @@
 						Next Puzzle
 					</button>
 
+					<!-- (4) Subscribe (non-subscribers only) -->
 					{#if onSubscribe && !hasSubscribed}
 						<button
 							onclick={() => (showSubscribeConfirm = true)}
@@ -416,7 +556,7 @@
 						</button>
 					{/if}
 
-					<!-- Engagement navigation -->
+					<!-- More menu -->
 					<button
 						onclick={() => (showMoreActions = !showMoreActions)}
 						class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
@@ -465,12 +605,56 @@
 									Season
 								</button>
 							{/if}
+							<!-- Challenge Friends moved from primary CTAs (Req 17.3) -->
+							{#if hasChallenged && challengeUrl}
+								<button
+									onclick={() => {
+										showMoreActions = false;
+										openChallenge();
+									}}
+									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
+								>
+									<ExternalLink class="w-3 h-3" />
+									<span>Open Challenge</span>
+								</button>
+							{:else}
+								<button
+									onclick={() => {
+										showMoreActions = false;
+										if (!hasChallenged)
+											showChallengeConfirm = true;
+									}}
+									disabled={hasChallenged}
+									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+								>
+									{hasChallenged
+										? "Challenged!"
+										: "Challenge Friends"}
+								</button>
+							{/if}
 						</div>
 					{/if}
 				</div>
 			</div>
 		{/if}
 	</main>
+
+	<!-- Inline hints — rendered outside the board so they float above everything -->
+	{#if showNumberHint}
+		<InlineHint
+			text="The number shows how many same-color neighbors this cell has, counting all 8 surrounding cells including diagonals."
+			kind="numberConstraint"
+			onDismiss={() => (showNumberHint = false)}
+		/>
+	{/if}
+
+	{#if showAdjacencyHint}
+		<InlineHint
+			text="No row or column may contain three of the same color in a row."
+			kind="adjacencyViolation"
+			onDismiss={() => (showAdjacencyHint = false)}
+		/>
+	{/if}
 
 	<!-- Footer -->
 	<footer class="flex-none flex items-center justify-center h-8">
@@ -607,6 +791,7 @@
 	isOpen={showHowToPlay}
 	onClose={() => (showHowToPlay = false)}
 	{gridSize}
+	onOpenTutorial={handleOpenOptInTutorial}
 />
 
 <!-- Engagement modals -->
@@ -639,3 +824,15 @@
 	isOpen={showSeasonLeaderboard}
 	onClose={() => (showSeasonLeaderboard = false)}
 />
+
+<!-- Opt-in tutorial overlay -->
+{#if showOptInTutorial}
+	<div class="fixed inset-0 z-50 bg-theme-bg-primary">
+		<TutorialView
+			mode="opt-in"
+			onComplete={handleOptInTutorialComplete}
+			onDismiss={handleOptInTutorialDismiss}
+			isReplay={true}
+		/>
+	</div>
+{/if}

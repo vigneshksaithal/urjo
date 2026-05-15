@@ -27,6 +27,9 @@ const completionCounterKey = (date: string): string =>
 const resultCopyCounterKey = (date: string): string =>
     `analytics:${date}:result_copies`
 
+const helpTapCounterKey = (date: string): string =>
+    `analytics:${date}:help_taps`
+
 const subredditCompletionKey = (date: string, subredditId: string): string =>
     `analytics:${date}:completions:subreddit:${subredditId}`
 
@@ -126,6 +129,24 @@ export const trackResultCopy = async (date: string): Promise<void> => {
     await redis.incrBy(resultCopyCounterKey(date), 1)
 }
 
+/**
+ * Track a help-icon tap event (deduplicated per user per post per day).
+ * Uses SET NX on analytics:helped:{date}:{postId}:{userId} with 24h TTL.
+ * Returns true if this was a new event, false if duplicate.
+ */
+export const trackHelpTap = async (
+    date: string,
+    postId: string,
+    userId: string,
+): Promise<boolean> => {
+    const dedupKey = `analytics:helped:${date}:${postId}:${userId}`
+    const isNew = await trySetDedup(dedupKey, TTL_24H)
+    if (!isNew) return false
+
+    await redis.incrBy(helpTapCounterKey(date), 1)
+    return true
+}
+
 // ─── Metrics Retrieval ─────────────────────────────────────────────────────────
 
 /**
@@ -143,19 +164,41 @@ const safeDivide = (numerator: number, denominator: number): number =>
     denominator === 0 ? 0 : numerator / denominator
 
 /**
+ * Determine whether the DQ flag should be set for a given date.
+ * Returns true when completions were recorded but first_actions is zero —
+ * an instrumentation gap that makes funnel rates untrustworthy.
+ */
+const isFirstActionMissing = (completions: number, firstActions: number): boolean =>
+    completions > 0 && firstActions === 0
+
+/**
  * Get daily metrics for a given date.
- * Reads all counters and computes first_action_rate and completion_rate.
+ * Reads all counters, detects the DQ condition, and returns nullable rates.
+ *
+ * When dq.firstActionMissing is true, firstActionRate and completionRate are
+ * returned as null rather than 0 to distinguish missing data from poor performance.
+ * helpTapRate is null when postOpens is 0 (no sessions to compute a rate against).
  */
 export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
-    const [postOpens, firstActions, completions, resultCopies] = await Promise.all([
+    const [postOpens, firstActions, completions, resultCopies, helpTaps] = await Promise.all([
         readCounter(postOpenCounterKey(date)),
         readCounter(firstActionCounterKey(date)),
         readCounter(completionCounterKey(date)),
         readCounter(resultCopyCounterKey(date)),
+        readCounter(helpTapCounterKey(date)),
     ])
 
-    const firstActionRate = safeDivide(firstActions, postOpens)
-    const completionRate = safeDivide(completions, firstActions)
+    const dqFirstActionMissing = isFirstActionMissing(completions, firstActions)
+
+    const firstActionRate: number | null = dqFirstActionMissing
+        ? null
+        : safeDivide(firstActions, postOpens)
+
+    const completionRate: number | null = dqFirstActionMissing
+        ? null
+        : safeDivide(completions, firstActions)
+
+    const helpTapRate: number | null = postOpens === 0 ? null : safeDivide(helpTaps, postOpens)
 
     return {
         date,
@@ -163,10 +206,13 @@ export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
         firstActions,
         completions,
         resultCopies,
+        helpTaps,
         firstActionRate,
         completionRate,
         d1ReturnRate: 0,
         estimatedDQE: completions,
+        dq: { firstActionMissing: dqFirstActionMissing },
+        helpTapRate,
     }
 }
 

@@ -25,18 +25,21 @@ export type DailyMetrics = {
     firstActions: number
     completions: number
     resultCopies: number
-    firstActionRate: number
-    completionRate: number
-    d1ReturnRate: number
+    helpTaps: number
+    firstActionRate: number | null
+    completionRate: number | null
+    d1ReturnRate: number | null
     estimatedDQE: number
+    dq: { firstActionMissing: boolean }
+    helpTapRate: number | null
 }
 
 /** 7-day rolling averages for key growth metrics */
 export type RollingMetrics = {
-    dqe7d: number
-    firstActionRate7d: number
-    completionRate7d: number
-    d1ReturnRate7d: number
+    dqe7d: number | null
+    firstActionRate7d: number | null
+    completionRate7d: number | null
+    d1ReturnRate7d: number | null
 }
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────
@@ -67,6 +70,8 @@ export type DashboardData = {
     alerts: Alert[]
     currentPhase: CurrentPhase
     seasonParticipants: number
+    dqSuppressedRuleIds: string[]
+    backfillPolicy: 'no-backfill'
 }
 
 // ─── Seasons ───────────────────────────────────────────────────────────────────

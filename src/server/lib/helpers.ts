@@ -139,6 +139,15 @@ export const updateLoginStreak = async (userId: string, isDailyFirst: boolean): 
 }
 
 
+/**
+ * Read the user's current streak count from Redis.
+ * Returns 0 if no streak is recorded.
+ */
+export const readUserStreak = async (userId: string): Promise<number> => {
+	const value = await redis.get(`user:${userId}:streak:current`)
+	return value !== undefined ? parseInt(value, 10) : 0
+}
+
 // ─── Grid Size Preference ───────────────────────────────────────────────────
 
 /**

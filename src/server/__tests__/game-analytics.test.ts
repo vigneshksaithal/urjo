@@ -99,7 +99,7 @@ testPostOpen('GET /api/game/state deduplicates post_open for same user/post/day'
     vi.restoreAllMocks()
 })
 
-// ─── GET /api/game/state — returns firstScreen for new users ──────────────────
+// ─── GET /api/game/state — new users go directly to GameView (no firstScreen) ─
 
 const testFirstScreen = createDevvitTest({
     userId: 't2_newuser',
@@ -108,7 +108,7 @@ const testFirstScreen = createDevvitTest({
     postId: 't3_testpost',
 })
 
-testFirstScreen('GET /api/game/state returns firstScreen data for new users with no solves', async () => {
+testFirstScreen('GET /api/game/state does not return firstScreen for new users — they go directly to GameView', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'new_user' } as never)
 
     const newCtx = { ...CTX, userId: 't2_newuser' }
@@ -118,17 +118,10 @@ testFirstScreen('GET /api/game/state returns firstScreen data for new users with
     expect(res.status).toBe(200)
 
     const body = await res.json() as Record<string, unknown>
-    expect(body).toHaveProperty('firstScreen')
-
-    const firstScreen = body.firstScreen as {
-        samplePuzzle: { gridSize: number }
-        instruction: string
-        communityStats: { activePlayers: number; collectiveStreakDays: number }
-    }
-    expect(firstScreen.samplePuzzle.gridSize).toBe(4)
-    expect(firstScreen.instruction).toContain('Tap cells')
-    expect(firstScreen.communityStats).toHaveProperty('activePlayers')
-    expect(firstScreen.communityStats).toHaveProperty('collectiveStreakDays')
+    // firstScreen is removed — new users go straight to GameView (Req 7.1, 7.3)
+    expect(body).not.toHaveProperty('firstScreen')
+    // isFirstTimeUser is still present for client-side awareness
+    expect(body).toHaveProperty('isFirstTimeUser', true)
 
     vi.restoreAllMocks()
 })
@@ -327,6 +320,86 @@ testResultComment('POST /api/game/result-comment returns 400 with invalid body',
     expect(body.error).toBe('Invalid result card data')
 })
 
+// ─── POST /api/game/help-tap — tracks help icon taps ─────────────────────────
+
+const testHelpTap = createDevvitTest({
+    userId: 't2_player1',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+    postId: 't3_testpost',
+})
+
+testHelpTap('POST /api/game/help-tap returns { tracked: true } on first call and increments counter', async () => {
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/help-tap', { method: 'POST' }),
+    )
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { tracked: boolean }
+    expect(body.tracked).toBe(true)
+
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    const counter = await withCtx(CTX, () => redis.get(`analytics:${today}:help_taps`))
+    expect(counter).toBe('1')
+})
+
+testHelpTap('POST /api/game/help-tap returns { tracked: false } on duplicate call and does not increment counter', async () => {
+    // First call
+    await withCtx(CTX, () =>
+        app.request('/api/game/help-tap', { method: 'POST' }),
+    )
+    // Second call — same (date, postId, userId)
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/help-tap', { method: 'POST' }),
+    )
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { tracked: boolean }
+    expect(body.tracked).toBe(false)
+
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    const counter = await withCtx(CTX, () => redis.get(`analytics:${today}:help_taps`))
+    expect(counter).toBe('1') // Still 1, not 2
+})
+
+testHelpTap('POST /api/game/help-tap returns 400 when postId is missing', async () => {
+    // Pass empty string for postId — falsy, triggers the guard
+    const res = await withCtx({ userId: 't2_player1', postId: '' }, () =>
+        app.request('/api/game/help-tap', { method: 'POST' }),
+    )
+    expect(res.status).toBe(400)
+
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Post ID is required')
+})
+
+testHelpTap('POST /api/game/help-tap returns 400 when userId is missing', async () => {
+    const res = await withCtx({ postId: 't3_testpost' }, () =>
+        app.request('/api/game/help-tap', { method: 'POST' }),
+    )
+    expect(res.status).toBe(400)
+
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('User ID is required')
+})
+
+testHelpTap('POST /api/game/help-tap sets dedup key with 24h TTL', async () => {
+    await withCtx(CTX, () =>
+        app.request('/api/game/help-tap', { method: 'POST' }),
+    )
+
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    const dedupKey = `analytics:helped:${today}:${CTX.postId}:${CTX.userId}`
+    const dedupValue = await withCtx(CTX, () => redis.get(dedupKey))
+    expect(dedupValue).toBe('1')
+
+    // expireTime returns absolute Unix timestamp in seconds — verify it's within 24h from now
+    const ttl = await withCtx(CTX, () => redis.expireTime(dedupKey))
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    expect(ttl).toBeGreaterThan(nowSeconds)
+    expect(ttl).toBeLessThanOrEqual(nowSeconds + 86400 + 5) // +5s buffer for test execution time
+})
+
 // ─── POST /api/game/share — legacy share route metrics ───────────────────────
 
 const testShare = createDevvitTest({
@@ -366,4 +439,247 @@ testShare('POST /api/game/share tracks result copy and share count on success', 
     expect(social['sharesCount']).toBe('1')
 
     vi.restoreAllMocks()
+})
+
+// ─── GET /api/game/state — notifyOptIn and hintsDismissed fields ──────────────
+// Requirements: 7.1, 7.2, 7.3, 12.3, 14.6
+
+const testGameStateFields = createDevvitTest({
+    userId: 't2_stateuser',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+    postId: 't3_statepost',
+})
+
+const STATE_CTX = {
+    userId: 't2_stateuser',
+    postId: 't3_statepost',
+    subredditId: 't5_testsub',
+    subredditName: 'testsub',
+}
+
+const seedStatePuzzle = async (): Promise<void> => {
+    await redis.hSet(`game:${STATE_CTX.postId}:puzzle`, {
+        colors: 'rrbbrrbbrrbbrrbb',
+        numbers: '----------------',
+        solution: 'rrbbrrbbrrbbrrbb',
+        difficulty: 'easy',
+        gridSize: '4',
+    })
+}
+
+testGameStateFields('GET /api/game/state includes notifyOptIn: false for user not opted in', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
+    await withCtx(STATE_CTX, seedStatePuzzle)
+
+    const res = await withCtx(STATE_CTX, () => app.request('/api/game/state'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as Record<string, unknown>
+    expect(body).toHaveProperty('notifyOptIn', false)
+
+    vi.restoreAllMocks()
+})
+
+testGameStateFields('GET /api/game/state includes notifyOptIn: true for opted-in user', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
+    await withCtx(STATE_CTX, seedStatePuzzle)
+
+    // Opt the user in directly via Redis
+    await withCtx(STATE_CTX, () =>
+        redis.zAdd('notify:optin', { member: STATE_CTX.userId, score: Date.now() }),
+    )
+
+    const res = await withCtx(STATE_CTX, () => app.request('/api/game/state'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as Record<string, unknown>
+    expect(body).toHaveProperty('notifyOptIn', true)
+
+    vi.restoreAllMocks()
+})
+
+testGameStateFields('GET /api/game/state includes hintsDismissed with both false for new user', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
+    await withCtx(STATE_CTX, seedStatePuzzle)
+
+    const res = await withCtx(STATE_CTX, () => app.request('/api/game/state'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as Record<string, unknown>
+    expect(body).toHaveProperty('hintsDismissed')
+    const hintsDismissed = body.hintsDismissed as { numberConstraint: boolean; adjacencyViolation: boolean }
+    expect(hintsDismissed.numberConstraint).toBe(false)
+    expect(hintsDismissed.adjacencyViolation).toBe(false)
+
+    vi.restoreAllMocks()
+})
+
+testGameStateFields('GET /api/game/state reflects persisted hint dismissal flags', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
+    await withCtx(STATE_CTX, seedStatePuzzle)
+
+    // Pre-set the numberConstraint hint as dismissed
+    await withCtx(STATE_CTX, () =>
+        redis.set(`user:${STATE_CTX.userId}:hint:numberConstraint`, '1'),
+    )
+
+    const res = await withCtx(STATE_CTX, () => app.request('/api/game/state'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as Record<string, unknown>
+    const hintsDismissed = body.hintsDismissed as { numberConstraint: boolean; adjacencyViolation: boolean }
+    expect(hintsDismissed.numberConstraint).toBe(true)
+    expect(hintsDismissed.adjacencyViolation).toBe(false)
+
+    vi.restoreAllMocks()
+})
+
+testGameStateFields('GET /api/game/state does NOT include firstScreen for new users', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
+    await withCtx(STATE_CTX, seedStatePuzzle)
+
+    // Ensure user has no solves (new user)
+    const res = await withCtx(STATE_CTX, () => app.request('/api/game/state'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as Record<string, unknown>
+    expect(body).not.toHaveProperty('firstScreen')
+
+    vi.restoreAllMocks()
+})
+
+// ─── POST /api/game/hints/dismiss ────────────────────────────────────────────
+
+const testHintsDismiss = createDevvitTest({
+    userId: 't2_player1',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+    postId: 't3_testpost',
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss returns { dismissed: true } for numberConstraint', async () => {
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'numberConstraint' }),
+        }),
+    )
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { dismissed: boolean }
+    expect(body.dismissed).toBe(true)
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss sets Redis flag for numberConstraint', async () => {
+    await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'numberConstraint' }),
+        }),
+    )
+
+    const flag = await withCtx(CTX, () => redis.get('user:t2_player1:hint:numberConstraint'))
+    expect(flag).toBe('1')
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss returns { dismissed: true } for adjacencyViolation', async () => {
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'adjacencyViolation' }),
+        }),
+    )
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { dismissed: boolean }
+    expect(body.dismissed).toBe(true)
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss sets Redis flag for adjacencyViolation', async () => {
+    await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'adjacencyViolation' }),
+        }),
+    )
+
+    const flag = await withCtx(CTX, () => redis.get('user:t2_player1:hint:adjacencyViolation'))
+    expect(flag).toBe('1')
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss is idempotent — second call still returns { dismissed: true }', async () => {
+    await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'numberConstraint' }),
+        }),
+    )
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'numberConstraint' }),
+        }),
+    )
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { dismissed: boolean }
+    expect(body.dismissed).toBe(true)
+
+    const flag = await withCtx(CTX, () => redis.get('user:t2_player1:hint:numberConstraint'))
+    expect(flag).toBe('1')
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss returns 400 for invalid kind', async () => {
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'invalidKind' }),
+        }),
+    )
+    expect(res.status).toBe(400)
+
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Invalid request body')
+})
+
+testHintsDismiss('POST /api/game/hints/dismiss returns 400 when kind is missing', async () => {
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/hints/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        }),
+    )
+    expect(res.status).toBe(400)
+
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Invalid request body')
+})
+
+const testHintsDismissNoUser = createDevvitTest({
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+    postId: 't3_testpost',
+})
+
+testHintsDismissNoUser('POST /api/game/hints/dismiss returns 400 when no userId', async () => {
+    const res = await runWithContext(
+        { postId: 't3_testpost', subredditId: 't5_testsub', subredditName: 'testsub' } as Parameters<typeof runWithContext>[0],
+        () =>
+            app.request('/api/game/hints/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'numberConstraint' }),
+            }),
+    )
+    expect(res.status).toBe(400)
 })

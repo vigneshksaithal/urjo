@@ -33,69 +33,85 @@ const seasonLeaderboardKey = (seasonId: string): string =>
 // ─── Pure Functions ────────────────────────────────────────────────────────────
 
 /**
- * Compute the 7-day rolling average of a numeric array.
+ * Compute the 7-day rolling average of a nullable numeric array.
+ * Filters out null values before averaging.
  * Uses the last 7 values when length >= 7, otherwise the mean of all values.
- * Returns 0 for an empty array.
+ * Returns null when all values are null or the array is empty.
  */
-export const computeRollingAverage = (values: number[]): number => {
-    if (values.length === 0) return 0
-
+export const computeRollingAverage = (values: readonly (number | null)[]): number | null => {
     const slice = values.length >= 7
         ? values.slice(-7)
         : values
 
-    const sum = slice.reduce((acc, v) => acc + v, 0)
-    return sum / slice.length
+    const nonNull = slice.filter((v): v is number => v !== null)
+
+    if (nonNull.length === 0) return null
+
+    const sum = nonNull.reduce((acc, v) => acc + v, 0)
+    return sum / nonNull.length
+}
+
+/** Result of evaluating a set of rules against rolling metrics. */
+export type RuleEvaluationResult = {
+    alerts: Alert[]
+    suppressedRuleIds: string[]
 }
 
 /**
  * Generic rule evaluator — shared logic for kill and scale rules.
- * Returns an alert for each rule whose metric breaches the threshold.
+ * Skips rules whose target metric is null and records them in suppressedRuleIds.
  */
 const evaluateRules = (
     metrics: RollingMetrics,
     rules: readonly (KillRule | ScaleRule)[],
     type: 'kill' | 'scale',
-): Alert[] =>
-    rules.reduce<Alert[]>((alerts, rule) => {
-        const metricValue = metrics[rule.metric as keyof RollingMetrics] as number | undefined
-        if (metricValue === undefined) return alerts
+): RuleEvaluationResult =>
+    rules.reduce<RuleEvaluationResult>(({ alerts, suppressedRuleIds }, rule) => {
+        const metricValue = metrics[rule.metric as keyof RollingMetrics]
+
+        // Null metric → suppress this rule entirely
+        if (metricValue === null || metricValue === undefined) {
+            return { alerts, suppressedRuleIds: [...suppressedRuleIds, rule.id] }
+        }
 
         const triggered = rule.comparison === 'below'
             ? metricValue < rule.threshold
             : metricValue > rule.threshold
 
         if (triggered) {
-            alerts.push({
-                ruleId: rule.id,
-                type,
-                message: rule.message,
-                metricValue,
-                threshold: rule.threshold,
-            })
+            return {
+                alerts: [...alerts, {
+                    ruleId: rule.id,
+                    type,
+                    message: rule.message,
+                    metricValue,
+                    threshold: rule.threshold,
+                }],
+                suppressedRuleIds,
+            }
         }
 
-        return alerts
-    }, [])
+        return { alerts, suppressedRuleIds }
+    }, { alerts: [], suppressedRuleIds: [] })
 
 /**
  * Evaluate kill rules against rolling metrics.
- * Returns alerts for metrics that breach kill thresholds.
+ * Skips rules whose target metric is null; returns alerts and suppressedRuleIds.
  */
 export const evaluateKillRules = (
     metrics: RollingMetrics,
     rules: readonly KillRule[],
-): Alert[] =>
+): RuleEvaluationResult =>
     evaluateRules(metrics, rules, 'kill')
 
 /**
  * Evaluate scale rules against rolling metrics.
- * Returns alerts for metrics that breach scale thresholds.
+ * Skips rules whose target metric is null; returns alerts and suppressedRuleIds.
  */
 export const evaluateScaleRules = (
     metrics: RollingMetrics,
     rules: readonly ScaleRule[],
-): Alert[] =>
+): RuleEvaluationResult =>
     evaluateRules(metrics, rules, 'scale')
 
 /**
@@ -248,10 +264,11 @@ export const computeDashboard = async (date: string): Promise<DashboardData> => 
         d1ReturnRate7d: computeRollingAverage(dailyMetricsList.map((m) => m.d1ReturnRate)),
     }
 
-    // Evaluate rules
-    const killAlerts = evaluateKillRules(rolling, KILL_RULES)
-    const scaleAlerts = evaluateScaleRules(rolling, SCALE_RULES)
-    const alerts = [...killAlerts, ...scaleAlerts]
+    // Evaluate rules (null metrics are suppressed, not alerted)
+    const killResult = evaluateKillRules(rolling, KILL_RULES)
+    const scaleResult = evaluateScaleRules(rolling, SCALE_RULES)
+    const alerts = [...killResult.alerts, ...scaleResult.alerts]
+    const dqSuppressedRuleIds = [...killResult.suppressedRuleIds, ...scaleResult.suppressedRuleIds]
 
     // Compute roadmap phase
     const startDateStr = await redis.get(roadmapStartDateKey())
@@ -270,6 +287,8 @@ export const computeDashboard = async (date: string): Promise<DashboardData> => 
         alerts,
         currentPhase,
         seasonParticipants,
+        dqSuppressedRuleIds,
+        backfillPolicy: 'no-backfill',
     }
 
     // Store in Redis with 90-day TTL

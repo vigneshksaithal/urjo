@@ -24,8 +24,8 @@ import type {
 // ─── computeRollingAverage (unit tests) ────────────────────────────────────────
 
 describe('computeRollingAverage', () => {
-    it('returns 0 for empty array', () => {
-        expect(computeRollingAverage([])).toBe(0)
+    it('returns null for empty array', () => {
+        expect(computeRollingAverage([])).toBeNull()
     })
 
     it('returns the single value for array of length 1', () => {
@@ -45,6 +45,28 @@ describe('computeRollingAverage', () => {
     it('returns mean of exactly 7 values when length === 7', () => {
         const values = [10, 20, 30, 40, 50, 60, 70]
         expect(computeRollingAverage(values)).toBe(40)
+    })
+
+    // ─── Null-aware behaviour (task 3.1) ────────────────────────────────────
+
+    it('returns null when all values are null', () => {
+        expect(computeRollingAverage([null, null, null])).toBeNull()
+    })
+
+    it('filters out null values before averaging', () => {
+        // [0.5, null, 0.3, null] → mean of [0.5, 0.3] = 0.4
+        expect(computeRollingAverage([0.5, null, 0.3, null])).toBeCloseTo(0.4)
+    })
+
+    it('ignores nulls when computing the last-7 window', () => {
+        // 10 values, last 7 are [4, null, 6, 7, 8, 9, 10] → non-null: [4,6,7,8,9,10] → mean = 44/6
+        const values: (number | null)[] = [1, 2, 3, 4, null, 6, 7, 8, 9, 10]
+        const expected = (4 + 6 + 7 + 8 + 9 + 10) / 6
+        expect(computeRollingAverage(values)).toBeCloseTo(expected)
+    })
+
+    it('returns the single non-null value when rest are null', () => {
+        expect(computeRollingAverage([null, null, 7, null])).toBe(7)
     })
 })
 
@@ -66,12 +88,13 @@ describe('evaluateKillRules', () => {
             message: 'Test kill alert',
         }]
 
-        const alerts = evaluateKillRules(metrics, rules)
+        const { alerts, suppressedRuleIds } = evaluateKillRules(metrics, rules)
         expect(alerts).toHaveLength(1)
         expect(alerts[0]?.type).toBe('kill')
         expect(alerts[0]?.ruleId).toBe('test_kill')
         expect(alerts[0]?.metricValue).toBe(0.40)
         expect(alerts[0]?.threshold).toBe(0.50)
+        expect(suppressedRuleIds).toHaveLength(0)
     })
 
     it('returns no alert when metric equals threshold (below comparison)', () => {
@@ -89,8 +112,9 @@ describe('evaluateKillRules', () => {
             message: 'Test kill alert',
         }]
 
-        const alerts = evaluateKillRules(metrics, rules)
+        const { alerts, suppressedRuleIds } = evaluateKillRules(metrics, rules)
         expect(alerts).toHaveLength(0)
+        expect(suppressedRuleIds).toHaveLength(0)
     })
 
     it('returns no alert when metric is above threshold (below comparison)', () => {
@@ -108,8 +132,78 @@ describe('evaluateKillRules', () => {
             message: 'Test kill alert',
         }]
 
-        const alerts = evaluateKillRules(metrics, rules)
+        const { alerts, suppressedRuleIds } = evaluateKillRules(metrics, rules)
         expect(alerts).toHaveLength(0)
+        expect(suppressedRuleIds).toHaveLength(0)
+    })
+
+    it('skips rule and adds to suppressedRuleIds when target metric is null', () => {
+        const metrics: RollingMetrics = {
+            dqe7d: 100,
+            firstActionRate7d: null,
+            completionRate7d: 0.50,
+            d1ReturnRate7d: 0.20,
+        }
+        const rules: KillRule[] = [{
+            id: 'test_kill_null',
+            metric: 'firstActionRate7d',
+            threshold: 0.50,
+            comparison: 'below',
+            message: 'Test kill alert',
+        }]
+
+        const { alerts, suppressedRuleIds } = evaluateKillRules(metrics, rules)
+        expect(alerts).toHaveLength(0)
+        expect(suppressedRuleIds).toEqual(['test_kill_null'])
+    })
+
+    it('evaluates non-null rules and suppresses null-metric rules independently', () => {
+        const metrics: RollingMetrics = {
+            dqe7d: 100,
+            firstActionRate7d: null,
+            completionRate7d: 0.20,
+            d1ReturnRate7d: 0.20,
+        }
+        const rules: KillRule[] = [
+            {
+                id: 'kill_null_metric',
+                metric: 'firstActionRate7d',
+                threshold: 0.50,
+                comparison: 'below',
+                message: 'Null metric kill',
+            },
+            {
+                id: 'kill_triggered',
+                metric: 'completionRate7d',
+                threshold: 0.30,
+                comparison: 'below',
+                message: 'Completion rate kill',
+            },
+        ]
+
+        const { alerts, suppressedRuleIds } = evaluateKillRules(metrics, rules)
+        expect(alerts).toHaveLength(1)
+        expect(alerts[0]?.ruleId).toBe('kill_triggered')
+        expect(suppressedRuleIds).toEqual(['kill_null_metric'])
+    })
+
+    it('returns empty suppressedRuleIds when all metrics are non-null', () => {
+        const metrics: RollingMetrics = {
+            dqe7d: 100,
+            firstActionRate7d: 0.60,
+            completionRate7d: 0.50,
+            d1ReturnRate7d: 0.20,
+        }
+        const rules: KillRule[] = [{
+            id: 'test_kill',
+            metric: 'firstActionRate7d',
+            threshold: 0.50,
+            comparison: 'below',
+            message: 'Test kill alert',
+        }]
+
+        const { suppressedRuleIds } = evaluateKillRules(metrics, rules)
+        expect(suppressedRuleIds).toHaveLength(0)
     })
 })
 
@@ -129,10 +223,11 @@ describe('evaluateScaleRules', () => {
             message: 'Test scale alert',
         }]
 
-        const alerts = evaluateScaleRules(metrics, rules)
+        const { alerts, suppressedRuleIds } = evaluateScaleRules(metrics, rules)
         expect(alerts).toHaveLength(1)
         expect(alerts[0]?.type).toBe('scale')
         expect(alerts[0]?.ruleId).toBe('test_scale')
+        expect(suppressedRuleIds).toHaveLength(0)
     })
 
     it('returns no alert when metric equals threshold (above comparison)', () => {
@@ -150,8 +245,48 @@ describe('evaluateScaleRules', () => {
             message: 'Test scale alert',
         }]
 
-        const alerts = evaluateScaleRules(metrics, rules)
+        const { alerts, suppressedRuleIds } = evaluateScaleRules(metrics, rules)
         expect(alerts).toHaveLength(0)
+        expect(suppressedRuleIds).toHaveLength(0)
+    })
+
+    it('skips rule and adds to suppressedRuleIds when target metric is null', () => {
+        const metrics: RollingMetrics = {
+            dqe7d: null,
+            firstActionRate7d: 0.60,
+            completionRate7d: 0.50,
+            d1ReturnRate7d: 0.45,
+        }
+        const rules: ScaleRule[] = [{
+            id: 'test_scale_null',
+            metric: 'dqe7d',
+            threshold: 1000,
+            comparison: 'above',
+            message: 'Test scale alert',
+        }]
+
+        const { alerts, suppressedRuleIds } = evaluateScaleRules(metrics, rules)
+        expect(alerts).toHaveLength(0)
+        expect(suppressedRuleIds).toEqual(['test_scale_null'])
+    })
+
+    it('returns empty suppressedRuleIds when all metrics are non-null', () => {
+        const metrics: RollingMetrics = {
+            dqe7d: 1000,
+            firstActionRate7d: 0.60,
+            completionRate7d: 0.50,
+            d1ReturnRate7d: 0.45,
+        }
+        const rules: ScaleRule[] = [{
+            id: 'test_scale',
+            metric: 'dqe7d',
+            threshold: 500,
+            comparison: 'above',
+            message: 'Test scale alert',
+        }]
+
+        const { suppressedRuleIds } = evaluateScaleRules(metrics, rules)
+        expect(suppressedRuleIds).toHaveLength(0)
     })
 })
 
@@ -292,8 +427,8 @@ describe('Rolling Average Computation — Property 6', () => {
         )
     })
 
-    it('returns 0 for empty array', () => {
-        expect(computeRollingAverage([])).toBe(0)
+    it('returns null for empty array', () => {
+        expect(computeRollingAverage([])).toBeNull()
     })
 })
 
@@ -340,7 +475,7 @@ describe('Kill and Scale Rule Evaluation — Property 7', () => {
                 }
 
                 const killRule: KillRule = { ...rule, metric: metricKey }
-                const alerts = evaluateKillRules(metrics, [killRule])
+                const { alerts, suppressedRuleIds } = evaluateKillRules(metrics, [killRule])
 
                 const shouldTrigger = rule.comparison === 'below'
                     ? metricValue < rule.threshold
@@ -356,6 +491,8 @@ describe('Kill and Scale Rule Evaluation — Property 7', () => {
                 } else {
                     expect(alerts).toHaveLength(0)
                 }
+                // All metrics are non-null, so no suppression
+                expect(suppressedRuleIds).toHaveLength(0)
             }),
             { numRuns: 100 },
         )
@@ -379,7 +516,7 @@ describe('Kill and Scale Rule Evaluation — Property 7', () => {
                 }
 
                 const scaleRule: ScaleRule = { ...rule, metric: metricKey }
-                const alerts = evaluateScaleRules(metrics, [scaleRule])
+                const { alerts, suppressedRuleIds } = evaluateScaleRules(metrics, [scaleRule])
 
                 const shouldTrigger = rule.comparison === 'below'
                     ? metricValue < rule.threshold
@@ -395,6 +532,8 @@ describe('Kill and Scale Rule Evaluation — Property 7', () => {
                 } else {
                     expect(alerts).toHaveLength(0)
                 }
+                // All metrics are non-null, so no suppression
+                expect(suppressedRuleIds).toHaveLength(0)
             }),
             { numRuns: 100 },
         )
@@ -413,10 +552,22 @@ describe('Dashboard Markdown Formatting — Property 8', () => {
      * and roadmap phase number and day count.
      */
     const rollingMetricsArb = fc.record({
-        dqe7d: fc.double({ min: 0, max: 10000, noNaN: true, noDefaultInfinity: true }),
-        firstActionRate7d: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
-        completionRate7d: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
-        d1ReturnRate7d: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+        dqe7d: fc.oneof(
+            fc.double({ min: 0, max: 10000, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
+        firstActionRate7d: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
+        completionRate7d: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
+        d1ReturnRate7d: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
     })
 
     const alertArb = fc.record({
@@ -441,10 +592,25 @@ describe('Dashboard Markdown Formatting — Property 8', () => {
         firstActions: fc.nat({ max: 10000 }),
         completions: fc.nat({ max: 10000 }),
         resultCopies: fc.nat({ max: 10000 }),
-        firstActionRate: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
-        completionRate: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
-        d1ReturnRate: fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+        helpTaps: fc.nat({ max: 10000 }),
+        firstActionRate: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
+        completionRate: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
+        d1ReturnRate: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
         estimatedDQE: fc.nat({ max: 10000 }),
+        dq: fc.record({ firstActionMissing: fc.boolean() }),
+        helpTapRate: fc.oneof(
+            fc.double({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
+            fc.constant(null),
+        ),
     })
 
     const dashboardDataArb: fc.Arbitrary<DashboardData> = fc.record({
@@ -454,6 +620,8 @@ describe('Dashboard Markdown Formatting — Property 8', () => {
         alerts: fc.array(alertArb, { minLength: 0, maxLength: 5 }),
         currentPhase: phaseArb,
         seasonParticipants: fc.nat({ max: 10000 }),
+        dqSuppressedRuleIds: fc.array(fc.stringMatching(/^[a-z_]{1,20}$/), { minLength: 0, maxLength: 3 }),
+        backfillPolicy: fc.constant('no-backfill' as const),
     })
 
     it('contains metric values in the markdown table', () => {
@@ -461,10 +629,10 @@ describe('Dashboard Markdown Formatting — Property 8', () => {
             fc.property(dashboardDataArb, (data) => {
                 const md = formatDashboardMarkdown(data)
 
-                expect(md).toContain(String(data.rolling.dqe7d))
-                expect(md).toContain(String(data.rolling.firstActionRate7d))
-                expect(md).toContain(String(data.rolling.completionRate7d))
-                expect(md).toContain(String(data.rolling.d1ReturnRate7d))
+                if (data.rolling.dqe7d !== null) expect(md).toContain(String(data.rolling.dqe7d))
+                if (data.rolling.firstActionRate7d !== null) expect(md).toContain(String(data.rolling.firstActionRate7d))
+                if (data.rolling.completionRate7d !== null) expect(md).toContain(String(data.rolling.completionRate7d))
+                if (data.rolling.d1ReturnRate7d !== null) expect(md).toContain(String(data.rolling.d1ReturnRate7d))
             }),
             { numRuns: 100 },
         )
@@ -616,10 +784,13 @@ const makeDashboardData = (overrides: Partial<DashboardData> = {}): DashboardDat
         firstActions: 60,
         completions: 30,
         resultCopies: 5,
+        helpTaps: 5,
         firstActionRate: 0.6,
         completionRate: 0.5,
         d1ReturnRate: 0.2,
         estimatedDQE: 30,
+        dq: { firstActionMissing: false },
+        helpTapRate: 0.05,
     },
     rolling: {
         dqe7d: 25,
@@ -636,5 +807,7 @@ const makeDashboardData = (overrides: Partial<DashboardData> = {}): DashboardDat
         suggestedActions: ['Pitch to 2 subreddit mods today'],
     },
     seasonParticipants: 10,
+    dqSuppressedRuleIds: [],
+    backfillPolicy: 'no-backfill',
     ...overrides,
 })

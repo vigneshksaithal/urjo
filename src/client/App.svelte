@@ -25,6 +25,8 @@
 		resetMistakes,
 		setPuzzleData,
 	} from "./stores/mistakes";
+	import { hydrateFromServer, resetHints } from "./stores/hints";
+	import { fireOnce, resetLatch } from "./stores/first-action";
 
 	type EconomyResponse = {
 		coins: number;
@@ -81,6 +83,14 @@
 	let seasonRank = $state<number | null>(null);
 	let seasonPoints = $state(0);
 	let isMod = $state(false);
+	let notifyOptIn = $state(false);
+	let hintsDismissed = $state<{
+		numberConstraint: boolean;
+		adjacencyViolation: boolean;
+	}>({
+		numberConstraint: false,
+		adjacencyViolation: false,
+	});
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -113,6 +123,7 @@
 	});
 
 	async function loadGame() {
+		resetLatch();
 		try {
 			const response = await fetch("/api/game/state");
 			if (!response.ok) throw new Error("Failed to load game");
@@ -144,6 +155,15 @@
 			isFirstTimeUser = data.isFirstTimeUser ?? false;
 			puzzleNumber = data.puzzleNumber ?? 0;
 			isMod = data.isMod ?? false;
+
+			// Hydrate notify opt-in and hints dismissed from GameState
+			notifyOptIn = data.notifyOptIn ?? false;
+			const serverHintsDismissed = data.hintsDismissed ?? {
+				numberConstraint: false,
+				adjacencyViolation: false,
+			};
+			hintsDismissed = serverHintsDismissed;
+			hydrateFromServer(serverHintsDismissed);
 
 			if (data.communityStats) {
 				communityStats = data.communityStats;
@@ -177,14 +197,10 @@
 			resetMistakes();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
-			if (!data.tutorialCompleted) {
-				currentView = "tutorial";
-			} else if (data.isFirstTimeUser && data.tutorialCompleted) {
-				// Tutorial done but never solved a puzzle — show first screen
-				currentView = "first-screen";
-			} else {
-				currentView = "game";
-			}
+			// Reqs 7.1, 7.2, 7.3: all users — new or returning — go directly to
+			// GameView. tutorialCompleted and isFirstTimeUser are preserved for
+			// compatibility but no longer gate the view.
+			currentView = "game";
 
 			// Load economy data
 			loadEconomy();
@@ -245,6 +261,9 @@
 
 		// Track mistakes: check previous cell when moving to a new one
 		onCellChange(row, col, color, grid, gridSize);
+
+		// Fire first-action POST exactly once per session (fire-and-forget)
+		void fireOnce("");
 
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
@@ -396,6 +415,8 @@
 	async function handleNextChallenge() {
 		hasChallenged = false;
 		challengeUrl = null;
+		resetLatch();
+		resetHints();
 		try {
 			const timeSpent = Math.round((Date.now() - startTime) / 1000);
 			const response = await fetch("/api/game/next-challenge", {
@@ -432,6 +453,8 @@
 	function handleRestart() {
 		hasChallenged = false;
 		challengeUrl = null;
+		resetLatch();
+		resetHints();
 		grid = deserializeGrid(
 			puzzleColors,
 			puzzleNumbers,
@@ -452,6 +475,8 @@
 	async function handleGridSizeChange(newSize: number) {
 		const previousSize = gridSizePreference;
 		gridSizePreference = newSize;
+		resetLatch();
+		resetHints();
 
 		try {
 			const response = await fetch("/api/game/grid-size", {
@@ -500,12 +525,8 @@
 		}
 
 		tutorialCompleted = true;
-		// After tutorial, check if first-time user
-		if (isFirstTimeUser) {
-			currentView = "first-screen";
-		} else {
-			currentView = "game";
-		}
+		// Req 7.1: always go to GameView after tutorial — no FirstScreen gate.
+		currentView = "game";
 	}
 
 	/**
@@ -575,6 +596,8 @@
 			seasonRank,
 			seasonPoints,
 			currentSeason,
+			notifyOptIn,
+			hintsDismissed,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}

@@ -51,8 +51,11 @@ import { getMissionState, saveMissionState, updateMissionProgress } from '../lib
 import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
-import { trackPostOpen, trackFirstAction, trackCompletion, trackResultCopy } from '../lib/analytics'
+import { trackPostOpen, trackFirstAction, trackCompletion, trackResultCopy, trackHelpTap } from '../lib/analytics'
+import { getHintsDismissed, markHintDismissed } from '../lib/hints'
+import type { HintKind } from '../lib/hints'
 import { isModeratorCached } from '../lib/moderator'
+import { isOptedIn } from '../lib/notify'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
 import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, incrementSharesCount } from '../lib/social'
 import { serializeResultCard } from '../../shared/result-card'
@@ -472,34 +475,14 @@ gameRouter.get('/api/game/state', async (c) => {
 			console.error('[Analytics] Post open tracking failed (non-critical):', err)
 		}
 
-		// ─── First-screen data for new users ───────────────────────────────────
-		let firstScreen: {
-			samplePuzzle: SerializedPuzzle
-			instruction: string
-			communityStats: { activePlayers: number; collectiveStreakDays: number }
-		} | undefined
+		// ─── Notify opt-in and hints dismissal (for GameView) ────────────────
+		const [notifyOptIn, hintsDismissed] = await Promise.all([
+			isOptedIn(userId),
+			getHintsDismissed(userId),
+		])
 
 		const economy = await getUserEconomy(userId)
 		const isFirstTimeUser = economy.totalSolves === 0
-
-		if (isFirstTimeUser) {
-			const samplePuzzle = generatePuzzleForGridLevel(4 as GridSize, 1)
-			let activePlayers = 0
-			let collectiveStreakDays = 0
-			try {
-				const cachedActive = await redis.get('stats:activePlayers:7d')
-				activePlayers = cachedActive !== undefined ? parseInt(cachedActive, 10) : 0
-				const cachedStreaks = await redis.get('stats:collectiveStreaks')
-				collectiveStreakDays = cachedStreaks !== undefined ? parseInt(cachedStreaks, 10) : 0
-			} catch {
-				// non-critical — defaults to 0
-			}
-			firstScreen = {
-				samplePuzzle,
-				instruction: 'Tap cells to color them. Fill the grid so each row and column has equal reds and blues.',
-				communityStats: { activePlayers, collectiveStreakDays },
-			}
-		}
 
 		// ─── Puzzle number ─────────────────────────────────────────────────────
 		let puzzleNumber: number | undefined
@@ -550,9 +533,11 @@ gameRouter.get('/api/game/state', async (c) => {
 			...(communityStats !== undefined && { communityStats }),
 			isMod,
 			currentSeason,
+			notifyOptIn,
+			hintsDismissed,
 		}
 
-		return c.json({ ...gameState, ...(firstScreen !== undefined && { firstScreen }) })
+		return c.json(gameState)
 	} catch (error) {
 		console.error('Error fetching game state:', error)
 		return c.json({ error: 'Failed to fetch game state' }, 500)
@@ -629,6 +614,24 @@ gameRouter.post('/api/game/first-action', async (c) => {
 		return c.json({ tracked: isNew })
 	} catch (error) {
 		console.error('[Analytics] First action tracking failed:', error)
+		return c.json({ tracked: false })
+	}
+})
+
+// ─── POST /api/game/help-tap ──────────────────────────────────────────────────
+
+gameRouter.post('/api/game/help-tap', async (c) => {
+	const { postId, userId } = context
+
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const today = getTodayUTC()
+		const tracked = await trackHelpTap(today, postId, userId)
+		return c.json({ tracked })
+	} catch (error) {
+		console.error('[Analytics] Help tap tracking failed:', error)
 		return c.json({ tracked: false })
 	}
 })
@@ -1184,6 +1187,34 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 	} catch (error) {
 		console.error('Error posting result comment:', error)
 		return c.json({ error: 'Failed to post result comment' }, 500)
+	}
+})
+
+// ─── POST /api/game/hints/dismiss ────────────────────────────────────────────
+
+const VALID_HINT_KINDS: readonly HintKind[] = ['numberConstraint', 'adjacencyViolation']
+
+gameRouter.post('/api/game/hints/dismiss', async (c) => {
+	const { userId } = context
+
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const body = await c.req.json().catch(() => null)
+		if (!body || typeof body !== 'object') {
+			return c.json({ error: 'Invalid request body' }, 400)
+		}
+
+		const { kind } = body as Record<string, unknown>
+		if (typeof kind !== 'string' || !(VALID_HINT_KINDS as readonly string[]).includes(kind)) {
+			return c.json({ error: 'Invalid request body' }, 400)
+		}
+
+		await markHintDismissed(userId, kind as HintKind)
+		return c.json({ dismissed: true })
+	} catch (error) {
+		console.error('Error dismissing hint:', error)
+		return c.json({ error: 'Failed to dismiss hint' }, 500)
 	}
 })
 

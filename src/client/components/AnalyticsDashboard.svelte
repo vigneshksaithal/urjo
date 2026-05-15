@@ -47,7 +47,8 @@
         }
     }
 
-    const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
+    const pct = (n: number | null): string =>
+        n === null ? "—" : `${(n * 100).toFixed(1)}%`;
     const num = (n: number): string => n.toLocaleString();
 
     function alertBg(type: "kill" | "scale"): string {
@@ -214,7 +215,7 @@
                         </div>
 
                         <!-- Alerts -->
-                        {#if latest.alerts.length > 0}
+                        {#if latest.alerts.length > 0 || latest.dqSuppressedRuleIds.length > 0}
                             <div class="space-y-2">
                                 <p
                                     class="text-xs text-theme-text-muted uppercase tracking-wide flex items-center gap-1"
@@ -222,7 +223,7 @@
                                     <AlertTriangle class="w-3 h-3" />
                                     Alerts
                                 </p>
-                                {#each latest.alerts as alert}
+                                {#each latest.alerts.filter((a) => !latest.dqSuppressedRuleIds.includes(a.ruleId)) as alert}
                                     <div
                                         class="rounded-lg border px-3 py-2 text-sm {alertBg(
                                             alert.type,
@@ -237,6 +238,16 @@
                                         </span>
                                     </div>
                                 {/each}
+                                {#if latest.dqSuppressedRuleIds.length > 0}
+                                    <div
+                                        class="rounded-lg border border-theme-border bg-theme-hover px-3 py-2 text-sm text-theme-text-muted"
+                                    >
+                                        ℹ️ {latest.dqSuppressedRuleIds.length}
+                                        {latest.dqSuppressedRuleIds.length === 1
+                                            ? "rule"
+                                            : "rules"} suppressed due to data quality
+                                    </div>
+                                {/if}
                             </div>
                         {/if}
 
@@ -258,7 +269,19 @@
                                     <p
                                         class="text-xl font-bold text-theme-text-primary mt-0.5"
                                     >
-                                        {num(Math.round(latest.rolling.dqe7d))}
+                                        {latest.rolling.dqe7d === null
+                                            ? "—"
+                                            : num(
+                                                  Math.round(
+                                                      latest.rolling.dqe7d,
+                                                  ),
+                                              )}
+                                        {#if latest.rolling.dqe7d === null}
+                                            <span
+                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
+                                                >DQ</span
+                                            >
+                                        {/if}
                                     </p>
                                 </div>
                                 <div
@@ -269,14 +292,23 @@
                                     </p>
                                     <p
                                         class="text-xl font-bold {latest.rolling
-                                            .d1ReturnRate7d >= 0.4
-                                            ? 'text-emerald-400'
-                                            : latest.rolling.d1ReturnRate7d <
-                                                0.15
-                                              ? 'text-red-400'
-                                              : 'text-theme-text-primary'} mt-0.5"
+                                            .d1ReturnRate7d === null
+                                            ? 'text-theme-text-muted'
+                                            : latest.rolling.d1ReturnRate7d >=
+                                                0.4
+                                              ? 'text-emerald-400'
+                                              : latest.rolling.d1ReturnRate7d <
+                                                  0.15
+                                                ? 'text-red-400'
+                                                : 'text-theme-text-primary'} mt-0.5"
                                     >
                                         {pct(latest.rolling.d1ReturnRate7d)}
+                                        {#if latest.rolling.d1ReturnRate7d === null}
+                                            <span
+                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
+                                                >DQ</span
+                                            >
+                                        {/if}
                                     </p>
                                 </div>
                                 <div
@@ -287,11 +319,20 @@
                                     </p>
                                     <p
                                         class="text-xl font-bold {latest.rolling
-                                            .firstActionRate7d >= 0.5
-                                            ? 'text-emerald-400'
-                                            : 'text-red-400'} mt-0.5"
+                                            .firstActionRate7d === null
+                                            ? 'text-theme-text-muted'
+                                            : latest.rolling
+                                                    .firstActionRate7d >= 0.5
+                                              ? 'text-emerald-400'
+                                              : 'text-red-400'} mt-0.5"
                                     >
                                         {pct(latest.rolling.firstActionRate7d)}
+                                        {#if latest.rolling.firstActionRate7d === null}
+                                            <span
+                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
+                                                >DQ</span
+                                            >
+                                        {/if}
                                     </p>
                                 </div>
                                 <div
@@ -302,11 +343,20 @@
                                     </p>
                                     <p
                                         class="text-xl font-bold {latest.rolling
-                                            .completionRate7d >= 0.3
-                                            ? 'text-emerald-400'
-                                            : 'text-red-400'} mt-0.5"
+                                            .completionRate7d === null
+                                            ? 'text-theme-text-muted'
+                                            : latest.rolling.completionRate7d >=
+                                                0.3
+                                              ? 'text-emerald-400'
+                                              : 'text-red-400'} mt-0.5"
                                     >
                                         {pct(latest.rolling.completionRate7d)}
+                                        {#if latest.rolling.completionRate7d === null}
+                                            <span
+                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
+                                                >DQ</span
+                                            >
+                                        {/if}
                                     </p>
                                 </div>
                             </div>
@@ -386,8 +436,15 @@
                                     >
                                         <td
                                             class="px-3 py-2 text-theme-text-muted font-mono"
-                                            >{d.date}</td
                                         >
+                                            {d.date}
+                                            {#if d.daily.dq.firstActionMissing}
+                                                <span
+                                                    class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
+                                                    >DQ</span
+                                                >
+                                            {/if}
+                                        </td>
                                         <td
                                             class="px-3 py-2 text-right text-theme-text-primary"
                                             >{num(d.daily.postOpens)}</td
@@ -402,41 +459,52 @@
                                         >
                                         <td
                                             class="px-3 py-2 text-right {d.daily
-                                                .firstActionRate >= 0.5
-                                                ? 'text-emerald-400'
-                                                : d.daily.firstActionRate > 0
-                                                  ? 'text-red-400'
-                                                  : 'text-theme-text-muted'}"
-                                        >
-                                            {d.daily.postOpens > 0
-                                                ? pct(d.daily.firstActionRate)
-                                                : "—"}
-                                        </td>
-                                        <td
-                                            class="px-3 py-2 text-right {d.daily
-                                                .completionRate >= 0.3
-                                                ? 'text-emerald-400'
-                                                : d.daily.completionRate > 0
-                                                  ? 'text-red-400'
-                                                  : 'text-theme-text-muted'}"
-                                        >
-                                            {d.daily.firstActions > 0
-                                                ? pct(d.daily.completionRate)
-                                                : "—"}
-                                        </td>
-                                        <td
-                                            class="px-3 py-2 text-right {d.daily
-                                                .d1ReturnRate >= 0.4
-                                                ? 'text-emerald-400'
-                                                : d.daily.d1ReturnRate >= 0.15
-                                                  ? 'text-theme-text-primary'
-                                                  : d.daily.d1ReturnRate > 0
+                                                .firstActionRate === null
+                                                ? 'text-theme-text-muted'
+                                                : d.daily.firstActionRate >= 0.5
+                                                  ? 'text-emerald-400'
+                                                  : d.daily.firstActionRate > 0
                                                     ? 'text-red-400'
                                                     : 'text-theme-text-muted'}"
                                         >
-                                            {d.daily.d1ReturnRate > 0
-                                                ? pct(d.daily.d1ReturnRate)
-                                                : "—"}
+                                            {d.daily.firstActionRate === null
+                                                ? "—"
+                                                : d.daily.postOpens > 0
+                                                  ? pct(d.daily.firstActionRate)
+                                                  : "—"}
+                                        </td>
+                                        <td
+                                            class="px-3 py-2 text-right {d.daily
+                                                .completionRate === null
+                                                ? 'text-theme-text-muted'
+                                                : d.daily.completionRate >= 0.3
+                                                  ? 'text-emerald-400'
+                                                  : d.daily.completionRate > 0
+                                                    ? 'text-red-400'
+                                                    : 'text-theme-text-muted'}"
+                                        >
+                                            {d.daily.completionRate === null
+                                                ? "—"
+                                                : d.daily.firstActions > 0
+                                                  ? pct(d.daily.completionRate)
+                                                  : "—"}
+                                        </td>
+                                        <td
+                                            class="px-3 py-2 text-right {d.daily
+                                                .d1ReturnRate === null
+                                                ? 'text-theme-text-muted'
+                                                : d.daily.d1ReturnRate >= 0.4
+                                                  ? 'text-emerald-400'
+                                                  : d.daily.d1ReturnRate >= 0.15
+                                                    ? 'text-theme-text-primary'
+                                                    : d.daily.d1ReturnRate > 0
+                                                      ? 'text-red-400'
+                                                      : 'text-theme-text-muted'}"
+                                        >
+                                            {d.daily.d1ReturnRate === null ||
+                                            d.daily.d1ReturnRate <= 0
+                                                ? "—"
+                                                : pct(d.daily.d1ReturnRate)}
                                         </td>
                                     </tr>
                                 {/each}
