@@ -8,8 +8,16 @@ import {
     trackFirstAction,
     trackCompletion,
     trackResultCopy,
+    trackResultComment,
+    trackChallengePostCreated,
+    trackChallengeOpen,
+    trackChallengeCompletion,
+    trackNotifyOptIn,
+    trackSubscribeTap,
     getDailyMetrics,
     computeD1ReturnRatePure,
+    computeReturnRateForDate,
+    computeKFactorPure,
 } from '../analytics'
 
 // ─── trackPostOpen ─────────────────────────────────────────────────────────────
@@ -115,6 +123,70 @@ testResultCopy('trackResultCopy increments counter (not deduplicated)', async ()
 
     const counter = await redis.get('analytics:2025-01-15:result_copies')
     expect(counter).toBe('3')
+})
+
+const testGrowthEvents = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testGrowthEvents('growth tracking records DAE and K-factor inputs', async () => {
+    await trackFirstAction('2025-01-15', 't3_daily', 't2_solver', 't5_testsub')
+    await trackCompletion('2025-01-15', 't3_daily', 't2_solver', 't5_testsub')
+    await trackResultComment('2025-01-15', 't2_solver')
+    await trackChallengePostCreated('2025-01-15', 't2_solver', 't3_challenge')
+    await trackChallengeOpen('2025-01-15', 't3_challenge', 't2_newbie')
+    await trackChallengeCompletion('2025-01-15', 't3_challenge', 't2_newbie', true)
+    await trackNotifyOptIn('2025-01-15', 't2_solver')
+    await trackSubscribeTap('2025-01-15', 't2_solver')
+
+    const metrics = await getDailyMetrics('2025-01-15')
+
+    expect(metrics.growth?.dailyActiveEngagers).toBe(2)
+    expect(metrics.growth?.resultComments).toBe(1)
+    expect(metrics.growth?.challengePosts).toBe(1)
+    expect(metrics.growth?.challengeOpens).toBe(1)
+    expect(metrics.growth?.challengeCompletions).toBe(1)
+    expect(metrics.growth?.newPlayerChallengeCompletions).toBe(1)
+    expect(metrics.growth?.notifyOptIns).toBe(1)
+    expect(metrics.growth?.subscribeTaps).toBe(1)
+    expect(metrics.growth?.challengePostsPerCompleter).toBe(1)
+    expect(metrics.growth?.newCompletersPerChallenge).toBe(1)
+})
+
+const testReturnRate = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testReturnRate('computeReturnRateForDate reads persisted completion cohorts', async () => {
+    await trackCompletion('2025-01-15', 't3_d1', 't2_u1', 't5_testsub')
+    await trackCompletion('2025-01-15', 't3_d1', 't2_u2', 't5_testsub')
+    await trackCompletion('2025-01-16', 't3_d2', 't2_u2', 't5_testsub')
+    await trackCompletion('2025-01-16', 't3_d2', 't2_u3', 't5_testsub')
+
+    expect(await computeReturnRateForDate('2025-01-15', 1)).toBe(0.5)
+})
+
+describe('computeKFactorPure', () => {
+    it('multiplies challenge actions, new completers, and retained share', () => {
+        expect(computeKFactorPure({
+            completions: 20,
+            challengePosts: 5,
+            newPlayerChallengeCompletions: 10,
+            challengeD1RetainedShare: 0.4,
+        })).toBe(0.2)
+    })
+
+    it('returns 0 when there are no completions or no challenge posts', () => {
+        expect(computeKFactorPure({
+            completions: 0,
+            challengePosts: 5,
+            newPlayerChallengeCompletions: 10,
+            challengeD1RetainedShare: 0.4,
+        })).toBe(0)
+
+        expect(computeKFactorPure({
+            completions: 20,
+            challengePosts: 0,
+            newPlayerChallengeCompletions: 10,
+            challengeD1RetainedShare: 0.4,
+        })).toBe(0)
+    })
 })
 
 // ─── getDailyMetrics ───────────────────────────────────────────────────────────

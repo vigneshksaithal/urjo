@@ -262,7 +262,8 @@ const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
     ...formatLeaderboardSection('🔥 **Top Streaks**', streakLeaders, (s) => `${s} days`),
     ...formatLeaderboardSection('⚡ **Fastest Yesterday**', speedLeaders, (s) => `${s}s`),
     ...formatLeaderboardSection('🪙 **Coin Leaders**', coinsLeaders, (s) => s.toLocaleString('en-US')),
-    '⬆️ Upvote to keep the game alive!',
+    'Comment your result from the game to join the scoreboard.',
+    'Create one Rival Challenge after a strong solve to start a beat-my-time chain.',
     'Good luck! 🍀',
   ].join('\n')
 }
@@ -316,7 +317,7 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
     const brandingEmoji = subredditConfig.brandingEmoji
 
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
-    const title = `${brandingEmoji} Urjo Puzzle #${puzzleNumber} — Can you solve it?`
+    const title = `${brandingEmoji} Urjo Puzzle #${puzzleNumber} — Beat today's board`
 
     console.log(`[Scheduler] Creating post: ${title}`)
 
@@ -444,6 +445,10 @@ app.post('/internal/on-post-create', async (c: Context) => {
   }
 
   if (meta.redditGamesCrosspostId !== undefined) {
+    return c.json({ status: 'ok' }, 200)
+  }
+
+  if (meta.redditGamesCrosspostApproved !== 'true') {
     return c.json({ status: 'ok' }, 200)
   }
 

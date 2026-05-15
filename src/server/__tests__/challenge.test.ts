@@ -346,10 +346,13 @@ challengeTest('challenge route: returns comments URL and increments challengesCr
 
     const body = await res.json() as { success: boolean; postUrl?: string }
     const social = await redis.hGetAll('user:t2_challenger:social')
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    const challengePosts = await redis.get(`analytics:${today}:challenge_posts`)
 
     expect(body.success).toBe(true)
     expect(body.postUrl).toBe('https://reddit.com/comments/newposturl')
     expect(social['challengesCreated']).toBe('1')
+    expect(challengePosts).toBe('1')
 })
 
 challengeTest('challenge route: initializes stats with attempts=0 and beats=0', async () => {

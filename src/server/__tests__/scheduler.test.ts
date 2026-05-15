@@ -149,6 +149,27 @@ test('scheduler analytics reply contains markdown table with DQE and rates', asy
     expect(text).toContain('Phase')
 })
 
+test('scheduler sticky comment does not ask for upvotes', async () => {
+    mockRedditApis('t3_no_vote_ask')
+
+    await withCtx(() => schedulerRequest())
+
+    const firstComment = vi.mocked(reddit.submitComment).mock.calls[0]?.[0] as { text: string } | undefined
+    expect(firstComment?.text).toBeDefined()
+    expect(firstComment?.text.toLowerCase()).not.toContain('upvote')
+})
+
+test('scheduler sticky comment packages the daily scoreboard and result flow', async () => {
+    mockRedditApis('t3_scoreboard_packaging')
+
+    await withCtx(() => schedulerRequest())
+
+    const firstComment = vi.mocked(reddit.submitComment).mock.calls[0]?.[0] as { text: string } | undefined
+    expect(firstComment?.text).toContain("Today's Missions")
+    expect(firstComment?.text).toContain("Yesterday's Stars")
+    expect(firstComment?.text).toContain('Comment your result from the game')
+})
+
 test('scheduler posts season recap comment on Mondays', async () => {
     // Mock Date to be a Monday (UTC day 1)
     const monday = new Date('2025-01-06T16:00:00Z') // Jan 6, 2025 is a Monday

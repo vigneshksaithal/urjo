@@ -34,10 +34,27 @@ test('POST /internal/on-post-create returns 200 with ok status for tagged puzzle
   expect(body).toEqual({ status: 'ok' })
 })
 
-test('POST /internal/on-post-create crossposts tagged app puzzle posts to r/RedditGames', async () => {
+test('POST /internal/on-post-create does not crosspost tagged puzzle posts by default', async () => {
   const crosspostSpy = vi.spyOn(reddit, 'crosspost').mockResolvedValue({ id: 't3_cross2' } as never)
   vi.spyOn(reddit, 'getAppUser').mockResolvedValue({ username: 'urjo-game-app' } as never)
   await redis.hSet('game:t3_xyz789:meta', { [URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE })
+
+  await app.request('/internal/on-post-create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(makePostCreateBody('xyz789', 'Test Puzzle')),
+  })
+
+  expect(crosspostSpy).not.toHaveBeenCalled()
+})
+
+test('POST /internal/on-post-create crossposts only when explicitly approved', async () => {
+  const crosspostSpy = vi.spyOn(reddit, 'crosspost').mockResolvedValue({ id: 't3_cross2' } as never)
+  vi.spyOn(reddit, 'getAppUser').mockResolvedValue({ username: 'urjo-game-app' } as never)
+  await redis.hSet('game:t3_xyz789:meta', {
+    [URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+    redditGamesCrosspostApproved: 'true',
+  })
 
   await app.request('/internal/on-post-create', {
     method: 'POST',
@@ -86,7 +103,10 @@ test('POST /internal/on-post-create skips posts not created by the app user', as
 test('POST /internal/on-post-create returns 500 when qualifying crosspost fails', async () => {
   vi.spyOn(reddit, 'crosspost').mockRejectedValue(new Error('crosspost failed'))
   vi.spyOn(reddit, 'getAppUser').mockResolvedValue({ username: 'urjo-game-app' } as never)
-  await redis.hSet('game:t3_abc123:meta', { [URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE })
+  await redis.hSet('game:t3_abc123:meta', {
+    [URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+    redditGamesCrosspostApproved: 'true',
+  })
 
   const res = await app.request('/internal/on-post-create', {
     method: 'POST',
@@ -119,7 +139,10 @@ test('POST /internal/on-post-create skips posts that were already crossposted', 
 test('POST /internal/on-post-create stores the created crosspost id for dedupe', async () => {
   vi.spyOn(reddit, 'crosspost').mockResolvedValue({ id: 't3_cross7' } as never)
   vi.spyOn(reddit, 'getAppUser').mockResolvedValue({ username: 'urjo-game-app' } as never)
-  await redis.hSet('game:t3_store123:meta', { [URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE })
+  await redis.hSet('game:t3_store123:meta', {
+    [URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+    redditGamesCrosspostApproved: 'true',
+  })
 
   const res = await app.request('/internal/on-post-create', {
     method: 'POST',

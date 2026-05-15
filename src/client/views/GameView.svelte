@@ -10,6 +10,10 @@
 	import type { SeasonInfo } from "../../shared/growth-types";
 	import { validateGrid } from "../lib/validation";
 	import { hintShownStore, markShown } from "../stores/hints";
+	import {
+		getCompletionCtas,
+		type CompletionCtaId,
+	} from "../lib/completion-ctas";
 	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -117,17 +121,14 @@
 	let showShareConfirm = $state(false);
 	let showChallengeConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
-	let hasFiredConfetti = $state(false);
 	let showMissions = $state(false);
 	let showAchievements = $state(false);
 	let showProfile = $state(false);
-	let showMysteryBox = $state(false);
-	let showStreakMilestone = $state(false);
-	let mysteryBoxDismissed = $state(false);
-	let milestoneDismissed = $state(false);
+	let dismissedMysteryBoxKey = $state<string | null>(null);
+	let dismissedMilestoneKey = $state<string | null>(null);
 	let showSeasonLeaderboard = $state(false);
 	let hasCommentedResult = $state(false);
-	let showMoreActions = $state(false);
+	let openMoreActionsKey = $state<string | null>(null);
 	let showOptInTutorial = $state(false);
 
 	// Notify toggle — initialised from prop, updated optimistically on tap (Reqs 13.1–13.5)
@@ -145,31 +146,6 @@
 
 	// Tracks whether the help-tap POST has already fired this session (Req 11.1).
 	let helpTapFired = $state(false);
-
-	$effect(() => {
-		if (isCompleted && !hasFiredConfetti) {
-			hasFiredConfetti = true;
-		} else if (!isCompleted) {
-			hasFiredConfetti = false;
-			mysteryBoxDismissed = false;
-			milestoneDismissed = false;
-			showMoreActions = false;
-		}
-	});
-
-	// Show mystery box animation when engagement data arrives with a box reward
-	$effect(() => {
-		if (engagement?.variableReward.mysteryBox && !mysteryBoxDismissed) {
-			showMysteryBox = true;
-		}
-	});
-
-	// Show streak milestone overlay when a milestone is reached
-	$effect(() => {
-		if (engagement?.streakMilestone && !milestoneDismissed) {
-			showStreakMilestone = true;
-		}
-	});
 
 	// ─── Inline hint trigger logic ───────────────────────────────────────────
 	// Wraps the parent's onCellChange to intercept taps and surface inline hints.
@@ -241,12 +217,45 @@
 	const boardSizeStyle = $derived(
 		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: 100%;`,
 	);
+	const currentCompletionKey = $derived(
+		isCompleted ? `${timeTaken ?? 0}:${puzzleColors ?? ""}` : null,
+	);
+	const showConfetti = $derived(isCompleted);
+	const mysteryBoxKey = $derived(
+		engagement?.variableReward.mysteryBox && currentCompletionKey
+			? `${currentCompletionKey}:mystery`
+			: null,
+	);
+	const showMysteryBoxOverlay = $derived(
+		mysteryBoxKey !== null && dismissedMysteryBoxKey !== mysteryBoxKey,
+	);
+	const milestoneKey = $derived(
+		engagement?.streakMilestone && currentCompletionKey
+			? `${currentCompletionKey}:milestone`
+			: null,
+	);
+	const showStreakMilestoneOverlay = $derived(
+		milestoneKey !== null && dismissedMilestoneKey !== milestoneKey,
+	);
+	const showMoreActionsPanel = $derived(
+		currentCompletionKey !== null && openMoreActionsKey === currentCompletionKey,
+	);
 
 	// Tomorrow's streak bonus: current streak + 1 day worth of bonus coins
 	const tomorrowStreakBonus = $derived(
 		streakData.currentStreak > 0
 			? Math.min(streakData.currentStreak + 1, 30)
 			: 1,
+	);
+	const completionCtas = $derived(
+		getCompletionCtas({
+			mistakes,
+			streak: streakData.currentStreak,
+			skillLevel,
+			hasChallenged,
+			challengeUrl,
+			seasonRank,
+		}),
 	);
 
 	function confirmShare(): void {
@@ -257,6 +266,17 @@
 	function confirmChallenge(): void {
 		showChallengeConfirm = false;
 		onChallenge();
+	}
+
+	function handleSocialCta(id: CompletionCtaId): void {
+		if (id === "open-rival-challenge") {
+			openChallenge();
+			return;
+		}
+
+		if (id === "rival-challenge") {
+			showChallengeConfirm = true;
+		}
 	}
 
 	function openChallenge(): void {
@@ -270,13 +290,16 @@
 	}
 
 	function dismissMysteryBox(): void {
-		showMysteryBox = false;
-		mysteryBoxDismissed = true;
+		dismissedMysteryBoxKey = mysteryBoxKey;
 	}
 
 	function dismissMilestone(): void {
-		showStreakMilestone = false;
-		milestoneDismissed = true;
+		dismissedMilestoneKey = milestoneKey;
+	}
+
+	function toggleMoreActions(): void {
+		if (currentCompletionKey === null) return;
+		openMoreActionsKey = showMoreActionsPanel ? null : currentCompletionKey;
 	}
 
 	// Notify toggle handler — optimistic update, revert on failure (Req 13.5)
@@ -511,6 +534,22 @@
 						/>
 					{/if}
 
+					{#if completionCtas.social.length > 0}
+						<div class="grid grid-cols-1 gap-2 w-full">
+							{#each completionCtas.social as cta (cta.id)}
+								<button
+									onclick={() => handleSocialCta(cta.id)}
+									class="px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 active:scale-95 transition-all w-full flex items-center justify-center gap-2"
+								>
+									{#if cta.id === "open-rival-challenge"}
+										<ExternalLink class="w-4 h-4" />
+									{/if}
+									<span>{cta.label}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+
 					<!-- Tomorrow's streak bonus preview -->
 					<div class="text-xs text-theme-text-muted text-center">
 						🔥 Return tomorrow for +{tomorrowStreakBonus} streak bonus
@@ -543,7 +582,7 @@
 						onclick={onNextChallenge}
 						class="px-8 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all w-full"
 					>
-						Next Puzzle
+						{completionCtas.primary.label}
 					</button>
 
 					<!-- (4) Subscribe (non-subscribers only) -->
@@ -558,18 +597,18 @@
 
 					<!-- More menu -->
 					<button
-						onclick={() => (showMoreActions = !showMoreActions)}
+						onclick={toggleMoreActions}
 						class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
 					>
 						<MoreHorizontal class="w-4 h-4" />
 						<span>More</span>
 					</button>
 
-					{#if showMoreActions}
+					{#if showMoreActionsPanel}
 						<div class="grid grid-cols-2 gap-2 w-full">
 							<button
 								onclick={() => {
-									showMoreActions = false;
+									openMoreActionsKey = null;
 									showMissions = true;
 								}}
 								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
@@ -578,7 +617,7 @@
 							</button>
 							<button
 								onclick={() => {
-									showMoreActions = false;
+									openMoreActionsKey = null;
 									showAchievements = true;
 								}}
 								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
@@ -587,7 +626,7 @@
 							</button>
 							<button
 								onclick={() => {
-									showMoreActions = false;
+									openMoreActionsKey = null;
 									showProfile = true;
 								}}
 								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
@@ -597,39 +636,12 @@
 							{#if currentSeason?.isActive}
 								<button
 									onclick={() => {
-										showMoreActions = false;
+										openMoreActionsKey = null;
 										showSeasonLeaderboard = true;
 									}}
 									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
 								>
 									Season
-								</button>
-							{/if}
-							<!-- Challenge Friends moved from primary CTAs (Req 17.3) -->
-							{#if hasChallenged && challengeUrl}
-								<button
-									onclick={() => {
-										showMoreActions = false;
-										openChallenge();
-									}}
-									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
-								>
-									<ExternalLink class="w-3 h-3" />
-									<span>Open Challenge</span>
-								</button>
-							{:else}
-								<button
-									onclick={() => {
-										showMoreActions = false;
-										if (!hasChallenged)
-											showChallengeConfirm = true;
-									}}
-									disabled={hasChallenged}
-									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-								>
-									{hasChallenged
-										? "Challenged!"
-										: "Challenge Friends"}
 								</button>
 							{/if}
 						</div>
@@ -671,7 +683,7 @@
 </div>
 
 <!-- Confetti effect -->
-{#if isCompleted && hasFiredConfetti}
+{#if showConfetti}
 	<ConfettiEffect />
 {/if}
 
@@ -718,7 +730,7 @@
 			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
 		>
 			<h2 class="text-base font-bold text-theme-text-primary">
-				Issue a challenge?
+				Create Rival Challenge?
 			</h2>
 			<p class="text-sm text-theme-text-secondary">
 				This creates a public post in r/urjo with your time{username
@@ -736,7 +748,7 @@
 					onclick={confirmChallenge}
 					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
 				>
-					Post Challenge
+					Create
 				</button>
 			</div>
 		</div>
@@ -803,7 +815,7 @@
 <ProfilePanel isOpen={showProfile} onClose={() => (showProfile = false)} />
 
 <!-- Mystery box animation -->
-{#if showMysteryBox && engagement?.variableReward.mysteryBox}
+{#if showMysteryBoxOverlay && engagement?.variableReward.mysteryBox}
 	<MysteryBoxAnimation
 		reward={engagement.variableReward.mysteryBox}
 		onDismiss={dismissMysteryBox}
@@ -811,7 +823,7 @@
 {/if}
 
 <!-- Streak milestone overlay -->
-{#if showStreakMilestone && engagement?.streakMilestone}
+{#if showStreakMilestoneOverlay && engagement?.streakMilestone}
 	<StreakMilestoneOverlay
 		threshold={engagement.streakMilestone.threshold}
 		bonus={engagement.streakMilestone.bonus}

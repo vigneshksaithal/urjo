@@ -23,7 +23,8 @@ import {
 	getUserDisplay,
 	getUserStreakData,
 } from '../lib/economy'
-import { getSkillLevel } from '../lib/helpers'
+import { getSkillLevel, getTodayUTC } from '../lib/helpers'
+import { trackSubscribeTap } from '../lib/analytics'
 
 export const economyRouter = new Hono()
 
@@ -343,6 +344,7 @@ economyRouter.post('/api/subscribe', async (c) => {
 		await reddit.subscribeToCurrentSubreddit()
 		// Track subscription in Redis so we don't show the prompt again
 		await redis.set(`user:${userId}:subscribed`, 'true')
+		await trackSubscribeTap(getTodayUTC(), userId)
 		return c.json({ success: true })
 	} catch (error) {
 		console.error('Subscribe error:', error)

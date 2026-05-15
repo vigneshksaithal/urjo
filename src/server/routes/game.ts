@@ -20,6 +20,7 @@ import type {
 	ChallengeResponse,
 	SerializedPuzzle,
 	GridSizeResponse,
+	FirstScreenData,
 } from '../../shared/types'
 import { MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
@@ -51,7 +52,17 @@ import { getMissionState, saveMissionState, updateMissionProgress } from '../lib
 import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
-import { trackPostOpen, trackFirstAction, trackCompletion, trackResultCopy, trackHelpTap } from '../lib/analytics'
+import {
+	trackPostOpen,
+	trackFirstAction,
+	trackCompletion,
+	trackResultCopy,
+	trackResultComment,
+	trackChallengePostCreated,
+	trackChallengeOpen,
+	trackChallengeCompletion,
+	trackHelpTap,
+} from '../lib/analytics'
 import { getHintsDismissed, markHintDismissed } from '../lib/hints'
 import type { HintKind } from '../lib/hints'
 import { isModeratorCached } from '../lib/moderator'
@@ -155,6 +166,10 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 
 		// Increment beats counter
 		await redis.hIncrBy(`game:${postId}:stats`, 'beats', 1)
+		await redis.zAdd(`challenge:${postId}:beat_events`, {
+			member: `${winnerId}:${Date.now()}`,
+			score: Date.now(),
+		})
 
 		// Update fastest time if this is a new record
 		const currentFastest = await redis.hGet(`game:${postId}:stats`, 'fastestTime')
@@ -251,6 +266,36 @@ const getCurrentPuzzle = async (
 		solution: puzzle.solution ?? '',
 		difficulty: puzzle.difficulty ?? 'easy',
 		gridSize: puzzle.gridSize ?? '4',
+	}
+}
+
+type FirstScreenTarget = NonNullable<FirstScreenData['targetToBeat']>
+
+const getFirstScreenTarget = async (
+	date: string,
+	gridSize: number,
+	postPuzzleMeta: Record<string, string> | undefined,
+	viewerId: string,
+): Promise<FirstScreenTarget | undefined> => {
+	const challengeScore = postPuzzleMeta?.challengeScore
+	if (challengeScore) {
+		const seconds = parseInt(challengeScore, 10)
+		if (!Number.isNaN(seconds) && seconds > 0) {
+			const challengerId = postPuzzleMeta?.challengeBy
+			return {
+				seconds,
+				...(challengerId !== undefined && { username: await fetchUsername(challengerId, viewerId) }),
+			}
+		}
+	}
+
+	const leaders = await redis.zRange(`leaderboard:speed:${date}:${gridSize}`, 0, 0, { by: 'rank' })
+	const leader = leaders[0]
+	if (!leader || typeof leader.score !== 'number') return undefined
+
+	return {
+		seconds: leader.score,
+		username: await fetchUsername(leader.member, viewerId),
 	}
 }
 
@@ -465,12 +510,15 @@ gameRouter.get('/api/game/state', async (c) => {
 			difficulty: puzzle.difficulty as 'easy' | 'medium' | 'hard' | 'diabolical',
 			gridSize: parseInt(puzzle.gridSize, 10),
 		}
+		const today = getTodayUTC()
 
 		// ─── Analytics: track post open (non-blocking) ────────────────────────
 		try {
 			const { subredditId } = context
-			const today = getTodayUTC()
 			await trackPostOpen(today, postId, userId, subredditId)
+			if (isChallenge) {
+				await trackChallengeOpen(today, postId, userId)
+			}
 		} catch (err) {
 			console.error('[Analytics] Post open tracking failed (non-critical):', err)
 		}
@@ -509,6 +557,19 @@ gameRouter.get('/api/game/state', async (c) => {
 		// ─── Current season info ───────────────────────────────────────────────
 		const currentSeason = getCurrentSeason()
 
+		const firstScreenTarget = isFirstTimeUser
+			? await getFirstScreenTarget(today, serializedPuzzle.gridSize, postPuzzleMeta, userId)
+			: undefined
+
+		const firstScreen: FirstScreenData | undefined = isFirstTimeUser
+			? {
+				samplePuzzle: serializedPuzzle,
+				instruction: 'Fill each row and column with equal reds and blues.',
+				communityStats: communityStats ?? { activePlayers: 0, collectiveStreakDays: 0 },
+				...(firstScreenTarget !== undefined && { targetToBeat: firstScreenTarget }),
+			}
+			: undefined
+
 		// ─── Moderator check (non-critical, used to show analytics UI) ─────────
 		let isMod = false
 		try {
@@ -535,6 +596,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			currentSeason,
 			notifyOptIn,
 			hintsDismissed,
+			...(firstScreen !== undefined && { firstScreen }),
 		}
 
 		return c.json(gameState)
@@ -724,7 +786,8 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 		// Track attempts on challenge posts (once per user)
 		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
-		if (puzzleMeta?.challengeBy) {
+		const isChallengePost = Boolean(puzzleMeta?.challengeBy)
+		if (isChallengePost) {
 			const attemptedKey = `challenge:${postId}:attempted:${userId}`
 			const alreadyAttempted = await redis.get(attemptedKey)
 			if (!alreadyAttempted) {
@@ -857,6 +920,9 @@ gameRouter.post('/api/game/complete', async (c) => {
 			const { subredditId } = context
 			const today = getTodayUTC()
 			await trackCompletion(today, postId, userId, subredditId)
+			if (isChallengePost) {
+				await trackChallengeCompletion(today, postId, userId, preCompletionEconomy.totalSolves === 0)
+			}
 		} catch (err) {
 			console.error('[Analytics] Completion tracking failed (non-critical):', err)
 		}
@@ -1091,6 +1157,7 @@ gameRouter.post('/api/game/share', async (c) => {
 		await redis.set(sharedKey, 'true')
 		await Promise.all([
 			trackResultCopy(getTodayUTC()),
+			trackResultComment(getTodayUTC(), userId),
 			incrementSharesCount(userId),
 		])
 
@@ -1180,6 +1247,7 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 		await redis.expire(dedupKey, RESULT_COMMENT_TTL)
 		await Promise.all([
 			trackResultCopy(getTodayUTC()),
+			trackResultComment(getTodayUTC(), userId),
 			incrementSharesCount(userId),
 		])
 
@@ -1256,6 +1324,9 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		// Get current puzzle for this post
 		const puzzle = await getCurrentPuzzle(postId, userId)
 		if (!puzzle) return c.json<ChallengeResponse>({ success: false, error: 'No puzzle found' })
+		const sourceMeta = await redis.hGetAll(`game:${postId}:meta`)
+		const sourceChainLength = parseInt(sourceMeta?.challengeChainLength ?? '0', 10)
+		const challengeChainLength = sourceChainLength + 1
 
 		// Get username directly from Reddit API to avoid "You" fallback
 		let username = 'Anon'
@@ -1302,6 +1373,8 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			created: new Date().toISOString(),
 			challengeBy: userId,
 			challengeScore: timeTaken.toString(),
+			sourcePostId: postId,
+			challengeChainLength: challengeChainLength.toString(),
 		})
 
 		// Initialize stats for the challenge post
@@ -1338,9 +1411,11 @@ Think you can beat it? Play above! 🎯`,
 			stickyCommentId: leaderboardComment.id,
 			sourcePostId: postId,
 			challengeCreatorId: userId,
+			challengeChainLength: challengeChainLength.toString(),
 			createdAt: Date.now().toString(),
 		})
 		await incrementChallengesCreated(userId)
+		await trackChallengePostCreated(today, userId, newPost.id)
 
 		return c.json<ChallengeResponse>({ success: true, postUrl: redditCommentsUrl(newPost.id) })
 	} catch (error) {

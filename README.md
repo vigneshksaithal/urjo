@@ -1,35 +1,36 @@
-# Devvit Svelte Example
+# Urjo
 
-This is a simple example of a Devvit app using Svelte.
+Urjo is a Devvit webview puzzle game built for Reddit posts. Players solve compact red/blue logic boards, build streaks, earn rewards, compare times, and optionally create Rival Challenge posts for other redditors to beat.
 
-## Running the app
+## Growth Loop
 
-1. Run `npm run dev` to start the development server.
-2. Run `npm run build` to build the app.
-3. Run `npm run deploy` to deploy the app.
-4. Run `npm run launch` to launch the app.
-5. Run `npm run check` to check the app.
+- Daily flagship puzzle post with scoreboard, missions, and yesterday's stars.
+- First-time players see a custom first screen with the live puzzle preview, one rule, community proof, and a time to beat.
+- Completion keeps `Next Puzzle` primary and promotes explicit `Comment Result` and `Create Rival Challenge` actions.
+- Rival Challenge posts carry source attribution, chain length, beat events, and leaderboard comments so the loop can be measured instead of guessed.
+- Analytics track Daily Active Engagers, D1/D3 return cohorts, challenge post creation, challenge opens, new-player completions, retained challenge completers, and K-factor.
 
-## Configure devvit.json
+## Compliance Posture
 
-- **name**: the app's username shown in Devvit. e.g "delete23423"
-- **label**: text shown in the subreddit menu
-- **description**: short helper text under the label
-- **subreddit**: subreddit to test against (e.g., "cat543")
+Urjo keeps Reddit actions explicit and separate. The app does not ask for votes, force posting, force subscribing, mass-tag users, or auto-crosspost every puzzle. The `r/RedditGames` crosspost path is disabled by default and only runs when the post metadata explicitly approves it.
 
-```json
-{
-  "name": "your-app-username",
-  "menu": {
-    "items": [
-      {
-        "label": "Create Post",
-        "description": "Start a new post"
-      }
-    ]
-  },
-  "dev": {
-    "subreddit": "cat543"
-  }
-}
+## Development
+
+```bash
+bun install
+bun run test
+bun run type-check
+bun run check
+bun run dev
 ```
+
+## Architecture
+
+```text
+src/
+  client/   Svelte 5 webview UI
+  server/   Hono routes, scheduler, Reddit actions, Redis persistence
+  shared/   Shared TypeScript types and pure helpers
+```
+
+The app runs inside a Reddit post through Devvit, with data flowing from Svelte to Hono routes and then to Redis or Reddit APIs.

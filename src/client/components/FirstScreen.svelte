@@ -1,73 +1,114 @@
 <script lang="ts">
+    import type { SerializedPuzzle } from "../../shared/types";
+
+    type PreviewCell = {
+        color: "red" | "blue" | null;
+        number: number | null;
+    };
+
+    type TargetToBeat = {
+        seconds: number;
+        username?: string;
+    };
+
     type Props = {
+        puzzle: SerializedPuzzle;
         puzzleNumber?: number;
+        instruction?: string;
         communityStats?: {
             activePlayers: number;
             collectiveStreakDays: number;
         };
+        targetToBeat?: TargetToBeat | undefined;
         onPlay: () => void;
     };
 
     let {
+        puzzle,
         puzzleNumber = 0,
+        instruction = "Fill each row and column with equal reds and blues.",
         communityStats = { activePlayers: 0, collectiveStreakDays: 0 },
+        targetToBeat = undefined,
         onPlay,
     }: Props = $props();
 
-    // 4×4 sample puzzle with 2-3 pre-colored cells
-    const SAMPLE_GRID: (string | null)[][] = [
-        ["red", null, null, null],
-        [null, null, "blue", null],
-        [null, "red", null, null],
-        [null, null, null, null],
-    ];
+    const previewCells = $derived(buildPreviewCells(puzzle));
+    const previewStyle = $derived(
+        `grid-template-columns: repeat(${puzzle.gridSize}, minmax(0, 1fr));`,
+    );
+    const targetLabel = $derived(formatTarget(targetToBeat));
 
     function getCellClass(cell: string | null): string {
         if (cell === "red") return "bg-urjo-coral";
         if (cell === "blue") return "bg-urjo-blue";
         return "bg-theme-bg-secondary border border-theme-border";
     }
+
+    function buildPreviewCells(source: SerializedPuzzle): PreviewCell[] {
+        return source.colors.split("").map((color, index) => {
+            const numberChar = source.numbers[index];
+            return {
+                color:
+                    color === "r" ? "red" : color === "b" ? "blue" : null,
+                number:
+                    numberChar !== undefined && /\d/.test(numberChar)
+                        ? parseInt(numberChar, 10)
+                        : null,
+            };
+        });
+    }
+
+    function formatTarget(target: TargetToBeat | undefined): string {
+        if (!target) return "Set the first time to beat today";
+        if (target.username && target.username !== "Anon") {
+            return `Beat ${target.username}'s ${target.seconds}s`;
+        }
+        return `Beat ${target.seconds}s`;
+    }
 </script>
 
 <div
-    class="h-full w-full overflow-hidden flex flex-col items-center justify-center p-6 gap-5"
+    class="h-full w-full overflow-hidden flex flex-col items-center justify-center px-5 py-4 gap-4"
 >
-    <!-- Logo and puzzle number -->
-    <div class="flex flex-col items-center gap-1">
-        <h1 class="text-3xl font-bold text-theme-text-primary">🧩 Urjo</h1>
+    <div class="flex flex-col items-center gap-1 text-center">
+        <h1 class="text-3xl font-bold text-theme-text-primary">Urjo</h1>
         {#if puzzleNumber > 0}
             <p class="text-sm text-theme-text-muted">Puzzle #{puzzleNumber}</p>
         {/if}
     </div>
 
-    <!-- Sample 4×4 puzzle -->
-    <div class="grid grid-cols-4 gap-1.5 w-40">
-        {#each SAMPLE_GRID as row}
-            {#each row as cell}
-                <div
-                    class="aspect-square rounded-md {getCellClass(cell)}"
-                ></div>
-            {/each}
+    <div
+        class="grid gap-1.5 w-[min(78vw,13rem)] aspect-square"
+        style={previewStyle}
+        aria-label="Puzzle preview"
+    >
+        {#each previewCells as cell, index (index)}
+            <div
+                class="aspect-square rounded-md flex items-center justify-center text-xs font-bold text-theme-text-primary {getCellClass(
+                    cell.color,
+                )}"
+            >
+                {cell.number ?? ""}
+            </div>
         {/each}
     </div>
 
-    <!-- Instruction -->
-    <p
-        class="text-sm text-theme-text-secondary text-center max-w-xs leading-relaxed"
-    >
-        Tap cells to color them. Fill the grid so each row and column has equal
-        reds and blues.
-    </p>
+    <div class="flex flex-col items-center gap-1 text-center max-w-xs">
+        <p class="text-sm font-semibold text-theme-text-primary">
+            {targetLabel}
+        </p>
+        <p class="text-sm text-theme-text-secondary leading-relaxed">
+            {instruction}
+        </p>
+    </div>
 
-    <!-- Play CTA -->
     <button
         onclick={onPlay}
-        class="px-10 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-lg hover:opacity-90 active:scale-95 transition-all shadow-lg"
+        class="px-10 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all shadow-lg"
     >
         Play
     </button>
 
-    <!-- Community stats -->
     {#if communityStats.activePlayers > 0 || communityStats.collectiveStreakDays > 0}
         <p class="text-xs text-theme-text-muted text-center">
             👥 {communityStats.activePlayers.toLocaleString()} active players · 🔥

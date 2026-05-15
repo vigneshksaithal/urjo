@@ -6,7 +6,7 @@
 
 import { redis } from '@devvit/web/server'
 
-import type { DailyMetrics } from '../../shared/growth-types'
+import type { DailyMetrics, GrowthLoopMetrics } from '../../shared/growth-types'
 
 // ─── TTL Constants ─────────────────────────────────────────────────────────────
 
@@ -30,8 +30,44 @@ const resultCopyCounterKey = (date: string): string =>
 const helpTapCounterKey = (date: string): string =>
     `analytics:${date}:help_taps`
 
+const resultCommentCounterKey = (date: string): string =>
+    `analytics:${date}:result_comments`
+
+const challengePostCounterKey = (date: string): string =>
+    `analytics:${date}:challenge_posts`
+
+const challengeOpenCounterKey = (date: string): string =>
+    `analytics:${date}:challenge_opens`
+
+const challengeCompletionCounterKey = (date: string): string =>
+    `analytics:${date}:challenge_completions`
+
+const newPlayerChallengeCompletionCounterKey = (date: string): string =>
+    `analytics:${date}:new_player_challenge_completions`
+
+const notifyOptInCounterKey = (date: string): string =>
+    `analytics:${date}:notify_opt_ins`
+
+const subscribeTapCounterKey = (date: string): string =>
+    `analytics:${date}:subscribe_taps`
+
 const subredditCompletionKey = (date: string, subredditId: string): string =>
     `analytics:${date}:completions:subreddit:${subredditId}`
+
+const dailyActiveEngagersKey = (date: string): string =>
+    `analytics:${date}:daily_active_engagers`
+
+const completionUsersKey = (date: string): string =>
+    `analytics:${date}:completion_users`
+
+const challengeNewCompletionUsersKey = (date: string): string =>
+    `analytics:${date}:challenge_new_completion_users`
+
+const challengePostCreatorsKey = (date: string): string =>
+    `analytics:${date}:challenge_post_creators`
+
+const challengePostIdsKey = (date: string): string =>
+    `analytics:${date}:challenge_post_ids`
 
 const seenDedupKey = (date: string, postId: string, userId: string): string =>
     `analytics:seen:${date}:${postId}:${userId}`
@@ -41,6 +77,12 @@ const actedDedupKey = (date: string, postId: string, userId: string): string =>
 
 const completedDedupKey = (postId: string, userId: string): string =>
     `analytics:completed:${postId}:${userId}`
+
+const challengeOpenedDedupKey = (date: string, postId: string, userId: string): string =>
+    `analytics:challenge_opened:${date}:${postId}:${userId}`
+
+const challengeCompletedDedupKey = (postId: string, userId: string): string =>
+    `analytics:challenge_completed:${postId}:${userId}`
 
 const userCompletionDatesKey = (userId: string): string =>
     `analytics:user:${userId}:completion_dates`
@@ -59,6 +101,24 @@ const trySetDedup = async (key: string, ttl: number): Promise<boolean> => {
     await redis.set(key, '1')
     await redis.expire(key, ttl)
     return true
+}
+
+const dateToTimestamp = (date: string): number =>
+    new Date(`${date}T00:00:00Z`).getTime()
+
+const addDays = (date: string, days: number): string => {
+    const value = new Date(`${date}T00:00:00Z`)
+    value.setUTCDate(value.getUTCDate() + days)
+    const iso = value.toISOString().split('T')[0]
+    if (iso === undefined) throw new Error(`Failed to format date from ${date} + ${days} days`)
+    return iso
+}
+
+const trackDailyActiveEngager = async (date: string, userId: string): Promise<void> => {
+    await redis.zAdd(dailyActiveEngagersKey(date), {
+        member: userId,
+        score: Date.now(),
+    })
 }
 
 // ─── Event Tracking ────────────────────────────────────────────────────────────
@@ -93,7 +153,10 @@ export const trackFirstAction = async (
     const isNew = await trySetDedup(actedDedupKey(date, postId, userId), TTL_24H)
     if (!isNew) return false
 
-    await redis.incrBy(firstActionCounterKey(date), 1)
+    await Promise.all([
+        redis.incrBy(firstActionCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ])
     return true
 }
 
@@ -111,12 +174,14 @@ export const trackCompletion = async (
     const isNew = await trySetDedup(completedDedupKey(postId, userId), TTL_48H)
     if (!isNew) return false
 
-    const dateTimestamp = new Date(`${date}T00:00:00Z`).getTime()
+    const dateTimestamp = dateToTimestamp(date)
 
     await Promise.all([
         redis.incrBy(completionCounterKey(date), 1),
         redis.incrBy(subredditCompletionKey(date, subredditId), 1),
+        redis.zAdd(completionUsersKey(date), { member: userId, score: dateTimestamp }),
         redis.zAdd(userCompletionDatesKey(userId), { member: date, score: dateTimestamp }),
+        trackDailyActiveEngager(date, userId),
     ])
 
     return true
@@ -127,6 +192,102 @@ export const trackCompletion = async (
  */
 export const trackResultCopy = async (date: string): Promise<void> => {
     await redis.incrBy(resultCopyCounterKey(date), 1)
+}
+
+/**
+ * Track an explicit Reddit result comment. This is a stronger engagement signal
+ * than copying/rendering the result card because it creates public post activity.
+ */
+export const trackResultComment = async (date: string, userId: string): Promise<void> => {
+    await Promise.all([
+        redis.incrBy(resultCommentCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ])
+}
+
+/**
+ * Track an explicitly created Rival Challenge post.
+ */
+export const trackChallengePostCreated = async (
+    date: string,
+    creatorId: string,
+    postId: string,
+): Promise<void> => {
+    await Promise.all([
+        redis.incrBy(challengePostCounterKey(date), 1),
+        redis.zAdd(challengePostCreatorsKey(date), {
+            member: creatorId,
+            score: Date.now(),
+        }),
+        redis.zAdd(challengePostIdsKey(date), {
+            member: postId,
+            score: Date.now(),
+        }),
+        trackDailyActiveEngager(date, creatorId),
+    ])
+}
+
+/**
+ * Track a challenge post open, deduplicated per user/post/day.
+ */
+export const trackChallengeOpen = async (
+    date: string,
+    postId: string,
+    userId: string,
+): Promise<boolean> => {
+    const isNew = await trySetDedup(challengeOpenedDedupKey(date, postId, userId), TTL_24H)
+    if (!isNew) return false
+
+    await Promise.all([
+        redis.incrBy(challengeOpenCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ])
+    return true
+}
+
+/**
+ * Track a challenge completion, deduplicated per user/post.
+ */
+export const trackChallengeCompletion = async (
+    date: string,
+    postId: string,
+    userId: string,
+    isNewPlayer: boolean,
+): Promise<boolean> => {
+    const isNew = await trySetDedup(challengeCompletedDedupKey(postId, userId), TTL_48H)
+    if (!isNew) return false
+
+    const writes: Promise<unknown>[] = [
+        redis.incrBy(challengeCompletionCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ]
+
+    if (isNewPlayer) {
+        writes.push(
+            redis.incrBy(newPlayerChallengeCompletionCounterKey(date), 1),
+            redis.zAdd(challengeNewCompletionUsersKey(date), {
+                member: userId,
+                score: dateToTimestamp(date),
+            }),
+        )
+    }
+
+    await Promise.all(writes)
+    return true
+}
+
+export const trackNotifyOptIn = async (date: string, userId: string): Promise<void> => {
+    await Promise.all([
+        redis.incrBy(notifyOptInCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ])
+}
+
+export const trackSubscribeTap = async (date: string, userId: string): Promise<void> => {
+    await Promise.all([
+        redis.incrBy(subscribeTapCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ])
 }
 
 /**
@@ -157,6 +318,11 @@ const readCounter = async (key: string): Promise<number> => {
     return value !== undefined ? parseInt(value, 10) : 0
 }
 
+const readSortedSetMembers = async (key: string): Promise<string[]> => {
+    const entries = await redis.zRange(key, 0, -1, { by: 'rank' })
+    return entries.map((entry) => entry.member)
+}
+
 /**
  * Safely divide numerator by denominator, returning 0 when denominator is 0.
  */
@@ -170,6 +336,71 @@ const safeDivide = (numerator: number, denominator: number): number =>
  */
 const isFirstActionMissing = (completions: number, firstActions: number): boolean =>
     completions > 0 && firstActions === 0
+
+export type KFactorInput = {
+    completions: number
+    challengePosts: number
+    newPlayerChallengeCompletions: number
+    challengeD1RetainedShare: number
+}
+
+export const computeKFactorPure = ({
+    completions,
+    challengePosts,
+    newPlayerChallengeCompletions,
+    challengeD1RetainedShare,
+}: KFactorInput): number => {
+    if (completions <= 0 || challengePosts <= 0) return 0
+
+    const challengePostsPerCompleter = safeDivide(challengePosts, completions)
+    const newCompletersPerChallenge = safeDivide(newPlayerChallengeCompletions, challengePosts)
+
+    return challengePostsPerCompleter * newCompletersPerChallenge * challengeD1RetainedShare
+}
+
+const readGrowthMetrics = async (date: string, completions: number): Promise<GrowthLoopMetrics> => {
+    const [
+        dailyActiveEngagers,
+        resultComments,
+        challengePosts,
+        challengeOpens,
+        challengeCompletions,
+        newPlayerChallengeCompletions,
+        notifyOptIns,
+        subscribeTaps,
+        challengeD1RetainedShare,
+    ] = await Promise.all([
+        readSortedSetMembers(dailyActiveEngagersKey(date)).then((members) => members.length),
+        readCounter(resultCommentCounterKey(date)),
+        readCounter(challengePostCounterKey(date)),
+        readCounter(challengeOpenCounterKey(date)),
+        readCounter(challengeCompletionCounterKey(date)),
+        readCounter(newPlayerChallengeCompletionCounterKey(date)),
+        readCounter(notifyOptInCounterKey(date)),
+        readCounter(subscribeTapCounterKey(date)),
+        computeChallengeReturnRateForDate(date, 1),
+    ])
+
+    return {
+        dailyActiveEngagers,
+        resultComments,
+        challengePosts,
+        challengeOpens,
+        challengeCompletions,
+        newPlayerChallengeCompletions,
+        notifyOptIns,
+        subscribeTaps,
+        challengePostsPerCompleter: safeDivide(challengePosts, completions),
+        newCompletersPerChallenge: safeDivide(newPlayerChallengeCompletions, challengePosts),
+        challengeD1RetainedShare,
+        kFactor: computeKFactorPure({
+            completions,
+            challengePosts,
+            newPlayerChallengeCompletions,
+            challengeD1RetainedShare,
+        }),
+    }
+}
 
 /**
  * Get daily metrics for a given date.
@@ -200,6 +431,12 @@ export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
 
     const helpTapRate: number | null = postOpens === 0 ? null : safeDivide(helpTaps, postOpens)
 
+    const [d1ReturnRate, d3ReturnRate, growth] = await Promise.all([
+        computeD1ReturnRate(date),
+        computeReturnRateForDate(date, 3),
+        readGrowthMetrics(date, completions),
+    ])
+
     return {
         date,
         postOpens,
@@ -209,10 +446,12 @@ export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
         helpTaps,
         firstActionRate,
         completionRate,
-        d1ReturnRate: 0,
+        d1ReturnRate,
+        d3ReturnRate,
         estimatedDQE: completions,
         dq: { firstActionMissing: dqFirstActionMissing },
         helpTapRate,
+        growth,
     }
 }
 
@@ -235,6 +474,26 @@ export const computeD1ReturnRatePure = (
     return intersectionCount / dayDUsers.length
 }
 
+export const computeReturnRateForDate = async (date: string, days: number): Promise<number> => {
+    const returnDate = addDays(date, days)
+    const [dayDUsers, returnUsers] = await Promise.all([
+        readSortedSetMembers(completionUsersKey(date)),
+        readSortedSetMembers(completionUsersKey(returnDate)),
+    ])
+
+    return computeD1ReturnRatePure(dayDUsers, returnUsers)
+}
+
+const computeChallengeReturnRateForDate = async (date: string, days: number): Promise<number> => {
+    const returnDate = addDays(date, days)
+    const [challengeCompleters, returnUsers] = await Promise.all([
+        readSortedSetMembers(challengeNewCompletionUsersKey(date)),
+        readSortedSetMembers(completionUsersKey(returnDate)),
+    ])
+
+    return computeD1ReturnRatePure(challengeCompleters, returnUsers)
+}
+
 /**
  * Compute D1 return rate for a given date.
  * Returns the cached rate if already computed, or 0 if not yet available.
@@ -242,9 +501,12 @@ export const computeD1ReturnRatePure = (
  */
 export const computeD1ReturnRate = async (date: string): Promise<number> => {
     const cachedRate = await redis.get(`analytics:${date}:d1_return_rate`)
-    if (cachedRate !== undefined) return parseFloat(cachedRate)
+    if (cachedRate !== undefined) {
+        const parsed = parseFloat(cachedRate)
+        if (!Number.isNaN(parsed)) return parsed
+    }
 
-    return 0
+    return computeReturnRateForDate(date, 1)
 }
 
 /**

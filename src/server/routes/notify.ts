@@ -7,6 +7,8 @@
 import { Hono } from 'hono'
 import { context } from '@devvit/web/server'
 import { addOptIn, removeOptIn } from '../lib/notify'
+import { trackNotifyOptIn } from '../lib/analytics'
+import { getTodayUTC } from '../lib/helpers'
 
 const HTTP_STATUS_UNAUTHORIZED = 401
 
@@ -23,6 +25,7 @@ notifyRouter.post('/api/game/notify/opt-in', async (c) => {
 
     try {
         await addOptIn(userId)
+        await trackNotifyOptIn(getTodayUTC(), userId)
         return c.json({ optedIn: true })
     } catch (error) {
         console.error('[Notify] Opt-in failed:', error)

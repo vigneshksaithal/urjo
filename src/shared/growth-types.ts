@@ -29,9 +29,27 @@ export type DailyMetrics = {
     firstActionRate: number | null
     completionRate: number | null
     d1ReturnRate: number | null
+    d3ReturnRate?: number | null
     estimatedDQE: number
     dq: { firstActionMissing: boolean }
     helpTapRate: number | null
+    growth?: GrowthLoopMetrics
+}
+
+/** Reddit-native growth loop metrics for a single date */
+export type GrowthLoopMetrics = {
+    dailyActiveEngagers: number
+    resultComments: number
+    challengePosts: number
+    challengeOpens: number
+    challengeCompletions: number
+    newPlayerChallengeCompletions: number
+    notifyOptIns: number
+    subscribeTaps: number
+    challengePostsPerCompleter: number
+    newCompletersPerChallenge: number
+    challengeD1RetainedShare: number
+    kFactor: number
 }
 
 /** 7-day rolling averages for key growth metrics */

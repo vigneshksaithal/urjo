@@ -372,7 +372,7 @@
                             <div
                                 class="rounded-lg border border-theme-border overflow-hidden"
                             >
-                                {#each [{ label: "Post Opens", value: num(latest.daily.postOpens) }, { label: "First Actions", value: num(latest.daily.firstActions) }, { label: "Completions", value: num(latest.daily.completions) }, { label: "Result Copies", value: num(latest.daily.resultCopies) }, { label: "Season Players", value: num(latest.seasonParticipants) }] as row, i}
+                                {#each [{ label: "Post Opens", value: num(latest.daily.postOpens) }, { label: "First Actions", value: num(latest.daily.firstActions) }, { label: "Completions", value: num(latest.daily.completions) }, { label: "D3 Return", value: pct(latest.daily.d3ReturnRate ?? null) }, { label: "Daily Engagers", value: num(latest.daily.growth?.dailyActiveEngagers ?? 0) }, { label: "Challenge Posts", value: num(latest.daily.growth?.challengePosts ?? 0) }, { label: "K", value: (latest.daily.growth?.kFactor ?? 0).toFixed(2) }, { label: "Season Players", value: num(latest.seasonParticipants) }] as row, i}
                                     <div
                                         class="flex justify-between px-3 py-2 text-sm {i %
                                             2 ===

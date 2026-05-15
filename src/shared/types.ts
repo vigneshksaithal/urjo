@@ -29,6 +29,16 @@ export type CommunityStats = {
 	collectiveStreakDays: number
 }
 
+export type FirstScreenData = {
+	samplePuzzle: SerializedPuzzle
+	instruction: string
+	communityStats: CommunityStats
+	targetToBeat?: {
+		seconds: number
+		username?: string
+	}
+}
+
 export type GameState = {
 	puzzle: SerializedPuzzle
 	tutorialCompleted: boolean
@@ -50,6 +60,7 @@ export type GameState = {
 	}
 	notifyOptIn?: boolean
 	hintsDismissed?: { numberConstraint: boolean; adjacencyViolation: boolean }
+	firstScreen?: FirstScreenData
 }
 
 export type NextChallengeResponse = {
@@ -70,6 +81,8 @@ export type CompleteResponse = {
 	streak?: StreakData
 	coinReward?: CoinReward
 	engagement?: EngagementCompletionData | undefined
+	seasonRank?: number
+	seasonPoints?: number
 }
 
 /** A single game record stored in user history */

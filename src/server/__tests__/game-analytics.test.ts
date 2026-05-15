@@ -99,7 +99,7 @@ testPostOpen('GET /api/game/state deduplicates post_open for same user/post/day'
     vi.restoreAllMocks()
 })
 
-// ─── GET /api/game/state — new users go directly to GameView (no firstScreen) ─
+// ─── GET /api/game/state — new users receive first-screen packaging ─
 
 const testFirstScreen = createDevvitTest({
     userId: 't2_newuser',
@@ -108,7 +108,7 @@ const testFirstScreen = createDevvitTest({
     postId: 't3_testpost',
 })
 
-testFirstScreen('GET /api/game/state does not return firstScreen for new users — they go directly to GameView', async () => {
+testFirstScreen('GET /api/game/state returns firstScreen for new users', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'new_user' } as never)
 
     const newCtx = { ...CTX, userId: 't2_newuser' }
@@ -118,8 +118,7 @@ testFirstScreen('GET /api/game/state does not return firstScreen for new users �
     expect(res.status).toBe(200)
 
     const body = await res.json() as Record<string, unknown>
-    // firstScreen is removed — new users go straight to GameView (Req 7.1, 7.3)
-    expect(body).not.toHaveProperty('firstScreen')
+    expect(body).toHaveProperty('firstScreen')
     // isFirstTimeUser is still present for client-side awareness
     expect(body).toHaveProperty('isFirstTimeUser', true)
 
@@ -268,9 +267,11 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
 
     const today = new Date().toISOString().split('T')[0] ?? ''
     const resultCopies = await withCtx(CTX, () => redis.get(`analytics:${today}:result_copies`))
+    const resultComments = await withCtx(CTX, () => redis.get(`analytics:${today}:result_comments`))
     const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
 
     expect(resultCopies).toBe('1')
+    expect(resultComments).toBe('1')
     expect(social['sharesCount']).toBe('1')
 
     vi.restoreAllMocks()
@@ -433,9 +434,11 @@ testShare('POST /api/game/share tracks result copy and share count on success', 
 
     const today = new Date().toISOString().split('T')[0] ?? ''
     const resultCopies = await withCtx(CTX, () => redis.get(`analytics:${today}:result_copies`))
+    const resultComments = await withCtx(CTX, () => redis.get(`analytics:${today}:result_comments`))
     const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
 
     expect(resultCopies).toBe('1')
+    expect(resultComments).toBe('1')
     expect(social['sharesCount']).toBe('1')
 
     vi.restoreAllMocks()
@@ -535,7 +538,7 @@ testGameStateFields('GET /api/game/state reflects persisted hint dismissal flags
     vi.restoreAllMocks()
 })
 
-testGameStateFields('GET /api/game/state does NOT include firstScreen for new users', async () => {
+testGameStateFields('GET /api/game/state includes firstScreen for new users', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
     await withCtx(STATE_CTX, seedStatePuzzle)
 
@@ -544,7 +547,7 @@ testGameStateFields('GET /api/game/state does NOT include firstScreen for new us
     expect(res.status).toBe(200)
 
     const body = await res.json() as Record<string, unknown>
-    expect(body).not.toHaveProperty('firstScreen')
+    expect(body).toHaveProperty('firstScreen')
 
     vi.restoreAllMocks()
 })

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import type {
 		Grid,
 		CellColor,
@@ -74,10 +75,7 @@
 	let isChallenge = $state(false);
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
 	let puzzleNumber = $state(0);
-	let communityStats = $state<{
-		activePlayers: number;
-		collectiveStreakDays: number;
-	}>({ activePlayers: 0, collectiveStreakDays: 0 });
+	let firstScreen = $state<GameState["firstScreen"] | undefined>(undefined);
 	let currentSeason = $state<SeasonInfo | undefined>(undefined);
 	let isFirstTimeUser = $state(false);
 	let seasonRank = $state<number | null>(null);
@@ -118,8 +116,8 @@
 		return result;
 	}
 
-	$effect(() => {
-		loadGame();
+	onMount(() => {
+		void loadGame();
 	});
 
 	async function loadGame() {
@@ -128,22 +126,7 @@
 			const response = await fetch("/api/game/state");
 			if (!response.ok) throw new Error("Failed to load game");
 
-			const data: GameState & {
-				firstScreen?: {
-					samplePuzzle: {
-						colors: string;
-						numbers: string;
-						solution: string;
-						difficulty: string;
-						gridSize: number;
-					};
-					instruction: string;
-					communityStats: {
-						activePlayers: number;
-						collectiveStreakDays: number;
-					};
-				};
-			} = await response.json();
+			const data: GameState = await response.json();
 
 			puzzleColors = data.puzzle.colors;
 			puzzleNumbers = data.puzzle.numbers;
@@ -153,6 +136,7 @@
 			gridSizePreference = data.gridSizePreference ?? 4;
 			isChallenge = data.isChallenge ?? false;
 			isFirstTimeUser = data.isFirstTimeUser ?? false;
+			firstScreen = data.firstScreen;
 			puzzleNumber = data.puzzleNumber ?? 0;
 			isMod = data.isMod ?? false;
 
@@ -165,9 +149,6 @@
 			hintsDismissed = serverHintsDismissed;
 			hydrateFromServer(serverHintsDismissed);
 
-			if (data.communityStats) {
-				communityStats = data.communityStats;
-			}
 			if (data.currentSeason) {
 				currentSeason = data.currentSeason;
 			}
@@ -197,10 +178,10 @@
 			resetMistakes();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
-			// Reqs 7.1, 7.2, 7.3: all users — new or returning — go directly to
-			// GameView. tutorialCompleted and isFirstTimeUser are preserved for
-			// compatibility but no longer gate the view.
-			currentView = "game";
+			currentView =
+				isFirstTimeUser && !tutorialCompleted && firstScreen
+					? "first-screen"
+					: "game";
 
 			// Load economy data
 			loadEconomy();
@@ -532,7 +513,13 @@
 	/**
 	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
 	 */
-	function handleFirstScreenPlay() {
+	async function handleFirstScreenPlay() {
+		try {
+			await fetch("/api/game/tutorial-complete", { method: "POST" });
+		} catch {
+			// Non-critical — the first-screen state is local for this session.
+		}
+		tutorialCompleted = true;
 		isFirstTimeUser = false;
 		currentView = "game";
 		startTime = Date.now();
@@ -561,11 +548,16 @@
 			isReplay={tutorialCompleted}
 		/>
 	{:else if currentView === "first-screen"}
-		<FirstScreen
-			{puzzleNumber}
-			{communityStats}
-			onPlay={handleFirstScreenPlay}
-		/>
+		{#if firstScreen}
+			<FirstScreen
+				puzzle={firstScreen.samplePuzzle}
+				instruction={firstScreen.instruction}
+				targetToBeat={firstScreen.targetToBeat}
+				{puzzleNumber}
+				communityStats={firstScreen.communityStats}
+				onPlay={handleFirstScreenPlay}
+			/>
+		{/if}
 	{:else if currentView === "game"}
 		{@const gameProps = {
 			grid,
