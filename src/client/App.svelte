@@ -79,7 +79,6 @@
 		collectiveStreakDays: number;
 	}>({ activePlayers: 0, collectiveStreakDays: 0 });
 	let currentSeason = $state<SeasonInfo | undefined>(undefined);
-	let isFirstTimeUser = $state(false);
 	let seasonRank = $state<number | null>(null);
 	let seasonPoints = $state(0);
 	let isMod = $state(false);
@@ -152,7 +151,6 @@
 			skillLevel = data.skillLevel;
 			gridSizePreference = data.gridSizePreference ?? 4;
 			isChallenge = data.isChallenge ?? false;
-			isFirstTimeUser = data.isFirstTimeUser ?? false;
 			puzzleNumber = data.puzzleNumber ?? 0;
 			isMod = data.isMod ?? false;
 
@@ -198,7 +196,7 @@
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
 			// Reqs 7.1, 7.2, 7.3: all users — new or returning — go directly to
-			// GameView. tutorialCompleted and isFirstTimeUser are preserved for
+			// GameView. tutorialCompleted is preserved for
 			// compatibility but no longer gate the view.
 			currentView = "game";
 
@@ -533,7 +531,6 @@
 	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
 	 */
 	function handleFirstScreenPlay() {
-		isFirstTimeUser = false;
 		currentView = "game";
 		startTime = Date.now();
 	}
