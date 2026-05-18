@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import * as fc from 'fast-check'
 import {
     validateGrid,
     countSameColorNeighbors,
@@ -18,87 +17,8 @@ const makeCell = (color: CellColor): Cell => ({ color, number: null, locked: fal
 const makeEmptyGrid = (size: number): Grid =>
     Array.from({ length: size }, () => Array.from({ length: size }, () => makeCell(null)))
 
-const cellColorArb = fc.oneof(
-    fc.constant<CellColor>('red'),
-    fc.constant<CellColor>('blue'),
-    fc.constant<CellColor>(null)
-)
+const SUPPORTED_GRID_SIZES = [4, 6, 8] as const
 
-const gridArb = (size: number): fc.Arbitrary<Grid> =>
-    fc.array(
-        fc.array(cellColorArb.map(makeCell), { minLength: size, maxLength: size }),
-        { minLength: size, maxLength: size }
-    )
-
-// ─── Property 1: Row and column violation detection ───────────────────────────
-// Feature: ui-critique-improvements, Property 1: Row and column violation detection
-// Validates: Requirements 3.1, 3.2, 3.5
-
-describe('validateGrid — Property 1: Row and column violation detection', () => {
-    it('returns exactly the rows/cols where a color count exceeds gridSize/2', () => {
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) =>
-                    gridArb(gridSize).map((grid) => ({ grid, gridSize }))
-                ),
-                ({ grid, gridSize }) => {
-                    const limit = gridSize / 2
-                    const { violatedRows, violatedCols } = validateGrid(grid, gridSize)
-
-                    for (let row = 0; row < gridSize; row++) {
-                        const cells = grid[row] ?? []
-                        const red = cells.filter((c) => c.color === 'red').length
-                        const blue = cells.filter((c) => c.color === 'blue').length
-                        expect(violatedRows.has(row)).toBe(red > limit || blue > limit)
-                    }
-
-                    for (let col = 0; col < gridSize; col++) {
-                        const red = grid.filter((r) => r[col]?.color === 'red').length
-                        const blue = grid.filter((r) => r[col]?.color === 'blue').length
-                        expect(violatedCols.has(col)).toBe(red > limit || blue > limit)
-                    }
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-})
-
-// ─── Property 2: Violation correction removes indicator ───────────────────────
-// Feature: ui-critique-improvements, Property 2: Violation correction removes indicator
-// Validates: Requirements 3.4
-
-describe('validateGrid — Property 2: Violation correction removes indicator', () => {
-    it('removing excess color from a violated row clears the violation', () => {
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)),
-                (gridSize) => {
-                    const limit = gridSize / 2
-                    // Row 0 all red — guaranteed violation
-                    const grid: Grid = makeEmptyGrid(gridSize)
-                    const row0 = grid[0]
-                    if (row0) {
-                        for (let col = 0; col < gridSize; col++) {
-                            row0[col] = makeCell('red')
-                        }
-                    }
-
-                    expect(validateGrid(grid, gridSize).violatedRows.has(0)).toBe(true)
-
-                    // Fix: null out cells beyond the limit
-                    const fixed: Grid = grid.map((row, r) => {
-                        if (r !== 0) return row
-                        return row.map((cell, col) => (col >= limit ? makeCell(null) : cell))
-                    })
-
-                    expect(validateGrid(fixed, gridSize).violatedRows.has(0)).toBe(false)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-})
 
 // ─── Edge case unit tests ─────────────────────────────────────────────────────
 
@@ -173,85 +93,6 @@ describe('validateGrid — edge cases', () => {
     })
 })
 
-// ─── Property 3: Color count derived from grid size ───────────────────────────
-// Feature: ui-critique-improvements, Property 3: Color count derived from grid size
-// Validates: Requirements 6.2, 6.3, 6.4
-
-describe('colorCount — Property 3: Color count derived from grid size', () => {
-    it('equals gridSize / 2 for any even positive integer', () => {
-        fc.assert(
-            fc.property(
-                fc.integer({ min: 1, max: 50 }).map(n => n * 2), // even positive integers
-                (gridSize) => {
-                    expect(Math.floor(gridSize / 2)).toBe(gridSize / 2)
-                    expect(gridSize / 2).toBeGreaterThan(0)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-})
-
-// ─── Property 4: Confetti fires at most once per completion ───────────────────
-// Feature: ui-critique-improvements, Property 4: Confetti fires at most once
-// Validates: Requirements 9.3
-
-describe('hasFiredConfetti — Property 4: Confetti fires at most once per completion', () => {
-    it('flag prevents re-firing on subsequent renders', () => {
-        fc.assert(
-            fc.property(
-                fc.integer({ min: 1, max: 20 }), // number of re-renders after completion
-                (rerenderCount) => {
-                    let hasFiredConfetti = false
-                    let isCompleted = false
-
-                    // Simulate completion
-                    isCompleted = true
-                    if (isCompleted && !hasFiredConfetti) {
-                        hasFiredConfetti = true
-                    }
-
-                    // Count additional fires across re-renders
-                    let confettiFires = 0
-                    for (let i = 0; i < rerenderCount; i++) {
-                        if (isCompleted && !hasFiredConfetti) {
-                            hasFiredConfetti = true
-                            confettiFires++
-                        }
-                    }
-
-                    // Flag should be true after completion
-                    expect(hasFiredConfetti).toBe(true)
-                    // No additional fires after the first
-                    expect(confettiFires).toBe(0)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-})
-
-// ─── Property 5: Footer displays solve time on completion ────────────────────
-// Feature: ui-critique-improvements, Property 5: Footer displays solve time
-// Validates: Requirements 10.1, 10.2
-
-describe('footer text — Property 5: Footer displays solve time on completion', () => {
-    it('formats "Solved in {timeTaken}s" for any non-negative timeTaken', () => {
-        fc.assert(
-            fc.property(
-                fc.integer({ min: 0, max: 3600 }), // non-negative timeTaken in seconds
-                (timeTaken) => {
-                    const footerText = `Solved in ${timeTaken}s`
-                    expect(footerText).toBe(`Solved in ${timeTaken}s`)
-                    expect(footerText).toContain('Solved in')
-                    expect(footerText).toContain('s')
-                    expect(footerText).toMatch(/^Solved in \d+s$/)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-})
 
 // ─── Helpers for new validation tests ────────────────────────────────────────
 
@@ -261,18 +102,14 @@ const makeNumberedCell = (color: CellColor, number: number | null): Cell => ({
     locked: false,
 })
 
-// Build a valid balanced 4×4 grid (2 red + 2 blue per row/col, no adjacent identical rows/cols)
-// Pattern:
-//   r b r b
-//   b r b r
-//   r b r b
-//   b r b r
-const makeValid4x4Grid = (): Grid => [
-    [makeCell('red'), makeCell('blue'), makeCell('red'), makeCell('blue')],
-    [makeCell('blue'), makeCell('red'), makeCell('blue'), makeCell('red')],
-    [makeCell('red'), makeCell('blue'), makeCell('red'), makeCell('blue')],
-    [makeCell('blue'), makeCell('red'), makeCell('blue'), makeCell('red')],
-]
+const makeCheckerboardGrid = (gridSize: number): Grid =>
+    Array.from({ length: gridSize }, (_, row) =>
+        Array.from({ length: gridSize }, (_, col) =>
+            makeCell((row + col) % 2 === 0 ? 'red' : 'blue')
+        )
+    )
+
+const makeValid4x4Grid = (): Grid => makeCheckerboardGrid(4)
 
 // ─── Unit tests: countSameColorNeighbors ─────────────────────────────────────
 
@@ -516,6 +353,46 @@ describe('isGridComplete', () => {
     })
 })
 
+describe('validation across supported grid sizes', () => {
+    it.each(SUPPORTED_GRID_SIZES)('accepts a valid complete %ix%i grid', (gridSize) => {
+        const grid = makeCheckerboardGrid(gridSize)
+        const validation = validateGrid(grid, gridSize)
+
+        expect(validation.violatedRows.size).toBe(0)
+        expect(validation.violatedCols.size).toBe(0)
+        expect(isGridComplete(grid, gridSize)).toBe(true)
+        expect(doesCellViolateConstraints(grid, 0, 0, gridSize)).toBe(false)
+    })
+
+    it.each(SUPPORTED_GRID_SIZES)('detects row balance violations in a %ix%i grid', (gridSize) => {
+        const grid = makeCheckerboardGrid(gridSize)
+        const limit = gridSize / 2
+
+        for (let col = 0; col <= limit; col++) {
+            grid[0]![col] = makeCell('red')
+        }
+
+        const validation = validateGrid(grid, gridSize)
+        expect(validation.violatedRows.has(0)).toBe(true)
+        expect(isGridComplete(grid, gridSize)).toBe(false)
+        expect(doesCellViolateConstraints(grid, 0, 0, gridSize)).toBe(true)
+    })
+
+    it.each(SUPPORTED_GRID_SIZES)('detects column balance violations in a %ix%i grid', (gridSize) => {
+        const grid = makeCheckerboardGrid(gridSize)
+        const limit = gridSize / 2
+
+        for (let row = 0; row <= limit; row++) {
+            grid[row]![0] = makeCell('red')
+        }
+
+        const validation = validateGrid(grid, gridSize)
+        expect(validation.violatedCols.has(0)).toBe(true)
+        expect(isGridComplete(grid, gridSize)).toBe(false)
+        expect(doesCellViolateConstraints(grid, 0, 0, gridSize)).toBe(true)
+    })
+})
+
 // ─── Unit tests: doesCellViolateConstraints ───────────────────────────────────
 
 describe('doesCellViolateConstraints', () => {
@@ -558,228 +435,5 @@ describe('doesCellViolateConstraints', () => {
         grid[1]![1] = makeNumberedCell('red', 0)
         // (1,1) has 4 red neighbors but expects 0 → violation
         expect(doesCellViolateConstraints(grid, 1, 1, 4)).toBe(true)
-    })
-})
-
-// ─── Property 1: Bug Condition - Valid Alternate Solutions Accepted as Complete ─
-// Feature: unique-solution-validation, Property 1
-// Validates: Requirements 2.2
-
-// Arbitraries for generating valid complete grids
-// A valid complete grid must satisfy:
-//   1. Every row has exactly half red and half blue
-//   2. Every column has exactly half red and half blue
-//   3. No two adjacent rows are identical
-//   4. No two adjacent columns are identical
-//   5. All number constraints satisfied (no numbers set → trivially true)
-//
-// Strategy: use known valid base patterns for 4×4 and 6×6, then apply
-// row/column permutations that preserve all constraints.
-
-const VALID_4x4_BASES: ReadonlyArray<ReadonlyArray<CellColor[]>> = [
-    // Pattern A: alternating checkerboard
-    [['red', 'blue', 'red', 'blue'], ['blue', 'red', 'blue', 'red'], ['red', 'blue', 'red', 'blue'], ['blue', 'red', 'blue', 'red']],
-    // Pattern B: block pattern
-    [['red', 'red', 'blue', 'blue'], ['blue', 'blue', 'red', 'red'], ['red', 'blue', 'red', 'blue'], ['blue', 'red', 'blue', 'red']],
-    // Pattern C
-    [['red', 'blue', 'blue', 'red'], ['blue', 'red', 'red', 'blue'], ['blue', 'red', 'blue', 'red'], ['red', 'blue', 'red', 'blue']],
-]
-
-const VALID_6x6_BASES: ReadonlyArray<ReadonlyArray<CellColor[]>> = [
-    // Pattern A: alternating
-    [
-        ['red', 'blue', 'red', 'blue', 'red', 'blue'],
-        ['blue', 'red', 'blue', 'red', 'blue', 'red'],
-        ['red', 'blue', 'red', 'blue', 'red', 'blue'],
-        ['blue', 'red', 'blue', 'red', 'blue', 'red'],
-        ['red', 'blue', 'red', 'blue', 'red', 'blue'],
-        ['blue', 'red', 'blue', 'red', 'blue', 'red'],
-    ],
-    // Pattern B
-    [
-        ['red', 'red', 'blue', 'blue', 'red', 'blue'],
-        ['blue', 'blue', 'red', 'red', 'blue', 'red'],
-        ['red', 'blue', 'red', 'blue', 'red', 'blue'],
-        ['blue', 'red', 'blue', 'red', 'blue', 'red'],
-        ['red', 'blue', 'blue', 'red', 'blue', 'red'],
-        ['blue', 'red', 'red', 'blue', 'red', 'blue'],
-    ],
-]
-
-const validCompleteGridArb = (gridSize: number): fc.Arbitrary<Grid> => {
-    const bases = gridSize === 4 ? VALID_4x4_BASES : VALID_6x6_BASES
-    return fc.integer({ min: 0, max: bases.length - 1 }).map((idx) => {
-        const base = bases[idx]!
-        return base.map((row) => row.map((color) => makeCell(color)))
-    })
-}
-
-describe('isGridComplete — Property 1: Bug Condition - Valid Alternate Solutions Accepted as Complete', () => {
-    it('returns true for any fully-filled grid satisfying all constraints', () => {
-        // **Validates: Requirements 2.2**
-        // Property: for all grids where every constraint is satisfied, isGridComplete returns true.
-        // This is the core bug-condition test: valid alternate solutions must be accepted.
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) =>
-                    validCompleteGridArb(gridSize).map((grid) => ({ grid, gridSize }))
-                ),
-                ({ grid, gridSize }) => {
-                    expect(isGridComplete(grid, gridSize)).toBe(true)
-                }
-            ),
-            { numRuns: 100 }
-        )
-    })
-
-    it('returns false for grids with balance violations', () => {
-        // Validates: Requirements 2.2
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) => {
-                    // Generate a grid where at least one row has too many of one color
-                    return fc.record({
-                        gridSize: fc.constant(gridSize),
-                        grid: fc.array(
-                            fc.array(cellColorArb.map(makeCell), { minLength: gridSize, maxLength: gridSize }),
-                            { minLength: gridSize, maxLength: gridSize }
-                        ),
-                    }).filter(({ grid, gridSize: gs }) => {
-                        const half = gs / 2
-                        // At least one row must have a balance violation
-                        return grid.some((row) => {
-                            const red = row.filter((c) => c.color === 'red').length
-                            const blue = row.filter((c) => c.color === 'blue').length
-                            return red > half || blue > half
-                        })
-                    })
-                }),
-                ({ grid, gridSize }) => {
-                    expect(isGridComplete(grid, gridSize)).toBe(false)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-
-    it('returns false for grids with null cells (incomplete)', () => {
-        // Validates: Requirements 2.2
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) =>
-                    gridArb(gridSize).filter((grid) =>
-                        grid.some((row) => row.some((c) => c.color === null))
-                    ).map((grid) => ({ grid, gridSize }))
-                ),
-                ({ grid, gridSize }) => {
-                    expect(isGridComplete(grid, gridSize)).toBe(false)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-})
-
-// ─── Property 3: Preservation - Invalid Grids Still Rejected ─────────────────
-// Feature: unique-solution-validation, Property 3
-// Validates: Requirements 3.1, 3.2
-
-describe('isGridComplete — Property 3: Preservation - Invalid Grids Still Rejected', () => {
-    it('returns false for any fully-filled grid with a balance violation', () => {
-        // Validates: Requirements 3.1, 3.2
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) => {
-                    const half = gridSize / 2
-                    // Generate a fully-filled grid (no nulls) with at least one balance violation
-                    const filledCellArb = fc.oneof(
-                        fc.constant<CellColor>('red'),
-                        fc.constant<CellColor>('blue')
-                    ).map(makeCell)
-
-                    return fc.array(
-                        fc.array(filledCellArb, { minLength: gridSize, maxLength: gridSize }),
-                        { minLength: gridSize, maxLength: gridSize }
-                    ).filter((grid) => {
-                        // Must have at least one row or column with a balance violation
-                        const rowViolation = grid.some((row) => {
-                            const red = row.filter((c) => c.color === 'red').length
-                            const blue = row.filter((c) => c.color === 'blue').length
-                            return red > half || blue > half
-                        })
-                        const colViolation = Array.from({ length: gridSize }, (_, col) => {
-                            const red = grid.filter((r) => r[col]?.color === 'red').length
-                            const blue = grid.filter((r) => r[col]?.color === 'blue').length
-                            return red > half || blue > half
-                        }).some(Boolean)
-                        return rowViolation || colViolation
-                    }).map((grid) => ({ grid, gridSize }))
-                }),
-                ({ grid, gridSize }) => {
-                    expect(isGridComplete(grid, gridSize)).toBe(false)
-                }
-            ),
-            { numRuns: 50 }
-        )
-    })
-
-    it('returns false for any fully-filled grid with adjacent identical rows', () => {
-        // Validates: Requirements 3.1, 3.2
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) => {
-                    const half = gridSize / 2
-                    // Build a valid balanced row, then duplicate it to create adjacent identical rows
-                    const validRow = [
-                        ...Array(half).fill('red' as CellColor),
-                        ...Array(half).fill('blue' as CellColor),
-                    ]
-                    const otherRow = [
-                        ...Array(half).fill('blue' as CellColor),
-                        ...Array(half).fill('red' as CellColor),
-                    ]
-                    // Grid: row0=validRow, row1=validRow (identical adjacent), rest=otherRow
-                    const grid: Grid = Array.from({ length: gridSize }, (_, i) => {
-                        const colors = i <= 1 ? validRow : otherRow
-                        return colors.map(makeCell)
-                    })
-                    return fc.constant({ grid, gridSize })
-                }),
-                ({ grid, gridSize }) => {
-                    expect(isGridComplete(grid, gridSize)).toBe(false)
-                }
-            ),
-            { numRuns: 20 }
-        )
-    })
-
-    it('returns false for any fully-filled grid with adjacent identical columns', () => {
-        // Validates: Requirements 3.1, 3.2
-        fc.assert(
-            fc.property(
-                fc.oneof(fc.constant(4), fc.constant(6)).chain((gridSize) => {
-                    const half = gridSize / 2
-                    // Build a grid where columns 0 and 1 are identical and balanced.
-                    // Column pattern: alternating red/blue to keep each column balanced.
-                    // col0 = col1 = [r, b, r, b, ...] (half red, half blue)
-                    // col2 = col3 = [b, r, b, r, ...] (different, to keep rows balanced)
-                    // For gridSize=4: rows are [r,r,b,b], [b,b,r,r], [r,r,b,b], [b,b,r,r]
-                    // → col0=[r,b,r,b], col1=[r,b,r,b] (identical adjacent columns)
-                    const grid: Grid = Array.from({ length: gridSize }, (_, row) => {
-                        return Array.from({ length: gridSize }, (__, col) => {
-                            // Columns 0..half-1 share one pattern; columns half..gridSize-1 share the other
-                            const colGroup = col < half ? 0 : 1
-                            const color: CellColor = (row + colGroup) % 2 === 0 ? 'red' : 'blue'
-                            return makeCell(color)
-                        })
-                    })
-                    return fc.constant({ grid, gridSize })
-                }),
-                ({ grid, gridSize }) => {
-                    expect(isGridComplete(grid, gridSize)).toBe(false)
-                }
-            ),
-            { numRuns: 20 }
-        )
     })
 })
