@@ -1,12 +1,19 @@
 <script lang="ts">
     import type { DashboardData } from "../../shared/growth-types";
     import { focusTrap } from "../lib/focus-trap";
+    import {
+        generateMarkdownSnapshot,
+        copyToClipboard,
+    } from "../lib/markdown-export";
     import X from "lucide-svelte/icons/x";
     import Loader2 from "lucide-svelte/icons/loader-2";
     import BarChart2 from "lucide-svelte/icons/bar-chart-2";
     import AlertTriangle from "lucide-svelte/icons/alert-triangle";
     import TrendingUp from "lucide-svelte/icons/trending-up";
     import RefreshCw from "lucide-svelte/icons/refresh-cw";
+    import Clipboard from "lucide-svelte/icons/clipboard";
+    import Check from "lucide-svelte/icons/check";
+    import XCircle from "lucide-svelte/icons/x-circle";
 
     type Props = {
         isOpen: boolean;
@@ -22,8 +29,27 @@
     let loading = $state(false);
     let error = $state<string | null>(null);
 
+    type CopyState = "idle" | "success" | "error";
+    let copyState = $state<CopyState>("idle");
+
     // Latest dashboard entry (most recent day)
     let latest = $derived(dashboards[dashboards.length - 1] ?? null);
+
+    async function handleCopy(): Promise<void> {
+        if (dashboards.length === 0 || !latest) return;
+
+        const markdown = generateMarkdownSnapshot(
+            dashboards,
+            latest.rolling,
+            latest.currentPhase,
+        );
+        const success = await copyToClipboard(markdown);
+
+        copyState = success ? "success" : "error";
+        setTimeout(() => {
+            copyState = "idle";
+        }, 2000);
+    }
 
     $effect(() => {
         if (isOpen && dashboards.length === 0) {
@@ -115,6 +141,27 @@
                         <RefreshCw
                             class="w-4 h-4 {loading ? 'animate-spin' : ''}"
                         />
+                    </button>
+                    <button
+                        onclick={handleCopy}
+                        class="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors
+                            {copyState === 'success'
+                            ? 'text-emerald-400'
+                            : copyState === 'error'
+                              ? 'text-red-400'
+                              : 'text-theme-text-muted hover:text-theme-text-primary'}
+                            disabled:opacity-40 disabled:cursor-not-allowed"
+                        aria-label="Copy to Clipboard"
+                        disabled={dashboards.length === 0}
+                    >
+                        {#if copyState === "success"}
+                            <Check class="w-4 h-4" />
+                        {:else if copyState === "error"}
+                            <XCircle class="w-4 h-4" />
+                        {:else}
+                            <Clipboard class="w-4 h-4" />
+                        {/if}
+                        <span>Copy</span>
                     </button>
                     <button
                         onclick={onClose}

@@ -18,6 +18,10 @@ import type {
 } from '../../shared/growth-types'
 import { KILL_RULES, ROADMAP_PHASES, SCALE_RULES } from '../../shared/growth-constants'
 import { getDailyMetrics } from './analytics'
+import {
+    computeViralRollingAverage,
+    readViralMetricsForDate,
+} from './viral-tracker'
 
 // ─── Key Builders ──────────────────────────────────────────────────────────────
 
@@ -259,12 +263,40 @@ export const computeDashboard = async (date: string): Promise<DashboardData> => 
     // Current day's metrics (last in the list)
     const daily = dailyMetricsList[dailyMetricsList.length - 1]!
 
+    // Read viral counters for each day in the window
+    const viralDataPerDay = await Promise.all(
+        dates.map((d) => readViralMetricsForDate(d)),
+    )
+
+    // Enrich each day's growth metrics with viral data
+    for (let i = 0; i < dailyMetricsList.length; i++) {
+        const metrics = dailyMetricsList[i]!
+        const viral = viralDataPerDay[i]!
+        if (metrics.growth) {
+            metrics.growth.shareRate = viral.shareRate
+            metrics.growth.viralCycleTimeHours = viral.viralCycleTimeHours
+            metrics.growth.perChannelMetrics = viral.perChannelMetrics
+        }
+    }
+
+    // Compute rolling viral averages
+    const shareRateValues = viralDataPerDay.map((v) => v.shareRate)
+    const kFactorValues = dailyMetricsList.map((m) => m.growth?.kFactor ?? null)
+    const viralCycleTimeValues = viralDataPerDay.map((v) => v.viralCycleTimeHours)
+
+    const shareRate7d = computeViralRollingAverage(shareRateValues)
+    const kFactor7d = computeViralRollingAverage(kFactorValues)
+    const viralCycleTimeHours7d = computeViralRollingAverage(viralCycleTimeValues)
+
     // Compute rolling averages
     const rolling: RollingMetrics = {
         dqe7d: computeRollingAverage(dailyMetricsList.map((m) => m.estimatedDQE)),
         firstActionRate7d: computeRollingAverage(dailyMetricsList.map((m) => m.firstActionRate)),
         completionRate7d: computeRollingAverage(dailyMetricsList.map((m) => m.completionRate)),
         d1ReturnRate7d: computeRollingAverage(dailyMetricsList.map((m) => m.d1ReturnRate)),
+        shareRate7d,
+        kFactor7d,
+        viralCycleTimeHours7d,
     }
 
     // Evaluate rules (null metrics are suppressed, not alerted)

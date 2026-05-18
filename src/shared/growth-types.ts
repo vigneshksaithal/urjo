@@ -16,6 +16,25 @@ export type ResultCardData = {
     streak: number
 }
 
+// ─── Viral Loop ────────────────────────────────────────────────────────────────
+
+/** Distinct mechanism through which existing users expose the game to potential new users */
+export type InviteChannel = 'challenge_post' | 'result_comment' | 'result_copy'
+
+/** Metrics for a single invite channel */
+export type ChannelMetrics = {
+    opens: number
+    conversions: number
+    conversionRate: number | null
+}
+
+/** Per-channel metrics for all invite channels */
+export type PerChannelMetrics = {
+    challenge_post: ChannelMetrics
+    result_comment: ChannelMetrics
+    result_copy: ChannelMetrics
+}
+
 // ─── Analytics ─────────────────────────────────────────────────────────────────
 
 /** Daily funnel metrics for a single date */
@@ -50,6 +69,9 @@ export type GrowthLoopMetrics = {
     newCompletersPerChallenge: number
     challengeD1RetainedShare: number
     kFactor: number
+    shareRate: number | null
+    viralCycleTimeHours: number | null
+    perChannelMetrics: PerChannelMetrics | null
 }
 
 /** 7-day rolling averages for key growth metrics */
@@ -58,6 +80,9 @@ export type RollingMetrics = {
     firstActionRate7d: number | null
     completionRate7d: number | null
     d1ReturnRate7d: number | null
+    shareRate7d: number | null
+    kFactor7d: number | null
+    viralCycleTimeHours7d: number | null
 }
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 import { redis } from '@devvit/web/server'
 
 import type { DailyMetrics, GrowthLoopMetrics } from '../../shared/growth-types'
+import { readViralMetricsForDate } from './viral-tracker'
 
 // ─── TTL Constants ─────────────────────────────────────────────────────────────
 
@@ -369,6 +370,7 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
         notifyOptIns,
         subscribeTaps,
         challengeD1RetainedShare,
+        viralMetrics,
     ] = await Promise.all([
         readSortedSetMembers(dailyActiveEngagersKey(date)).then((members) => members.length),
         readCounter(resultCommentCounterKey(date)),
@@ -379,6 +381,7 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
         readCounter(notifyOptInCounterKey(date)),
         readCounter(subscribeTapCounterKey(date)),
         computeChallengeReturnRateForDate(date, 1),
+        readViralMetricsForDate(date),
     ])
 
     return {
@@ -399,6 +402,9 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
             newPlayerChallengeCompletions,
             challengeD1RetainedShare,
         }),
+        shareRate: viralMetrics.shareRate,
+        viralCycleTimeHours: viralMetrics.viralCycleTimeHours,
+        perChannelMetrics: viralMetrics.perChannelMetrics,
     }
 }
 

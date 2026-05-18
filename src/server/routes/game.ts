@@ -63,6 +63,17 @@ import {
 	trackChallengeCompletion,
 	trackHelpTap,
 } from '../lib/analytics'
+import {
+	recordCompleter,
+	recordSharer,
+	recordChallengeCreation,
+	recordCycleTime,
+	recordAttribution,
+	recordChannelOpen,
+	recordChannelConversion,
+	getChallengeCreationTimestamp,
+	getAttribution,
+} from '../lib/viral-tracker'
 import { getHintsDismissed, markHintDismissed } from '../lib/hints'
 import type { HintKind } from '../lib/hints'
 import { isModeratorCached } from '../lib/moderator'
@@ -532,6 +543,16 @@ gameRouter.get('/api/game/state', async (c) => {
 		const economy = await getUserEconomy(userId)
 		const isFirstTimeUser = economy.totalSolves === 0
 
+		// ─── Viral tracking: challenge post open by new player (non-blocking) ─
+		try {
+			if (isChallenge && isFirstTimeUser) {
+				await recordAttribution(userId, 'challenge_post')
+				await recordChannelOpen(today, 'challenge_post', userId)
+			}
+		} catch (err) {
+			console.error('[Viral] Challenge open attribution failed (non-critical):', err)
+		}
+
 		// ─── Puzzle number ─────────────────────────────────────────────────────
 		let puzzleNumber: number | undefined
 		try {
@@ -927,6 +948,31 @@ gameRouter.post('/api/game/complete', async (c) => {
 			console.error('[Analytics] Completion tracking failed (non-critical):', err)
 		}
 
+		// ─── Viral tracking: record completer + cycle time + conversion (non-blocking) ─
+		try {
+			const today = getTodayUTC()
+			await recordCompleter(today, userId)
+
+			// For new players on challenge posts, compute and record cycle time
+			if (isChallengePost && preCompletionEconomy.totalSolves === 0) {
+				const creationTs = await getChallengeCreationTimestamp(postId)
+				if (creationTs !== null) {
+					const elapsedSeconds = (Date.now() - creationTs) / 1000
+					await recordCycleTime(today, elapsedSeconds)
+				}
+			}
+
+			// Record channel conversion only for the attributed user's first completion.
+			if (preCompletionEconomy.totalSolves === 0) {
+				const attribution = await getAttribution(userId)
+				if (attribution !== null) {
+					await recordChannelConversion(today, attribution, userId)
+				}
+			}
+		} catch (err) {
+			console.error('[Viral] Completion tracking failed (non-critical):', err)
+		}
+
 		// ─── Season scoring (non-blocking) ─────────────────────────────────────
 		let seasonRank: number | null = null
 		let seasonPoints = 0
@@ -1161,6 +1207,15 @@ gameRouter.post('/api/game/share', async (c) => {
 			incrementSharesCount(userId),
 		])
 
+		// ─── Viral tracking: record sharer + channel open (non-blocking) ──────
+		try {
+			const today = getTodayUTC()
+			await recordSharer(today, userId)
+			await recordChannelOpen(today, 'result_copy', userId)
+		} catch (err) {
+			console.error('[Viral] Share tracking failed (non-critical):', err)
+		}
+
 		const response: ShareResponse = {
 			success: true,
 			shared: true,
@@ -1250,6 +1305,15 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 			trackResultComment(getTodayUTC(), userId),
 			incrementSharesCount(userId),
 		])
+
+		// ─── Viral tracking: record sharer + channel open (non-blocking) ──────
+		try {
+			const today = getTodayUTC()
+			await recordSharer(today, userId)
+			await recordChannelOpen(today, 'result_comment', userId)
+		} catch (err) {
+			console.error('[Viral] Result comment tracking failed (non-critical):', err)
+		}
 
 		return c.json({ success: true })
 	} catch (error) {
@@ -1416,6 +1480,15 @@ Think you can beat it? Play above! 🎯`,
 		})
 		await incrementChallengesCreated(userId)
 		await trackChallengePostCreated(today, userId, newPost.id)
+
+		// ─── Viral tracking: record sharer + channel open + challenge creation (non-blocking) ─
+		try {
+			await recordSharer(today, userId)
+			await recordChannelOpen(today, 'challenge_post', userId)
+			await recordChallengeCreation(today, newPost.id, Date.now())
+		} catch (err) {
+			console.error('[Viral] Challenge post tracking failed (non-critical):', err)
+		}
 
 		return c.json<ChallengeResponse>({ success: true, postUrl: redditCommentsUrl(newPost.id) })
 	} catch (error) {

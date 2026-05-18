@@ -4,6 +4,14 @@ import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
 
 import {
+    recordChannelConversion,
+    recordChannelOpen,
+    recordCompleter,
+    recordCycleTime,
+    recordSharer,
+} from '../viral-tracker'
+
+import {
     trackPostOpen,
     trackFirstAction,
     trackCompletion,
@@ -149,6 +157,34 @@ testGrowthEvents('growth tracking records DAE and K-factor inputs', async () => 
     expect(metrics.growth?.subscribeTaps).toBe(1)
     expect(metrics.growth?.challengePostsPerCompleter).toBe(1)
     expect(metrics.growth?.newCompletersPerChallenge).toBe(1)
+})
+
+const testDailyViralMetrics = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testDailyViralMetrics('getDailyMetrics includes computed viral metrics', async () => {
+    await recordCompleter('2025-01-15', 't2_solver1')
+    await recordCompleter('2025-01-15', 't2_solver2')
+    await recordSharer('2025-01-15', 't2_solver1')
+    await recordCycleTime('2025-01-15', 3600)
+    await recordCycleTime('2025-01-15', 7200)
+    await recordChannelOpen('2025-01-15', 'challenge_post', 't2_newbie')
+    await recordChannelOpen('2025-01-15', 'challenge_post', 't2_other')
+    await recordChannelConversion('2025-01-15', 'challenge_post', 't2_newbie')
+
+    const metrics = await getDailyMetrics('2025-01-15')
+
+    expect(metrics.growth?.shareRate).toBe(0.5)
+    expect(metrics.growth?.viralCycleTimeHours).toBe(1.5)
+    expect(metrics.growth?.perChannelMetrics?.challenge_post).toStrictEqual({
+        opens: 2,
+        conversions: 1,
+        conversionRate: 0.5,
+    })
+    expect(metrics.growth?.perChannelMetrics?.result_comment).toStrictEqual({
+        opens: 0,
+        conversions: 0,
+        conversionRate: null,
+    })
 })
 
 const testReturnRate = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })

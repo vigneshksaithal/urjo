@@ -76,6 +76,13 @@ export const SCALE_RULES: readonly ScaleRule[] = [
         comparison: 'above',
         message: 'SCALE: Tier 2 reached — focus on stability',
     },
+    {
+        id: 'k_factor_viral',
+        metric: 'kFactor7d',
+        threshold: 1.0,
+        comparison: 'above',
+        message: 'SCALE: K-factor > 1 — viral growth achieved, double down on share mechanics',
+    },
 ] as const
 
 // ─── Roadmap Phases ────────────────────────────────────────────────────────────
