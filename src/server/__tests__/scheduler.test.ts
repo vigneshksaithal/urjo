@@ -63,11 +63,16 @@ test('POST /internal/scheduler/daily-puzzle creates a post with puzzle number in
 })
 
 test('scheduler computes dashboard and posts analytics reply to sticky', async () => {
+    // Mock Date to be a Tuesday (UTC day 2) at 12:00 UTC (avoids Monday season recap and 16:00 mention flow)
+    const tuesday = new Date('2025-01-07T12:00:00Z')
+    vi.useFakeTimers()
+    vi.setSystemTime(tuesday)
+
     mockRedditApis('t3_dash1')
 
     await withCtx(() => schedulerRequest())
 
-    // submitComment should be called at least twice: sticky + analytics reply
+    // submitComment should be called exactly twice: sticky + analytics reply
     expect(reddit.submitComment).toHaveBeenCalledTimes(2)
 
     // The second call should be the analytics reply to the sticky comment
@@ -77,6 +82,8 @@ test('scheduler computes dashboard and posts analytics reply to sticky', async (
     const analyticsArg = analyticsCall![0] as { id: string; text: string }
     expect(analyticsArg.text).toContain('Developer Analytics')
     expect(analyticsArg.text).toContain('| Metric | Value |')
+
+    vi.useRealTimers()
 })
 
 test('scheduler uses subreddit config branding emoji in post title', async () => {
