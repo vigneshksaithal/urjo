@@ -184,3 +184,118 @@ testLeaderboard('GET /api/game/leaderboard returns 200 with type and entries fie
     expect(json.type).toBeDefined()
     expect(json.entries).toBeDefined()
 })
+
+
+// ─── Daily Preview Update on First Completion ─────────────────────────────────
+
+const testPreviewUpdate = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 6: First completion on a daily post updates the preview data in Redis
+ */
+testPreviewUpdate('POST /api/game/complete updates daily preview on first completion', async () => {
+    // Seed a daily preview in Redis (simulating what the scheduler does)
+    await redis.hSet(`game:${POST_ID}:preview`, {
+        type: 'daily',
+        data: JSON.stringify({
+            puzzleNumber: 42,
+            gridSize: 4,
+            completionsToday: 0,
+            activeNow: 0,
+            fastestTime: null,
+            fastestUsername: null,
+        }),
+    })
+
+    const res = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 30 }),
+    })
+    expect(res.status).toBe(200)
+
+    // Verify preview was updated
+    const previewMeta = await redis.hGetAll(`game:${POST_ID}:preview`)
+    expect(previewMeta.type).toBe('daily')
+    const parsed = JSON.parse(previewMeta.data!)
+    expect(parsed.completionsToday).toBe(1)
+    expect(parsed.fastestTime).toBe(30)
+})
+
+const testPreviewDedup = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 6: Preview update is deduped — second completion does not update preview again
+ */
+testPreviewDedup('POST /api/game/complete does not update daily preview on second completion (deduped)', async () => {
+    // Seed a daily preview in Redis
+    await redis.hSet(`game:${POST_ID}:preview`, {
+        type: 'daily',
+        data: JSON.stringify({
+            puzzleNumber: 43,
+            gridSize: 4,
+            completionsToday: 0,
+            activeNow: 0,
+            fastestTime: null,
+            fastestUsername: null,
+        }),
+    })
+
+    // Set the dedup key to simulate already-updated
+    await redis.set(`preview:updated:${POST_ID}`, '1')
+
+    const res = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20 }),
+    })
+    expect(res.status).toBe(200)
+
+    // Verify preview was NOT updated (still shows 0 completions)
+    const previewMeta = await redis.hGetAll(`game:${POST_ID}:preview`)
+    const parsed = JSON.parse(previewMeta.data!)
+    expect(parsed.completionsToday).toBe(0)
+    expect(parsed.fastestTime).toBeNull()
+})
+
+const testPreviewNonDaily = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 6: Preview update only applies to daily posts, not challenge posts
+ */
+testPreviewNonDaily('POST /api/game/complete does not update preview for challenge posts', async () => {
+    // Seed a challenge preview (not daily)
+    await redis.hSet(`game:${POST_ID}:preview`, {
+        type: 'challenge',
+        data: JSON.stringify({
+            challengerUsername: 'testuser',
+            challengerTime: 42,
+            gridSize: 4,
+            puzzleGridEmoji: '🟥🟦🟥🟦',
+            beatsCount: 0,
+            attemptsCount: 0,
+            fastestTime: null,
+            activeRacers: 0,
+        }),
+    })
+
+    const res = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 15 }),
+    })
+    expect(res.status).toBe(200)
+
+    // Verify no dedup key was set (preview update logic was skipped)
+    const dedupKey = await redis.get(`preview:updated:${POST_ID}`)
+    expect(dedupKey).toBeUndefined()
+})

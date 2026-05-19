@@ -12,6 +12,9 @@
         streak: number;
         timeTaken: number;
         mistakes: number;
+        seasonNumber?: number | null;
+        seasonRank?: number | null;
+        seasonPoints?: number;
         onCommentResult?: () => void;
         hasCommented?: boolean;
     };
@@ -24,6 +27,9 @@
         streak,
         timeTaken,
         mistakes,
+        seasonNumber = null,
+        seasonRank = null,
+        seasonPoints = 0,
         onCommentResult,
         hasCommented = false,
     }: Props = $props();
@@ -108,6 +114,18 @@
         <p class="text-xs text-theme-text-muted mt-1">
             ⏱️ {timeTaken}s | 🎯 {mistakes} mistakes | 🔥 {streak} streak
         </p>
+        {#if seasonNumber !== null && (seasonRank !== null || seasonPoints > 0)}
+            <p class="text-xs text-theme-text-muted mt-0.5">
+                🏆 Season {seasonNumber}
+                {#if seasonRank !== null}<span
+                        class="font-semibold text-yellow-400"
+                    >
+                        Rank #{seasonRank}</span
+                    >{/if}
+                {#if seasonPoints > 0}
+                    · {seasonPoints} pts{/if}
+            </p>
+        {/if}
     </div>
 
     <!-- Comment result button -->

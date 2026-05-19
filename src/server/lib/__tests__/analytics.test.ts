@@ -26,6 +26,9 @@ import {
     computeD1ReturnRatePure,
     computeReturnRateForDate,
     computeKFactorPure,
+    trackRaceJoin,
+    trackRaceMatch,
+    trackRaceComplete,
 } from '../analytics'
 
 // ─── trackPostOpen ─────────────────────────────────────────────────────────────
@@ -356,4 +359,64 @@ describe('D1 Return Rate Computation — Property 3', () => {
             { numRuns: 100 },
         )
     })
+})
+
+// ─── Race Analytics ────────────────────────────────────────────────────────────
+
+const testRaceJoin = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testRaceJoin('trackRaceJoin increments the race joins counter', async () => {
+    await trackRaceJoin('2025-01-15', 't3_post1', 't2_user1')
+
+    const counter = await redis.get('analytics:2025-01-15:race:joins')
+    expect(counter).toBe('1')
+})
+
+const testRaceJoinMultiple = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testRaceJoinMultiple('trackRaceJoin increments on each call (not deduplicated)', async () => {
+    await trackRaceJoin('2025-01-15', 't3_post1', 't2_user1')
+    await trackRaceJoin('2025-01-15', 't3_post1', 't2_user2')
+    await trackRaceJoin('2025-01-15', 't3_post2', 't2_user1')
+
+    const counter = await redis.get('analytics:2025-01-15:race:joins')
+    expect(counter).toBe('3')
+})
+
+const testRaceMatch = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testRaceMatch('trackRaceMatch increments the race matches counter', async () => {
+    await trackRaceMatch('2025-01-15', 't3_post1', 'session-abc')
+
+    const counter = await redis.get('analytics:2025-01-15:race:matches')
+    expect(counter).toBe('1')
+})
+
+const testRaceMatchMultiple = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testRaceMatchMultiple('trackRaceMatch increments on each call (not deduplicated)', async () => {
+    await trackRaceMatch('2025-01-15', 't3_post1', 'session-1')
+    await trackRaceMatch('2025-01-15', 't3_post1', 'session-2')
+
+    const counter = await redis.get('analytics:2025-01-15:race:matches')
+    expect(counter).toBe('2')
+})
+
+const testRaceComplete = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testRaceComplete('trackRaceComplete increments the race completions counter', async () => {
+    await trackRaceComplete('2025-01-15', 't3_post1', 'session-abc', 't2_winner')
+
+    const counter = await redis.get('analytics:2025-01-15:race:completions')
+    expect(counter).toBe('1')
+})
+
+const testRaceCompleteMultiple = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testRaceCompleteMultiple('trackRaceComplete increments on each call (not deduplicated)', async () => {
+    await trackRaceComplete('2025-01-15', 't3_post1', 'session-1', 't2_winner1')
+    await trackRaceComplete('2025-01-15', 't3_post2', 'session-2', 't2_winner2')
+
+    const counter = await redis.get('analytics:2025-01-15:race:completions')
+    expect(counter).toBe('2')
 })

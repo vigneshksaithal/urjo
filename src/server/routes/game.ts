@@ -76,6 +76,8 @@ import {
 } from '../lib/viral-tracker'
 import { getHintsDismissed, markHintDismissed } from '../lib/hints'
 import type { HintKind } from '../lib/hints'
+import { buildChallengePreview, buildChallengeBeatPreview } from '../lib/preview'
+import type { ChallengePreviewData } from '../../shared/race-types'
 import { isModeratorCached } from '../lib/moderator'
 import { isOptedIn } from '../lib/notify'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
@@ -194,6 +196,29 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 		// Update the leaderboard comment
 		await updateLeaderboardComment(postId)
 		await incrementChallengeBeats(challengerId)
+
+		// Update post preview with beat info (non-blocking, deduped)
+		try {
+			const previewDedupKey = `preview:beat:${postId}:${winnerId}`
+			const alreadyUpdatedPreview = await redis.get(previewDedupKey)
+			if (!alreadyUpdatedPreview) {
+				await redis.set(previewDedupKey, 'true')
+				await redis.expire(previewDedupKey, 3600) // 1-hour TTL dedup
+
+				const winnerUsername = await fetchUsername(winnerId)
+				const beatPreview = buildChallengeBeatPreview({
+					winnerUsername,
+					winnerTime: timeTaken,
+				})
+
+				await redis.hSet(`game:${postId}:preview`, {
+					type: 'challenge_beat',
+					data: JSON.stringify(beatPreview),
+				})
+			}
+		} catch (previewErr) {
+			console.error('[Preview] Challenge beat preview update failed (non-critical):', previewErr)
+		}
 
 		// Mark beat as recorded — after stats are written so partial failure doesn't lose data
 		await redis.set(notifyKey, 'true')
@@ -607,6 +632,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			tutorialCompleted,
 			skillLevel,
 			gridSizePreference,
+			postId,
 			isChallenge,
 			streak,
 			...(username !== undefined && { username }),
@@ -971,6 +997,38 @@ gameRouter.post('/api/game/complete', async (c) => {
 			}
 		} catch (err) {
 			console.error('[Viral] Completion tracking failed (non-critical):', err)
+		}
+
+		// ─── Daily preview update on first completion (deduped, non-blocking) ──
+		try {
+			const previewMeta = await redis.hGetAll(`game:${postId}:preview`)
+			if (previewMeta?.type === 'daily') {
+				const dedupKey = `preview:updated:${postId}`
+				const alreadyUpdated = await redis.get(dedupKey)
+				if (alreadyUpdated === undefined) {
+					await redis.set(dedupKey, '1')
+					await redis.expire(dedupKey, 86400) // 24h TTL
+
+					const existingData = previewMeta.data
+					if (existingData) {
+						const parsed = JSON.parse(existingData) as { puzzleNumber: number; gridSize: number }
+						const updatedPreviewData = {
+							puzzleNumber: parsed.puzzleNumber,
+							gridSize: parsed.gridSize,
+							completionsToday: 1,
+							activeNow: 0,
+							fastestTime: timeTaken,
+							fastestUsername: null,
+						}
+						await redis.hSet(`game:${postId}:preview`, {
+							type: 'daily',
+							data: JSON.stringify(updatedPreviewData),
+						})
+					}
+				}
+			}
+		} catch (previewErr) {
+			console.error('[Preview] Daily preview update failed (non-critical):', previewErr)
 		}
 
 		// ─── Season scoring (non-blocking) ─────────────────────────────────────
@@ -1480,6 +1538,38 @@ Think you can beat it? Play above! 🎯`,
 		})
 		await incrementChallengesCreated(userId)
 		await trackChallengePostCreated(today, userId, newPost.id)
+
+		// ─── Custom post preview for feed engagement (non-blocking) ────────────
+		try {
+			const emojiMap: Record<string, string> = { r: '🟥', b: '🟦' }
+			const cells = puzzle.colors.split('').map((ch) => emojiMap[ch] ?? '⬛')
+			const gridSizeNum = parseInt(puzzle.gridSize, 10)
+			const rows: string[] = []
+			for (let i = 0; i < cells.length; i += gridSizeNum) {
+				rows.push(cells.slice(i, i + gridSizeNum).join(''))
+			}
+			const emojiGrid = rows.join('\n')
+
+			const previewData: ChallengePreviewData = {
+				challengerUsername: username,
+				challengerTime: timeTaken,
+				gridSize: gridSizeNum,
+				puzzleGridEmoji: emojiGrid,
+				beatsCount: 0,
+				attemptsCount: 0,
+				fastestTime: null,
+				activeRacers: 0,
+			}
+			buildChallengePreview(previewData)
+
+			// Store preview data in Redis for future updates
+			await redis.hSet(`game:${newPost.id}:preview`, {
+				type: 'challenge',
+				data: JSON.stringify(previewData),
+			})
+		} catch (previewErr) {
+			console.error('[Preview] Challenge preview failed (non-critical):', previewErr)
+		}
 
 		// ─── Viral tracking: record sharer + channel open + challenge creation (non-blocking) ─
 		try {

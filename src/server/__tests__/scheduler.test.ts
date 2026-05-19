@@ -108,6 +108,25 @@ test('scheduler uses subreddit config branding emoji in post title', async () =>
     )
 })
 
+test('scheduler stores daily preview data in Redis after post creation', async () => {
+    mockRedditApis('t3_preview1')
+
+    await withCtx(() => schedulerRequest())
+
+    const previewMeta = await withCtx(() => redis.hGetAll('game:t3_preview1:preview'))
+    expect(previewMeta).toBeDefined()
+    expect(previewMeta.type).toBe('daily')
+    expect(previewMeta.data).toBeDefined()
+
+    const parsed = JSON.parse(previewMeta.data!)
+    expect(parsed.puzzleNumber).toBeGreaterThan(0)
+    expect(parsed.gridSize).toBe(4)
+    expect(parsed.completionsToday).toBe(0)
+    expect(parsed.activeNow).toBe(0)
+    expect(parsed.fastestTime).toBeNull()
+    expect(parsed.fastestUsername).toBeNull()
+})
+
 test('scheduler stores roadmap:startDate on first run', async () => {
     mockRedditApis('t3_roadmap1')
 

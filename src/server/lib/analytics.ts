@@ -88,6 +88,15 @@ const challengeCompletedDedupKey = (postId: string, userId: string): string =>
 const userCompletionDatesKey = (userId: string): string =>
     `analytics:user:${userId}:completion_dates`
 
+const raceJoinsCounterKey = (date: string): string =>
+    `analytics:${date}:race:joins`
+
+const raceMatchesCounterKey = (date: string): string =>
+    `analytics:${date}:race:matches`
+
+const raceCompletionsCounterKey = (date: string): string =>
+    `analytics:${date}:race:completions`
+
 // ─── Dedup Helper ──────────────────────────────────────────────────────────────
 
 /**
@@ -309,6 +318,45 @@ export const trackHelpTap = async (
     return true
 }
 
+// ─── Race Analytics ────────────────────────────────────────────────────────────
+
+/**
+ * Track a race join event (player enters the race queue).
+ * Not deduplicated — counts total joins.
+ */
+export const trackRaceJoin = async (
+    date: string,
+    _postId: string,
+    _userId: string,
+): Promise<void> => {
+    await redis.incrBy(raceJoinsCounterKey(date), 1)
+}
+
+/**
+ * Track a race match event (two players matched into a session).
+ * Not deduplicated — counts total matches.
+ */
+export const trackRaceMatch = async (
+    date: string,
+    _postId: string,
+    _sessionId: string,
+): Promise<void> => {
+    await redis.incrBy(raceMatchesCounterKey(date), 1)
+}
+
+/**
+ * Track a race completion event (race finishes with a winner).
+ * Not deduplicated — counts total completions.
+ */
+export const trackRaceComplete = async (
+    date: string,
+    _postId: string,
+    _sessionId: string,
+    _winnerId: string,
+): Promise<void> => {
+    await redis.incrBy(raceCompletionsCounterKey(date), 1)
+}
+
 // ─── Metrics Retrieval ─────────────────────────────────────────────────────────
 
 /**
@@ -371,6 +419,9 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
         subscribeTaps,
         challengeD1RetainedShare,
         viralMetrics,
+        raceJoins,
+        raceMatches,
+        raceCompletions,
     ] = await Promise.all([
         readSortedSetMembers(dailyActiveEngagersKey(date)).then((members) => members.length),
         readCounter(resultCommentCounterKey(date)),
@@ -382,7 +433,15 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
         readCounter(subscribeTapCounterKey(date)),
         computeChallengeReturnRateForDate(date, 1),
         readViralMetricsForDate(date),
+        readCounter(raceJoinsCounterKey(date)),
+        readCounter(raceMatchesCounterKey(date)),
+        readCounter(raceCompletionsCounterKey(date)),
     ])
+
+    // Win rate: completions / (matches * 2) — each match has 2 participants
+    const raceWinRate = raceMatches > 0
+        ? safeDivide(raceCompletions, raceMatches * 2)
+        : null
 
     return {
         dailyActiveEngagers,
@@ -405,6 +464,11 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
         shareRate: viralMetrics.shareRate,
         viralCycleTimeHours: viralMetrics.viralCycleTimeHours,
         perChannelMetrics: viralMetrics.perChannelMetrics,
+        raceJoins,
+        raceMatches,
+        raceCompletions,
+        raceWinRate,
+        avgRaceDuration: null, // Not tracked yet — placeholder for future instrumentation
     }
 }
 

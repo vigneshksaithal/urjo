@@ -77,6 +77,11 @@
         n === null ? "—" : `${(n * 100).toFixed(1)}%`;
     const num = (n: number): string => n.toLocaleString();
 
+    // Show race columns only when at least one day has race data
+    let hasRaceData = $derived(
+        dashboards.some((d) => (d.daily.growth?.raceJoins ?? 0) > 0),
+    );
+
     function alertBg(type: "kill" | "scale"): string {
         return type === "kill"
             ? "bg-red-500/10 border-red-500/40 text-red-400"
@@ -470,6 +475,20 @@
                                     <th class="px-3 py-2 text-right font-medium"
                                         >D1 Ret%</th
                                     >
+                                    {#if hasRaceData}
+                                        <th
+                                            class="px-3 py-2 text-right font-medium"
+                                            >Races</th
+                                        >
+                                        <th
+                                            class="px-3 py-2 text-right font-medium"
+                                            >R.Compl</th
+                                        >
+                                        <th
+                                            class="px-3 py-2 text-right font-medium"
+                                            >Win%</th
+                                        >
+                                    {/if}
                                 </tr>
                             </thead>
                             <tbody>
@@ -553,6 +572,34 @@
                                                 ? "—"
                                                 : pct(d.daily.d1ReturnRate)}
                                         </td>
+                                        {#if hasRaceData}
+                                            <td
+                                                class="px-3 py-2 text-right text-theme-text-primary"
+                                                >{num(
+                                                    d.daily.growth
+                                                        ?.raceMatches ?? 0,
+                                                )}</td
+                                            >
+                                            <td
+                                                class="px-3 py-2 text-right text-theme-text-primary"
+                                                >{num(
+                                                    d.daily.growth
+                                                        ?.raceCompletions ?? 0,
+                                                )}</td
+                                            >
+                                            <td
+                                                class="px-3 py-2 text-right text-theme-text-primary"
+                                                >{d.daily.growth
+                                                    ?.raceWinRate === null ||
+                                                d.daily.growth?.raceWinRate ===
+                                                    undefined
+                                                    ? "—"
+                                                    : pct(
+                                                          d.daily.growth
+                                                              .raceWinRate,
+                                                      )}</td
+                                            >
+                                        {/if}
                                     </tr>
                                 {/each}
                             </tbody>

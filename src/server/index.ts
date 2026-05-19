@@ -11,6 +11,8 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 
 import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from './post'
+import { buildDailyPreview } from './lib/preview'
+import type { DailyPreviewData } from '../shared/race-types'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
 import { engagementRouter } from './routes/engagement'
@@ -18,6 +20,8 @@ import { analyticsRouter } from './routes/analytics'
 import { adminRouter } from './routes/admin'
 import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
+import { raceRouter } from './routes/race'
+import { presenceRouter } from './routes/presence'
 import {
   computeDailyMentionBatch,
   getOptInUserIds,
@@ -323,6 +327,27 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
 
     const post = await createPost(title)
 
+    // ─── Custom post preview for feed engagement (non-blocking) ────────────
+    try {
+      const previewData: DailyPreviewData = {
+        puzzleNumber,
+        gridSize: 4,
+        completionsToday: 0,
+        activeNow: 0,
+        fastestTime: null,
+        fastestUsername: null,
+      }
+      buildDailyPreview(previewData)
+
+      // Store preview data in Redis for future updates
+      await redis.hSet(`game:${post.id}:preview`, {
+        type: 'daily',
+        data: JSON.stringify(previewData),
+      })
+    } catch (previewErr) {
+      console.error('[Preview] Daily preview failed (non-critical):', previewErr)
+    }
+
     // Build a stats comment from yesterday's data
     let stickyCommentId: string | undefined
     try {
@@ -483,6 +508,8 @@ app.route('/', analyticsRouter)
 app.route('/', adminRouter)
 app.route('/', seasonRouter)
 app.route('/', notifyRouter)
+app.route('/', raceRouter)
+app.route('/', presenceRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports

@@ -12,11 +12,16 @@
 	} from "../shared/types";
 	import type { EngagementCompletionData } from "../shared/engagement-types";
 	import type { SeasonInfo } from "../shared/growth-types";
+	import type {
+		JoinRaceResult,
+		RaceCompleteResult,
+	} from "../shared/race-types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
 	import FirstScreen from "./components/FirstScreen.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
+	import RaceOverlay from "./components/RaceOverlay.svelte";
 	import { deserializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
 	import {
@@ -82,6 +87,7 @@
 	let seasonPoints = $state(0);
 	let isMod = $state(false);
 	let notifyOptIn = $state(false);
+	let postId = $state<string | undefined>(undefined);
 	let hintsDismissed = $state<{
 		numberConstraint: boolean;
 		adjacencyViolation: boolean;
@@ -89,6 +95,13 @@
 		numberConstraint: false,
 		adjacencyViolation: false,
 	});
+
+	// ─── Race state ──────────────────────────────────────────────────────────
+	type RaceOverlayState = "waiting" | "racing" | "finished";
+	let isRacing = $state(false);
+	let raceSessionId = $state<string | null>(null);
+	let raceResult = $state<"won" | "lost" | null>(null);
+	let raceOverlayState = $state<RaceOverlayState>("waiting");
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -140,6 +153,9 @@
 			puzzleNumber = data.puzzleNumber ?? 0;
 			isMod = data.isMod ?? false;
 
+			// Hydrate postId from server context
+			postId = data.postId;
+
 			// Hydrate notify opt-in and hints dismissed from GameState
 			notifyOptIn = data.notifyOptIn ?? false;
 			const serverHintsDismissed = data.hintsDismissed ?? {
@@ -176,6 +192,7 @@
 			seasonRank = null;
 			seasonPoints = 0;
 			resetMistakes();
+			resetRaceState();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
 			currentView =
@@ -263,7 +280,12 @@
 			timeTaken = Math.round((Date.now() - startTime) / 1000);
 			// Check last active cell before reporting
 			onPuzzleComplete(grid, gridSize);
-			reportCompletion(timeTaken);
+			// Route through race completion if racing, otherwise normal solo
+			if (isRacing && raceSessionId) {
+				handleRaceComplete(timeTaken);
+			} else {
+				reportCompletion(timeTaken);
+			}
 		}
 	}
 
@@ -524,6 +546,134 @@
 		currentView = "game";
 		startTime = Date.now();
 	}
+
+	// ─── Race flow handlers ──────────────────────────────────────────────────
+
+	/**
+	 * Join or resume a race. Calls POST /api/race/join and transitions UI state.
+	 */
+	async function handleRace() {
+		if (!postId) return;
+
+		try {
+			const response = await fetch("/api/race/join", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ postId, gridSize }),
+			});
+
+			if (!response.ok) return;
+
+			const data: JoinRaceResult = await response.json();
+
+			if (data.status === "waiting") {
+				raceSessionId = data.sessionId;
+				isRacing = true;
+				raceResult = null;
+				raceOverlayState = "waiting";
+			} else if (data.status === "matched") {
+				raceSessionId = data.sessionId;
+				isRacing = true;
+				raceResult = null;
+				raceOverlayState = "racing";
+				// Reset timer for race start
+				startTime = Date.now();
+			} else if (data.status === "already_racing") {
+				raceSessionId = data.sessionId;
+				isRacing = true;
+				raceResult = null;
+				raceOverlayState = "racing";
+			}
+		} catch {
+			// Non-critical — race join failure doesn't block gameplay
+		}
+	}
+
+	/**
+	 * Handle race completion — called when puzzle is solved during a race.
+	 * Reports to race server and triggers normal completion analytics.
+	 */
+	async function handleRaceComplete(time: number) {
+		if (!raceSessionId) return;
+
+		try {
+			const response = await fetch(
+				`/api/race/complete/${raceSessionId}`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ timeTaken: time }),
+				},
+			);
+
+			if (!response.ok) return;
+
+			const data: RaceCompleteResult = await response.json();
+
+			if (data.waitingForOpponent) {
+				// We finished first, waiting for opponent — keep racing overlay
+				raceResult = null;
+			} else {
+				// Race is decided
+				raceResult = data.won ? "won" : "lost";
+				raceOverlayState = "finished";
+			}
+		} catch {
+			// On failure, still count as a normal completion
+		}
+
+		// Trigger same analytics as solo completion
+		reportCompletion(time);
+	}
+
+	/**
+	 * Cancel race during waiting state — abandon the queue.
+	 */
+	async function handleRaceCancel() {
+		if (raceSessionId) {
+			try {
+				await fetch(`/api/race/abandon/${raceSessionId}`, {
+					method: "POST",
+				});
+			} catch {
+				// Non-critical
+			}
+		}
+		resetRaceState();
+	}
+
+	/**
+	 * "Race Again" from the finished overlay — re-queue for a new race.
+	 */
+	function handleRaceAgain() {
+		resetRaceState();
+		handleRace();
+	}
+
+	/**
+	 * "Challenge Friends" from the race finished overlay.
+	 */
+	function handleRaceChallenge() {
+		resetRaceState();
+		handleChallenge();
+	}
+
+	/**
+	 * "Play Solo" from the waiting overlay when queue expires.
+	 */
+	function handleRaceSolo() {
+		resetRaceState();
+	}
+
+	/**
+	 * Reset all race state back to defaults.
+	 */
+	function resetRaceState() {
+		isRacing = false;
+		raceSessionId = null;
+		raceResult = null;
+		raceOverlayState = "waiting";
+	}
 </script>
 
 <div class="h-full w-full overflow-hidden bg-theme-bg-primary">
@@ -572,6 +722,7 @@
 			mistakes: $mistakeCount,
 			hasSubscribed,
 			isChallenge,
+			postId,
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
@@ -590,6 +741,9 @@
 			currentSeason,
 			notifyOptIn,
 			hintsDismissed,
+			onRace: handleRace,
+			isRaceResult: raceResult !== null,
+			raceWon: raceResult === "won",
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}
@@ -606,6 +760,18 @@
 	isOpen={showAnalytics}
 	onClose={() => (showAnalytics = false)}
 />
+
+{#if isRacing && raceSessionId && postId}
+	<RaceOverlay
+		sessionId={raceSessionId}
+		{postId}
+		state={raceOverlayState}
+		onCancel={handleRaceCancel}
+		onRaceAgain={handleRaceAgain}
+		onChallenge={handleRaceChallenge}
+		onSolo={handleRaceSolo}
+	/>
+{/if}
 
 {#if showLevelUp}
 	<div class="level-up-overlay" role="status" aria-live="polite">

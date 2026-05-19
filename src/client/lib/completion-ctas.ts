@@ -1,3 +1,5 @@
+import type { CompletionAction, CompletionContext } from '../../shared/race-types'
+
 export type CompletionCtaId =
     | 'next-puzzle'
     | 'rival-challenge'
@@ -67,4 +69,29 @@ export const getCompletionCtas = (input: CompletionCtaInput): CompletionCtas => 
             label: 'Create Rival Challenge',
         }],
     }
+}
+
+// ─── Simplified Completion CTAs (Social Viral Mechanics) ───────────────────────
+
+const getPrimaryCta = (context: CompletionContext): CompletionAction => {
+    if (context.isRaceResult && context.raceWon) {
+        return { id: 'race-rematch', label: 'Race Again', style: 'primary' }
+    }
+
+    if (context.hasChallenged) {
+        return { id: 'view-challenge', label: 'View Challenge', style: 'primary' }
+    }
+
+    return { id: 'challenge-friends', label: 'Challenge Friends', style: 'primary' }
+}
+
+export const getSimplifiedCompletionCtas = (
+    context: CompletionContext
+): { primary: CompletionAction; secondary: CompletionAction[] } => {
+    const primary = getPrimaryCta(context)
+    const secondary: CompletionAction[] = [
+        { id: 'next-puzzle', label: 'Next Puzzle', style: 'secondary' },
+    ]
+
+    return { primary, secondary }
 }

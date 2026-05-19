@@ -44,6 +44,7 @@ export type GameState = {
 	tutorialCompleted: boolean
 	skillLevel: number
 	gridSizePreference: number
+	postId?: string
 	isChallenge?: boolean
 	streak?: StreakData
 	username?: string

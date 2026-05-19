@@ -8,12 +8,10 @@
 	} from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
+	import type { CompletionContext } from "../../shared/race-types";
 	import { validateGrid } from "../lib/validation";
 	import { hintShownStore, markShown } from "../stores/hints";
-	import {
-		getCompletionCtas,
-		type CompletionCtaId,
-	} from "../lib/completion-ctas";
+	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
 	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -30,6 +28,7 @@
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 	import ResultCard from "../components/ResultCard.svelte";
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
+	import PresenceBar from "../components/PresenceBar.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
@@ -37,6 +36,7 @@
 	import BarChart2 from "lucide-svelte/icons/bar-chart-2";
 	import ExternalLink from "lucide-svelte/icons/external-link";
 	import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
+	import Zap from "lucide-svelte/icons/zap";
 
 	type Props = {
 		grid: Grid;
@@ -72,6 +72,10 @@
 		seasonPoints?: number;
 		currentSeason?: SeasonInfo | undefined;
 		notifyOptIn?: boolean;
+		onRace?: () => void;
+		isRaceResult?: boolean;
+		raceWon?: boolean;
+		postId?: string;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -109,6 +113,10 @@
 		seasonPoints = 0,
 		currentSeason,
 		notifyOptIn = false,
+		onRace,
+		isRaceResult = false,
+		raceWon = false,
+		postId,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
 		hintsDismissed: _hintsDismissed = {
 			numberConstraint: false,
@@ -129,6 +137,7 @@
 	let showSeasonLeaderboard = $state(false);
 	let hasCommentedResult = $state(false);
 	let openMoreActionsKey = $state<string | null>(null);
+	let showCoinBreakdown = $state(false);
 	let showOptInTutorial = $state(false);
 
 	// Notify toggle — initialised from prop, updated optimistically on tap (Reqs 13.1–13.5)
@@ -238,7 +247,8 @@
 		milestoneKey !== null && dismissedMilestoneKey !== milestoneKey,
 	);
 	const showMoreActionsPanel = $derived(
-		currentCompletionKey !== null && openMoreActionsKey === currentCompletionKey,
+		currentCompletionKey !== null &&
+			openMoreActionsKey === currentCompletionKey,
 	);
 
 	// Tomorrow's streak bonus: current streak + 1 day worth of bonus coins
@@ -247,15 +257,20 @@
 			? Math.min(streakData.currentStreak + 1, 30)
 			: 1,
 	);
-	const completionCtas = $derived(
-		getCompletionCtas({
-			mistakes,
-			streak: streakData.currentStreak,
-			skillLevel,
-			hasChallenged,
-			challengeUrl,
-			seasonRank,
-		}),
+	// Build CompletionContext for simplified CTAs (social viral mechanics)
+	const completionContext = $derived<CompletionContext>({
+		isRaceResult,
+		raceWon,
+		timeTaken: timeTaken ?? 0,
+		mistakes,
+		streak: streakData.currentStreak,
+		skillLevel,
+		hasChallenged,
+		challengeUrl,
+		hasSubscribed,
+	});
+	const simplifiedCtas = $derived(
+		getSimplifiedCompletionCtas(completionContext),
 	);
 
 	function confirmShare(): void {
@@ -268,14 +283,20 @@
 		onChallenge();
 	}
 
-	function handleSocialCta(id: CompletionCtaId): void {
-		if (id === "open-rival-challenge") {
-			openChallenge();
-			return;
-		}
-
-		if (id === "rival-challenge") {
+	function handlePrimaryCta(): void {
+		const id = simplifiedCtas.primary.id;
+		if (id === "challenge-friends") {
 			showChallengeConfirm = true;
+		} else if (id === "race-rematch") {
+			onRace?.();
+		} else if (id === "view-challenge") {
+			openChallenge();
+		}
+	}
+
+	function handleSecondaryCta(id: string): void {
+		if (id === "next-puzzle") {
+			onNextChallenge();
 		}
 	}
 
@@ -381,13 +402,24 @@
 		</div>
 
 		{#if !isCompleted}
-			<button
-				onclick={onNextChallenge}
-				class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
-				aria-label="New Puzzle"
-			>
-				<Shuffle class="w-5 h-5 text-urjo-blue" />
-			</button>
+			<div class="flex items-center gap-1 shrink-0">
+				{#if onRace}
+					<button
+						onclick={onRace}
+						class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
+						aria-label="Race"
+					>
+						<Zap class="w-5 h-5 text-yellow-400" />
+					</button>
+				{/if}
+				<button
+					onclick={onNextChallenge}
+					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
+					aria-label="New Puzzle"
+				>
+					<Shuffle class="w-5 h-5 text-urjo-blue" />
+				</button>
+			</div>
 		{:else}
 			<div class="w-9 shrink-0"></div>
 		{/if}
@@ -423,17 +455,26 @@
 				class="fixed inset-0 flex flex-col items-center z-20 p-3 bg-theme-overlay backdrop-blur-sm overflow-y-auto"
 			>
 				<div
-					class="flex flex-col items-center gap-2 max-w-sm w-full my-auto"
+					class="flex flex-col items-center gap-3 max-w-sm w-full my-auto"
 				>
-					<!-- Coin reward with inline streak badge -->
-					{#if coinReward && coinReward.total > 0}
+					<!-- ── Zone 1: Celebration header ── -->
+					<!-- Single row: coins · streak · perfect/mistakes · multiplier -->
+					<div
+						class="flex flex-col items-center gap-1 animate-bounce-in"
+					>
 						<div
-							class="flex flex-col items-center gap-1 animate-bounce-in"
+							class="flex items-center gap-2 flex-wrap justify-center"
 						>
-							<div class="flex items-center gap-2">
-								<span class="text-2xl font-bold text-yellow-400"
-									>+{coinReward.total} 🪙</span
+							{#if coinReward && coinReward.total > 0}
+								<button
+									onclick={() =>
+										(showCoinBreakdown =
+											!showCoinBreakdown)}
+									class="text-2xl font-bold text-yellow-400 hover:opacity-80 transition-opacity"
+									aria-label="Toggle coin breakdown"
 								>
+									+{coinReward.total} 🪙
+								</button>
 								{#if coinReward.multiplier}
 									<span
 										class="px-2 py-0.5 rounded-full bg-yellow-500/20 border border-yellow-500/50 text-xs font-bold text-yellow-400"
@@ -441,15 +482,33 @@
 										{coinReward.multiplier}× BONUS!
 									</span>
 								{/if}
-								{#if streakData.currentStreak > 0}
-									<span
-										class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
-									>
-										🔥 {streakData.currentStreak}
-									</span>
-								{/if}
-							</div>
-							<div class="flex gap-2 text-xs text-gray-400">
+							{/if}
+							{#if streakData.currentStreak > 0}
+								<span
+									class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
+								>
+									🔥 {streakData.currentStreak}
+								</span>
+							{/if}
+							{#if mistakes === 0}
+								<span
+									class="text-sm font-semibold text-green-400"
+									>🎯 Perfect!</span
+								>
+							{:else}
+								<span class="text-sm text-yellow-400"
+									>⚠️ {mistakes} mistake{mistakes === 1
+										? ""
+										: "s"}</span
+								>
+							{/if}
+						</div>
+
+						<!-- Coin breakdown — collapsed by default, tap coin total to expand -->
+						{#if showCoinBreakdown && coinReward}
+							<div
+								class="flex gap-2 text-xs text-gray-400 flex-wrap justify-center"
+							>
 								{#if coinReward.streakBonus > 0}<span
 										>🔥 +{coinReward.streakBonus}</span
 									>{/if}
@@ -466,14 +525,8 @@
 										>🎁 +{coinReward.loginBonus} login bonus</span
 									>{/if}
 							</div>
-						</div>
-					{:else if streakData.currentStreak > 0}
-						<span
-							class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
-						>
-							🔥 {streakData.currentStreak}
-						</span>
-					{/if}
+						{/if}
+					</div>
 
 					<!-- New achievement unlocks -->
 					{#if engagement?.newAchievements && engagement.newAchievements.length > 0}
@@ -491,111 +544,61 @@
 						</div>
 					{/if}
 
-					<!-- Perfect / mistakes badge -->
-					{#if mistakes === 0}
-						<div class="text-sm font-semibold text-green-400">
-							🎯 Perfect!
-						</div>
-					{:else}
-						<div class="text-sm text-yellow-400">
-							⚠️ {mistakes} mistake{mistakes === 1 ? "" : "s"}
-						</div>
-					{/if}
-
-					<!-- Season rank and points -->
-					{#if currentSeason?.isActive && (seasonRank !== null || seasonPoints > 0)}
-						<div
-							class="flex items-center gap-2 text-xs text-theme-text-muted"
-						>
-							<span>🏆 Season {currentSeason.seasonNumber}</span>
-							{#if seasonRank !== null}
-								<span class="font-semibold text-yellow-400"
-									>Rank #{seasonRank}</span
-								>
-							{/if}
-							{#if seasonPoints > 0}
-								<span>· {seasonPoints} pts</span>
-							{/if}
-						</div>
-					{/if}
-
-					<!-- (1) Result card preview + Copy -->
+					<!-- ── Zone 2: Result card (visual hero) ── -->
+					<!-- Season rank is now inside the card; no standalone row needed -->
 					{#if puzzleColors}
-						<ResultCard
-							{puzzleColors}
-							{gridSize}
-							{skillLevel}
-							{puzzleNumber}
-							streak={streakData.currentStreak}
-							timeTaken={timeTaken ?? 0}
-							{mistakes}
-							hasCommented={hasCommentedResult}
-							onCommentResult={() => (hasCommentedResult = true)}
-						/>
-					{/if}
-
-					{#if completionCtas.social.length > 0}
-						<div class="grid grid-cols-1 gap-2 w-full">
-							{#each completionCtas.social as cta (cta.id)}
-								<button
-									onclick={() => handleSocialCta(cta.id)}
-									class="px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 active:scale-95 transition-all w-full flex items-center justify-center gap-2"
-								>
-									{#if cta.id === "open-rival-challenge"}
-										<ExternalLink class="w-4 h-4" />
-									{/if}
-									<span>{cta.label}</span>
-								</button>
-							{/each}
+						<div class="w-full">
+							<ResultCard
+								{puzzleColors}
+								{gridSize}
+								{skillLevel}
+								{puzzleNumber}
+								streak={streakData.currentStreak}
+								timeTaken={timeTaken ?? 0}
+								{mistakes}
+								seasonNumber={currentSeason?.isActive
+									? currentSeason.seasonNumber
+									: null}
+								{seasonRank}
+								{seasonPoints}
+								hasCommented={hasCommentedResult}
+								onCommentResult={() =>
+									(hasCommentedResult = true)}
+							/>
 						</div>
 					{/if}
 
-					<!-- Tomorrow's streak bonus preview -->
-					<div class="text-xs text-theme-text-muted text-center">
+					<!-- ── Zone 3: Actions ── -->
+					<!-- Primary CTA — full-width, bold, high contrast -->
+					<button
+						onclick={handlePrimaryCta}
+						class="w-full px-4 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
+					>
+						{#if simplifiedCtas.primary.id === "view-challenge"}
+							<ExternalLink class="w-4 h-4" />
+						{/if}
+						<span>{simplifiedCtas.primary.label}</span>
+					</button>
+
+					<!-- Secondary CTA — ghost/outline styling -->
+					{#each simplifiedCtas.secondary as cta (cta.id)}
+						<button
+							onclick={() => handleSecondaryCta(cta.id)}
+							class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all"
+						>
+							{cta.label}
+						</button>
+					{/each}
+
+					<!-- Retention hook — promoted visibility -->
+					<div
+						class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
+					>
 						🔥 Return tomorrow for +{tomorrowStreakBonus} streak bonus
 						coins
 					</div>
 
-					<!-- (2) Notify Toggle (Reqs 13.1–13.5) -->
-					<div class="w-full flex flex-col items-center gap-1">
-						<button
-							onclick={handleNotifyToggle}
-							disabled={notifySubmitting}
-							aria-pressed={localNotifyOptIn}
-							class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm font-semibold hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-						>
-							{#if localNotifyOptIn}
-								🔕 Notifications on — tap to turn off
-							{:else}
-								🔔 Notify me tomorrow
-							{/if}
-						</button>
-						{#if notifyError}
-							<p class="text-xs text-red-400 text-center">
-								{notifyError}
-							</p>
-						{/if}
-					</div>
-
-					<!-- (3) Next Puzzle -->
-					<button
-						onclick={onNextChallenge}
-						class="px-8 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all w-full"
-					>
-						{completionCtas.primary.label}
-					</button>
-
-					<!-- (4) Subscribe (non-subscribers only) -->
-					{#if onSubscribe && !hasSubscribed}
-						<button
-							onclick={() => (showSubscribeConfirm = true)}
-							class="px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all w-full flex items-center justify-center gap-2"
-						>
-							🔔 Join r/urjo for daily puzzles
-						</button>
-					{/if}
-
-					<!-- More menu -->
+					<!-- "More" button — toggles collapsible panel -->
 					<button
 						onclick={toggleMoreActions}
 						class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
@@ -604,8 +607,34 @@
 						<span>More</span>
 					</button>
 
+					<!-- Collapsible "More" panel: 2-col grid -->
 					{#if showMoreActionsPanel}
 						<div class="grid grid-cols-2 gap-2 w-full">
+							<!-- Notify toggle -->
+							<button
+								onclick={() => {
+									openMoreActionsKey = null;
+									handleNotifyToggle();
+								}}
+								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+							>
+								{localNotifyOptIn
+									? "🔕 Notify off"
+									: "🔔 Notify me"}
+							</button>
+							<!-- Subscribe -->
+							{#if onSubscribe && !hasSubscribed}
+								<button
+									onclick={() => {
+										openMoreActionsKey = null;
+										showSubscribeConfirm = true;
+									}}
+									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
+								>
+									🔔 Subscribe
+								</button>
+							{/if}
+							<!-- Missions -->
 							<button
 								onclick={() => {
 									openMoreActionsKey = null;
@@ -615,6 +644,7 @@
 							>
 								Missions
 							</button>
+							<!-- Achievements -->
 							<button
 								onclick={() => {
 									openMoreActionsKey = null;
@@ -624,6 +654,7 @@
 							>
 								Achievements
 							</button>
+							<!-- Profile -->
 							<button
 								onclick={() => {
 									openMoreActionsKey = null;
@@ -633,6 +664,7 @@
 							>
 								Profile
 							</button>
+							<!-- Season -->
 							{#if currentSeason?.isActive}
 								<button
 									onclick={() => {
@@ -645,6 +677,12 @@
 								</button>
 							{/if}
 						</div>
+					{/if}
+
+					{#if notifyError}
+						<p class="text-xs text-red-400 text-center">
+							{notifyError}
+						</p>
 					{/if}
 				</div>
 			</div>
@@ -669,7 +707,7 @@
 	{/if}
 
 	<!-- Footer -->
-	<footer class="flex-none flex items-center justify-center h-8">
+	<footer class="flex-none flex flex-col items-center justify-center gap-0.5">
 		<p class="text-xs text-theme-text-muted text-center">
 			{#if isCompleted}
 				Solved in {timeTaken ?? 0}s
@@ -679,6 +717,9 @@
 				Mistakes: {mistakes}
 			{/if}
 		</p>
+		{#if !isCompleted && postId}
+			<PresenceBar {postId} />
+		{/if}
 	</footer>
 </div>
 

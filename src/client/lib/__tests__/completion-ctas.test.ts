@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import type { CompletionContext } from '../../../shared/race-types'
 import {
     getCompletionCtas,
+    getSimplifiedCompletionCtas,
     isRivalChallengeEligible,
 } from '../completion-ctas'
 
@@ -73,5 +75,91 @@ describe('getCompletionCtas', () => {
             id: 'open-rival-challenge',
             label: 'Open Rival Challenge',
         })
+    })
+})
+
+describe('getSimplifiedCompletionCtas', () => {
+    const baseContext: CompletionContext = {
+        isRaceResult: false,
+        raceWon: false,
+        timeTaken: 45,
+        mistakes: 1,
+        streak: 3,
+        skillLevel: 2,
+        hasChallenged: false,
+        challengeUrl: null,
+        hasSubscribed: false,
+    }
+
+    it('returns "Challenge Friends" as primary by default', () => {
+        const result = getSimplifiedCompletionCtas(baseContext)
+
+        expect(result.primary).toEqual({
+            id: 'challenge-friends',
+            label: 'Challenge Friends',
+            style: 'primary',
+        })
+    })
+
+    it('returns "Race Again" as primary after a race win', () => {
+        const context: CompletionContext = {
+            ...baseContext,
+            isRaceResult: true,
+            raceWon: true,
+        }
+        const result = getSimplifiedCompletionCtas(context)
+
+        expect(result.primary).toEqual({
+            id: 'race-rematch',
+            label: 'Race Again',
+            style: 'primary',
+        })
+    })
+
+    it('returns "View Challenge" as primary when already challenged', () => {
+        const context: CompletionContext = {
+            ...baseContext,
+            hasChallenged: true,
+            challengeUrl: 'https://reddit.com/comments/abc',
+        }
+        const result = getSimplifiedCompletionCtas(context)
+
+        expect(result.primary).toEqual({
+            id: 'view-challenge',
+            label: 'View Challenge',
+            style: 'primary',
+        })
+    })
+
+    it('always contains "Next Puzzle" in secondary', () => {
+        const result = getSimplifiedCompletionCtas(baseContext)
+
+        expect(result.secondary).toContainEqual({
+            id: 'next-puzzle',
+            label: 'Next Puzzle',
+            style: 'secondary',
+        })
+    })
+
+    it('returns "Challenge Friends" on race loss (not race rematch)', () => {
+        const context: CompletionContext = {
+            ...baseContext,
+            isRaceResult: true,
+            raceWon: false,
+        }
+        const result = getSimplifiedCompletionCtas(context)
+
+        expect(result.primary).toEqual({
+            id: 'challenge-friends',
+            label: 'Challenge Friends',
+            style: 'primary',
+        })
+    })
+
+    it('is a pure function — same input always produces same output', () => {
+        const first = getSimplifiedCompletionCtas(baseContext)
+        const second = getSimplifiedCompletionCtas(baseContext)
+
+        expect(first).toEqual(second)
     })
 })
