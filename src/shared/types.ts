@@ -84,6 +84,8 @@ export type CompleteResponse = {
 	engagement?: EngagementCompletionData | undefined
 	seasonRank?: number
 	seasonPoints?: number
+	/** URL of auto-generated challenge post (only on perfect solves, opt-out model) */
+	autoChallengeUrl?: string
 }
 
 /** A single game record stored in user history */
