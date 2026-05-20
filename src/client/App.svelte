@@ -70,6 +70,7 @@
 	let hasShared = $state(false);
 	let hasChallenged = $state(false);
 	let challengeUrl = $state<string | null>(null);
+	let autoChallengeUrl = $state<string | null>(null);
 	let showShop = $state(false);
 	let showAnalytics = $state(false);
 	let coins = $state(0);
@@ -348,6 +349,10 @@
 				if (data.seasonPoints !== undefined) {
 					seasonPoints = data.seasonPoints;
 				}
+				// Auto-challenge URL from perfect solve
+				if (data.autoChallengeUrl) {
+					autoChallengeUrl = data.autoChallengeUrl;
+				}
 			}
 		} catch {
 			// Non-critical, continue anyway
@@ -418,6 +423,7 @@
 	async function handleNextChallenge() {
 		hasChallenged = false;
 		challengeUrl = null;
+		autoChallengeUrl = null;
 		resetLatch();
 		resetHints();
 		try {
@@ -456,6 +462,7 @@
 	function handleRestart() {
 		hasChallenged = false;
 		challengeUrl = null;
+		autoChallengeUrl = null;
 		resetLatch();
 		resetHints();
 		grid = deserializeGrid(
@@ -744,6 +751,7 @@
 			onRace: handleRace,
 			isRaceResult: raceResult !== null,
 			raceWon: raceResult === "won",
+			autoChallengeUrl,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}

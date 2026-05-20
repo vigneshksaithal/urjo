@@ -76,6 +76,7 @@
 		isRaceResult?: boolean;
 		raceWon?: boolean;
 		postId?: string;
+		autoChallengeUrl?: string | null;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -117,6 +118,7 @@
 		isRaceResult = false,
 		raceWon = false,
 		postId,
+		autoChallengeUrl = null,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
 		hintsDismissed: _hintsDismissed = {
 			numberConstraint: false,
@@ -139,6 +141,8 @@
 	let openMoreActionsKey = $state<string | null>(null);
 	let showCoinBreakdown = $state(false);
 	let showOptInTutorial = $state(false);
+	let autoChallengeToastVisible = $state(true);
+	let autoChallengeDismissed = $state(false);
 
 	// Notify toggle — initialised from prop, updated optimistically on tap (Reqs 13.1–13.5)
 	// Using a function initialiser avoids the Svelte "captures initial value" warning
@@ -364,6 +368,20 @@
 	function handleOptInTutorialDismiss(): void {
 		showOptInTutorial = false;
 	}
+
+	async function handleAutoChallengeOptOut(): Promise<void> {
+		autoChallengeDismissed = true;
+		autoChallengeToastVisible = false;
+		try {
+			await fetch("/api/game/auto-challenge/opt-out", { method: "POST" });
+		} catch {
+			// Non-blocking — opt-out preference is best-effort
+		}
+	}
+
+	function dismissAutoChallengeToast(): void {
+		autoChallengeToastVisible = false;
+	}
 </script>
 
 <div class="h-full w-full flex flex-col p-3 gap-2 overflow-hidden">
@@ -541,6 +559,40 @@
 									>
 								</div>
 							{/each}
+						</div>
+					{/if}
+
+					<!-- Auto-challenge toast (VIRAL: shows when challenge was auto-posted) -->
+					{#if autoChallengeUrl && autoChallengeToastVisible && !autoChallengeDismissed}
+						<div class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-between gap-2 animate-bounce-in">
+							<div class="flex items-center gap-2 min-w-0">
+								<span class="text-lg shrink-0">🎯</span>
+								<span class="text-sm text-green-400 font-medium truncate">Your perfect solve is live!</span>
+							</div>
+							<div class="flex items-center gap-1 shrink-0">
+								<a
+									href={autoChallengeUrl}
+									target="_blank"
+									rel="noopener"
+									class="px-2 py-1 text-xs font-semibold text-green-400 hover:text-green-300 transition-colors"
+								>
+									View
+								</a>
+								<button
+									onclick={handleAutoChallengeOptOut}
+									class="px-2 py-1 text-xs text-theme-text-muted hover:text-red-400 transition-colors"
+									title="Stop auto-sharing perfect solves"
+								>
+									Don't auto-share
+								</button>
+								<button
+									onclick={dismissAutoChallengeToast}
+									class="px-1 py-1 text-xs text-theme-text-muted hover:text-theme-text-secondary transition-colors"
+									aria-label="Dismiss"
+								>
+									✕
+								</button>
+							</div>
 						</div>
 					{/if}
 
