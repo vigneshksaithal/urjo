@@ -76,7 +76,7 @@ import {
 } from '../lib/viral-tracker'
 import { getHintsDismissed, markHintDismissed } from '../lib/hints'
 import type { HintKind } from '../lib/hints'
-import { buildChallengePreview, buildChallengeBeatPreview } from '../lib/preview'
+import { buildChallengePreview, buildChallengeBeatPreview, maskPuzzleGrid } from '../lib/preview'
 import type { ChallengePreviewData } from '../../shared/race-types'
 import { isModeratorCached } from '../lib/moderator'
 import { isOptedIn } from '../lib/notify'
@@ -1459,15 +1459,15 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			// fallback to Anon
 		}
 
-		// Build title — rotating high-CTR templates with grid size context
-		const perfectTag = mistakes === 0 ? ' (perfect!)' : ''
-		const perfectBadge = mistakes === 0 ? ' (zero mistakes)' : ''
+		// Build title — rotating high-CTR templates WITHOUT "Level X" (removes beginner signal)
+		const perfectTag = mistakes === 0 ? ' (zero mistakes)' : ''
 		const gridLabel = `${puzzle.gridSize}×${puzzle.gridSize}`
+		const difficultyLabel = parseInt(puzzle.gridSize, 10) <= 4 ? 'Quick' : parseInt(puzzle.gridSize, 10) <= 6 ? 'Standard' : 'Hard'
 		const titleTemplates = [
-			`Only top players beat ${timeTaken}s on a ${gridLabel} at Level ${skillLevel}. u/${username} just did it${perfectBadge}. Your turn 🎯`,
-			`u/${username} solved a ${gridLabel} Level ${skillLevel} in ${timeTaken}s${perfectTag} — can YOU beat it? 🏆`,
-			`${gridLabel} Level ${skillLevel} cleared in ${timeTaken}s by u/${username}${perfectBadge}. Think you're faster? 👀`,
-			`New ${gridLabel} challenge dropped: Level ${skillLevel}, ${timeTaken}s to beat. u/${username} set the bar${perfectBadge} 🔥`,
+			`🎯 ${timeTaken}s to beat — u/${username} just set the bar${perfectTag}`,
+			`🔥 u/${username} cleared a ${difficultyLabel} ${gridLabel} in ${timeTaken}s${perfectTag}. Your move.`,
+			`👀 ${timeTaken}s${perfectTag}. u/${username} challenges you on this ${gridLabel}. Think you're faster?`,
+			`🏆 ${difficultyLabel} puzzle dropped: ${timeTaken}s to beat. u/${username} says try 🎯`,
 		]
 		// Rotate template based on hour to spread variety without randomness (deterministic)
 		const templateIndex = new Date().getUTCHours() % titleTemplates.length
@@ -1509,8 +1509,8 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		await redis.set(challengeKey, 'true')
 		await redis.expire(challengeKey, 86400)
 
-		// Post a comment on the challenge post showing the score to beat
-		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`} at Level ${skillLevel}\n\nThink you can do better? Solve the puzzle above! 🎯`
+		// Post a comment on the challenge post showing the score to beat (no Level reference)
+		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`}\n\nThink you can do better? Solve the puzzle above! 🎯`
 		await reddit.submitComment({ id: newPost.id as `t3_${string}`, text: scoreComment })
 
 		// Post the initial leaderboard comment (APP account, no user action needed)
@@ -1539,7 +1539,7 @@ Think you can beat it? Play above! 🎯`,
 		await incrementChallengesCreated(userId)
 		await trackChallengePostCreated(today, userId, newPost.id)
 
-		// ─── Custom post preview for feed engagement (non-blocking) ────────────
+		// ─── Custom post preview for feed engagement (VIRAL: curiosity-gap masking) ─
 		try {
 			const emojiMap: Record<string, string> = { r: '🟥', b: '🟦' }
 			const cells = puzzle.colors.split('').map((ch) => emojiMap[ch] ?? '⬛')
@@ -1548,13 +1548,17 @@ Think you can beat it? Play above! 🎯`,
 			for (let i = 0; i < cells.length; i += gridSizeNum) {
 				rows.push(cells.slice(i, i + gridSizeNum).join(''))
 			}
-			const emojiGrid = rows.join('\n')
+			const fullEmojiGrid = rows.join('\n')
+			
+			// VIRAL OPTIMIZATION: Mask 60% of cells to create curiosity gap
+			// Shows enough pattern to intrigue, not enough to satisfy
+			const maskedGrid = maskPuzzleGrid(fullEmojiGrid, gridSizeNum, newPost.id, 0.4)
 
 			const previewData: ChallengePreviewData = {
 				challengerUsername: username,
 				challengerTime: timeTaken,
 				gridSize: gridSizeNum,
-				puzzleGridEmoji: emojiGrid,
+				puzzleGridEmoji: maskedGrid, // Use masked grid instead of full
 				beatsCount: 0,
 				attemptsCount: 0,
 				fastestTime: null,
@@ -1562,10 +1566,11 @@ Think you can beat it? Play above! 🎯`,
 			}
 			buildChallengePreview(previewData)
 
-			// Store preview data in Redis for future updates
+			// Store BOTH masked (for preview) and full (for game) grids
 			await redis.hSet(`game:${newPost.id}:preview`, {
 				type: 'challenge',
 				data: JSON.stringify(previewData),
+				fullGrid: fullEmojiGrid, // Keep original for potential future use
 			})
 		} catch (previewErr) {
 			console.error('[Preview] Challenge preview failed (non-critical):', previewErr)
