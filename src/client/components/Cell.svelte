@@ -94,20 +94,13 @@
 		</div>
 	{/if}
 
-	<!-- Empty cell: diagonal split with lighter red and blue -->
+	<!-- Empty cell: single neutral tone — replaces the old red/blue split that
+	     ambiguously implied "this cell is both colors". Subtle ambient breathe
+	     keeps the board feeling alive while the player is thinking. -->
 	{#if !isLoading && color === null}
 		<div
-			class="absolute inset-0 overflow-hidden rounded-full pointer-events-none"
-		>
-			<div
-				class="absolute inset-0 bg-theme-empty-red"
-				style="clip-path: polygon(0 0, 0 100%, 100% 100%)"
-			></div>
-			<div
-				class="absolute inset-0 bg-theme-empty-blue"
-				style="clip-path: polygon(0 0, 100% 0, 100% 100%)"
-			></div>
-		</div>
+			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell border border-theme-empty-cell-border animate-empty-breathe"
+		></div>
 	{/if}
 
 	<!-- Loading state: animated red cell -->

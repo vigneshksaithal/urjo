@@ -12,6 +12,7 @@
 	import { validateGrid } from "../lib/validation";
 	import { hintShownStore, markShown } from "../stores/hints";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
+	import { getResultTier } from "../../shared/result-tiers";
 	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -29,7 +30,10 @@
 	import ResultCard from "../components/ResultCard.svelte";
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
 	import PresenceBar from "../components/PresenceBar.svelte";
+	import CountUp from "../components/CountUp.svelte";
+	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
+	import { playCoinChime, playTierFanfare } from "../lib/coin-sound";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
@@ -77,6 +81,47 @@
 		raceWon?: boolean;
 		postId?: string;
 		autoChallengeUrl?: string | null;
+		/** Run-again loop: number of solves this session (incl. the latest). */
+		sessionRun?: number;
+		/** Coin multiplier already applied for this session run. */
+		sessionRunMultiplier?: number;
+		/** Coins added by the session-run bonus on the latest completion. */
+		sessionRunBonusCoins?: number;
+		/** Streak forecast for tomorrow — drives the "come back" retention
+		 *  hook on the completion overlay. Optional because it only arrives
+		 *  after a successful /api/game/complete. */
+		streakForecast?: {
+			day: number;
+			coinBonus: number;
+			isMilestone: boolean;
+			label: string;
+		};
+		/** Active Weekend Event payload — when active, shows a persistent
+		 *  banner with countdown + applies a coin multiplier to all solves. */
+		weekendEvent?: {
+			active: boolean;
+			multiplier: number;
+			name: string;
+			emoji: string;
+			endsAtMs: number | null;
+			hoursLeft: number | null;
+		};
+		/** Coins added by the weekend event on the latest completion. */
+		weekendBonusCoins?: number;
+		/** Always-on progression strip data — player rank/score in the
+		 *  current season. Optional; the strip hides cleanly without it. */
+		seasonProgress?: {
+			rank: number | null;
+			score: number;
+		};
+		/** First incomplete daily mission for the always-on strip preview. */
+		nextMission?: {
+			templateId: string;
+			description: string;
+			currentProgress: number;
+			targetValue: number;
+			coinReward: number;
+		};
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -119,6 +164,14 @@
 		raceWon = false,
 		postId,
 		autoChallengeUrl = null,
+		sessionRun = 0,
+		sessionRunMultiplier = 1,
+		sessionRunBonusCoins = 0,
+		streakForecast = undefined,
+		weekendEvent = undefined,
+		weekendBonusCoins = 0,
+		seasonProgress = undefined,
+		nextMission = undefined,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
 		hintsDismissed: _hintsDismissed = {
 			numberConstraint: false,
@@ -261,6 +314,13 @@
 			? Math.min(streakData.currentStreak + 1, 30)
 			: 1,
 	);
+
+	// Result tier — replaces the binary Perfect/Mistakes framing with a
+	// positive spectrum (Flawless / Sharp / Solid / Scrappy). gridSize is
+	// always 4|6|8 in practice, so the cast is safe.
+	const resultTier = $derived(
+		getResultTier(mistakes, gridSize as 4 | 6 | 8),
+	);
 	// Build CompletionContext for simplified CTAs (social viral mechanics)
 	const completionContext = $derived<CompletionContext>({
 		isRaceResult,
@@ -288,18 +348,27 @@
 	}
 
 	function handlePrimaryCta(): void {
+		// Primary CTA is now always "Next Puzzle" (the in-flow continuation).
+		// We still route through the simplifiedCtas object so the label/id
+		// remain in sync with completion-ctas.ts.
 		const id = simplifiedCtas.primary.id;
+		if (id === "next-puzzle") {
+			onNextChallenge();
+		}
+	}
+
+	function handleSecondaryCta(id: string): void {
+		// Secondary CTA is the demoted social action. Old primary handlers move
+		// here so "Challenge Friends" / "Race Again" / "View Challenge" still
+		// work — they just live in the secondary slot now.
 		if (id === "challenge-friends") {
 			showChallengeConfirm = true;
 		} else if (id === "race-rematch") {
 			onRace?.();
 		} else if (id === "view-challenge") {
 			openChallenge();
-		}
-	}
-
-	function handleSecondaryCta(id: string): void {
-		if (id === "next-puzzle") {
+		} else if (id === "next-puzzle") {
+			// Backwards compat in case anything is still routed here
 			onNextChallenge();
 		}
 	}
@@ -398,6 +467,25 @@
 		<!-- Centre cluster -->
 		<div class="flex items-center gap-3 flex-1 justify-center">
 			<StreakBadge streak={streakData} />
+			{#if sessionRun >= 2}
+				<!-- Session run chip — Subway Surfers' "5 in a row" momentum
+				     indicator. Hidden for first solve so it doesn't appear
+				     before the player has earned anything. -->
+				<div
+					class="px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 flex items-center gap-1"
+					title="Keep playing for bigger coin bonuses"
+				>
+					<span class="text-xs">🏃</span>
+					<span class="text-xs font-bold text-orange-300">
+						{sessionRun} in a row
+					</span>
+					{#if sessionRunMultiplier > 1}
+						<span class="text-[10px] text-orange-200/80"
+							>· {sessionRunMultiplier.toFixed(2)}×</span
+						>
+					{/if}
+				</div>
+			{/if}
 			{#if coins !== undefined && onOpenShop}
 				<CoinDisplay {coins} onClick={onOpenShop} />
 			{/if}
@@ -443,6 +531,47 @@
 		{/if}
 	</header>
 
+	<!-- Weekend Event banner — persistent across the in-game and completion
+	     screens whenever the server reports an active event. Provides the
+	     FOMO clock the game previously lacked (CoC builder timer, Subway
+	     Surfers daily challenge timer). Tapping it has no action; it's a
+	     status indicator, not a CTA. -->
+	{#if weekendEvent?.active}
+		<div class="flex-none flex justify-center px-3">
+			<div
+				class="flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-fuchsia-500/15 via-orange-500/15 to-amber-500/15 border border-orange-500/40 shadow-sm"
+			>
+				<span class="text-base">{weekendEvent.emoji}</span>
+				<span class="text-xs font-bold text-orange-200">
+					{weekendEvent.name} · {weekendEvent.multiplier}× coins
+				</span>
+				{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
+					<span
+						class="text-[10px] text-orange-100/70 border-l border-orange-500/30 pl-2"
+					>
+						ends in {weekendEvent.hoursLeft}h
+					</span>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Always-on progression strip — Subway Surfers / CoC home-screen
+	     pattern. Surfaces streak calendar, season standing, and next daily
+	     mission so meta-progression is never hidden in modals. Only on the
+	     in-game view (hidden during completion overlay & challenge posts to
+	     avoid clutter). -->
+	{#if !isCompleted && !isChallenge}
+		<SeasonStrip
+			streak={streakData}
+			{currentSeason}
+			{seasonProgress}
+			{nextMission}
+			onOpenSeason={() => (showSeasonLeaderboard = true)}
+			onOpenMissions={() => (showMissions = true)}
+		/>
+	{/if}
+
 	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
 	{#if !isChallenge && onGridSizeChange}
 		<div class="flex-none flex justify-center">
@@ -484,6 +613,7 @@
 							class="flex items-center gap-2 flex-wrap justify-center"
 						>
 							{#if coinReward && coinReward.total > 0}
+								{@const finalCoinValue = coinReward.total + (coinReward.mysteryBox?.type === "coins" ? coinReward.mysteryBox.value : 0)}
 								<button
 									onclick={() =>
 										(showCoinBreakdown =
@@ -491,13 +621,45 @@
 									class="text-2xl font-bold text-yellow-400 hover:opacity-80 transition-opacity"
 									aria-label="Toggle coin breakdown"
 								>
-									+{coinReward.total} 🪙
+									<CountUp
+										to={finalCoinValue}
+										durationMs={Math.min(1400, 600 + finalCoinValue * 8)}
+										prefix="+"
+										suffix=" 🪙"
+										onTick={() => playCoinChime({ tier: "small", volume: 0.12 })}
+										onComplete={() => {
+											if (finalCoinValue >= 50) {
+												playTierFanfare(0.18);
+											} else {
+												playCoinChime({ tier: "big", volume: 0.18 });
+											}
+										}}
+									/>
 								</button>
 								{#if coinReward.multiplier}
 									<span
 										class="px-2 py-0.5 rounded-full bg-yellow-500/20 border border-yellow-500/50 text-xs font-bold text-yellow-400"
 									>
 										{coinReward.multiplier}× BONUS!
+									</span>
+								{/if}
+								{#if sessionRun >= 2 && sessionRunBonusCoins > 0}
+									<!-- Run-again loop: shows the bonus the
+									     player just earned for chaining solves. -->
+									<span
+										class="px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/50 text-xs font-bold text-orange-300"
+										title="Earned by playing {sessionRun} puzzles in a row"
+									>
+										🏃 +{sessionRunBonusCoins} ({sessionRunMultiplier.toFixed(2)}×)
+									</span>
+								{/if}
+								{#if weekendEvent?.active && weekendBonusCoins > 0}
+									<!-- Weekend Event bonus on this completion. -->
+									<span
+										class="px-2 py-0.5 rounded-full bg-fuchsia-500/20 border border-fuchsia-500/50 text-xs font-bold text-fuchsia-200"
+										title="{weekendEvent.name} {weekendEvent.multiplier}× — ends in {weekendEvent.hoursLeft}h"
+									>
+										{weekendEvent.emoji} +{weekendBonusCoins} ({weekendEvent.multiplier}×)
 									</span>
 								{/if}
 							{/if}
@@ -510,15 +672,17 @@
 							{/if}
 							{#if mistakes === 0}
 								<span
-									class="text-sm font-semibold text-green-400"
-									>🎯 Perfect!</span
+									class="px-2 py-0.5 rounded-full text-sm font-semibold {resultTier.bgClass} {resultTier.colorClass} border {resultTier.borderClass}"
 								>
+									{resultTier.emoji} {resultTier.headline}
+								</span>
 							{:else}
-								<span class="text-sm text-yellow-400"
-									>⚠️ {mistakes} mistake{mistakes === 1
-										? ""
-										: "s"}</span
+								<span
+									class="px-2 py-0.5 rounded-full text-sm font-semibold {resultTier.bgClass} {resultTier.colorClass} border {resultTier.borderClass}"
+									title="{mistakes} mistake{mistakes === 1 ? '' : 's'}"
 								>
+									{resultTier.emoji} {resultTier.headline}
+								</span>
 							{/if}
 						</div>
 
@@ -621,34 +785,69 @@
 					{/if}
 
 					<!-- ── Zone 3: Actions ── -->
-					<!-- Primary CTA — full-width, bold, high contrast -->
+					<!-- Primary CTA — always "Next Puzzle" so the in-flow player
+					     can keep playing with one tap. Pulses gently to draw
+					     the eye, the way Subway Surfers' Run-Again button does. -->
 					<button
 						onclick={handlePrimaryCta}
-						class="w-full px-4 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
+						class="w-full px-4 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2 animate-cta-pulse"
 					>
-						{#if simplifiedCtas.primary.id === "view-challenge"}
-							<ExternalLink class="w-4 h-4" />
+						{#if simplifiedCtas.primary.id === "next-puzzle"}
+							<Shuffle class="w-4 h-4" />
 						{/if}
 						<span>{simplifiedCtas.primary.label}</span>
 					</button>
 
-					<!-- Secondary CTA — ghost/outline styling -->
+					<!-- Secondary CTA — ghost/outline styling. This is where
+					     "Challenge Friends" / "Race Again" / "View Challenge"
+					     now live (demoted from primary). -->
 					{#each simplifiedCtas.secondary as cta (cta.id)}
 						<button
 							onclick={() => handleSecondaryCta(cta.id)}
-							class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all"
+							class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all flex items-center justify-center gap-2"
 						>
-							{cta.label}
+							{#if cta.id === "view-challenge"}
+								<ExternalLink class="w-4 h-4" />
+							{/if}
+							<span>{cta.label}</span>
 						</button>
 					{/each}
 
-					<!-- Retention hook — promoted visibility -->
-					<div
-						class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
-					>
-						🔥 Return tomorrow for +{tomorrowStreakBonus} streak bonus
-						coins
-					</div>
+					<!-- Retention hook — promoted visibility. The forecast comes
+					     from the server (escalating curve in streak-rewards.ts)
+					     so milestone bumps get a glow + clearer label. -->
+					{#if streakForecast}
+						<div
+							class="text-sm text-center px-3 py-1 rounded-full {streakForecast.isMilestone
+								? 'bg-yellow-500/15 border border-yellow-500/40 text-yellow-300 font-semibold'
+								: 'bg-theme-hover text-theme-text-secondary'}"
+						>
+							{#if streakForecast.isMilestone}
+								🎉 Tomorrow → <span class="font-bold">{streakForecast.label}</span>
+								· +{streakForecast.coinBonus} 🪙
+							{:else}
+								🔥 Return tomorrow → Day {streakForecast.day}
+								· +{streakForecast.coinBonus} 🪙
+							{/if}
+						</div>
+					{:else}
+						<div
+							class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
+						>
+							🔥 Return tomorrow for +{tomorrowStreakBonus} streak bonus
+							coins
+						</div>
+					{/if}
+
+					<!-- Free-freeze grant celebration — fires when the server's
+					     7-day cadence handed the player a Streak Freeze. -->
+					{#if streakData.freeFreezeGranted}
+						<div
+							class="text-xs text-center px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/40 text-blue-300 font-semibold"
+						>
+							🧊 Free Streak Freeze granted! Stored in your shop.
+						</div>
+					{/if}
 
 					<!-- "More" button — toggles collapsible panel -->
 					<button

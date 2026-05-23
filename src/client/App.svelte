@@ -33,6 +33,10 @@
 	} from "./stores/mistakes";
 	import { hydrateFromServer, resetHints } from "./stores/hints";
 	import { fireOnce, resetLatch } from "./stores/first-action";
+	import {
+		incrementSessionRun,
+		getSessionRun,
+	} from "./stores/session-run";
 
 	type EconomyResponse = {
 		coins: number;
@@ -77,6 +81,44 @@
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
 	let hasSubscribed = $state(false);
+	// Run-again loop state — persisted via sessionStorage in session-run store.
+	let sessionRun = $state(getSessionRun());
+	let sessionRunMultiplier = $state(1);
+	let sessionRunBonusCoins = $state(0);
+	// Streak forecast — what tomorrow's streak day will look like. Hydrated
+	// from /api/game/complete so the result screen can preview the next bump.
+	let streakForecast = $state<{
+		day: number;
+		coinBonus: number;
+		isMilestone: boolean;
+		label: string;
+	} | undefined>(undefined);
+	// Weekend Event payload — hydrated from /api/game/state on load and
+	// refreshed on /api/game/complete. Drives the in-game banner + result
+	// screen "weekend bonus" chip.
+	let weekendEvent = $state<{
+		active: boolean;
+		multiplier: number;
+		name: string;
+		emoji: string;
+		endsAtMs: number | null;
+		hoursLeft: number | null;
+	} | undefined>(undefined);
+	let weekendBonusCoins = $state(0);
+	// Always-on progression strip data — hydrated from /api/game/state.
+	let seasonProgress = $state<
+		{ rank: number | null; score: number } | undefined
+	>(undefined);
+	let nextMission = $state<
+		| {
+				templateId: string;
+				description: string;
+				currentProgress: number;
+				targetValue: number;
+				coinReward: number;
+		  }
+		| undefined
+	>(undefined);
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
@@ -169,6 +211,16 @@
 			if (data.currentSeason) {
 				currentSeason = data.currentSeason;
 			}
+
+			// Weekend Event hydration. Always set it (active or inactive) so
+			// the banner can render or hide based on the freshest server state.
+			if (data.weekendEvent) {
+				weekendEvent = data.weekendEvent;
+			}
+			// Always-on strip data — both fields are optional, set when
+			// present and clear otherwise so previous renders don't ghost.
+			seasonProgress = data.seasonProgress;
+			nextMission = data.nextMission;
 
 			// Update streak data
 			if (data.streak) {
@@ -294,6 +346,13 @@
 	 * Report puzzle completion to server (non-critical).
 	 */
 	async function reportCompletion(time: number) {
+		// Bump the session-run counter BEFORE the POST so the server applies
+		// the right multiplier for *this* solve (the freshly incremented
+		// value reflects how many puzzles have been solved this session,
+		// inclusive of the one we're reporting now).
+		const newSessionRun = incrementSessionRun();
+		sessionRun = newSessionRun;
+
 		try {
 			const response = await fetch("/api/game/complete", {
 				method: "POST",
@@ -301,6 +360,7 @@
 				body: JSON.stringify({
 					timeTaken: time,
 					mistakes: $mistakeCount,
+					sessionRun: newSessionRun,
 				}),
 			});
 
@@ -352,6 +412,37 @@
 				// Auto-challenge URL from perfect solve
 				if (data.autoChallengeUrl) {
 					autoChallengeUrl = data.autoChallengeUrl;
+				}
+				// Run-again loop: hydrate the session-streak chip + roll the
+				// bonus coins into the wallet so the CountUp lands on the
+				// fully-paid total.
+				if (typeof data.sessionRun === "number") {
+					sessionRun = data.sessionRun;
+				}
+				if (typeof data.sessionRunMultiplier === "number") {
+					sessionRunMultiplier = data.sessionRunMultiplier;
+				}
+				if (typeof data.sessionRunBonusCoins === "number") {
+					sessionRunBonusCoins = data.sessionRunBonusCoins;
+					if (data.sessionRunBonusCoins > 0) {
+						coins += data.sessionRunBonusCoins;
+					}
+				}
+				if (data.streakForecast) {
+					streakForecast = data.streakForecast;
+				}
+				// Weekend Event refresh: server is source of truth for both
+				// the banner countdown (hoursLeft) and the per-completion
+				// bonus. Any positive bonus is folded into the displayed
+				// wallet so CountUp lands on the fully-paid total.
+				if (data.weekendEvent) {
+					weekendEvent = data.weekendEvent;
+				}
+				if (typeof data.weekendBonusCoins === "number") {
+					weekendBonusCoins = data.weekendBonusCoins;
+					if (data.weekendBonusCoins > 0) {
+						coins += data.weekendBonusCoins;
+					}
 				}
 			}
 		} catch {
@@ -752,6 +843,14 @@
 			isRaceResult: raceResult !== null,
 			raceWon: raceResult === "won",
 			autoChallengeUrl,
+			sessionRun,
+			sessionRunMultiplier,
+			sessionRunBonusCoins,
+			streakForecast,
+			weekendEvent,
+			weekendBonusCoins,
+			seasonProgress,
+			nextMission,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}

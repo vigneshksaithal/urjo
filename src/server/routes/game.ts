@@ -23,7 +23,9 @@ import type {
 	FirstScreenData,
 } from '../../shared/types'
 import { MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize } from '../../shared/constants'
+import { MAX_STREAK_FREEZES } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
+import { FREE_STREAK_FREEZE_CADENCE_DAYS } from '../../shared/streak-rewards'
 import { generatePuzzle } from '../lib/generator'
 import {
 	calculatePerformanceScore,
@@ -85,6 +87,9 @@ import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, in
 import { serializeResultCard } from '../../shared/result-card'
 import type { ResultCardData } from '../../shared/growth-types'
 import type { EngagementCompletionData, MissionEvent, UserStats } from '../../shared/engagement-types'
+import { getSessionRunMultiplier, getSessionRunBonusCoins } from '../../shared/session-run'
+import { forecastNextStreak } from '../../shared/streak-rewards'
+import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
 
 // ─── Par Time Defaults ───────────────────────────────────────────────────────
 
@@ -384,6 +389,30 @@ const updateStreak = async (userId: string): Promise<StreakData> => {
 
 	const newLongest = Math.max(newStreak, streakData.longestStreak)
 
+	// ─── Free Streak Freeze grant ────────────────────────────────────────
+	// Every FREE_STREAK_FREEZE_CADENCE_DAYS (7) of streak the player earns
+	// one free Streak Freeze, capped at MAX_STREAK_FREEZES. Idempotent: we
+	// remember the highest "earned" cadence tier per-user and only grant on
+	// crossing a new boundary, so a single solve that increments streak past
+	// a 7-day boundary grants exactly one freeze (no double-grant on retries).
+	let freeFreezeGranted = false
+	if (newStreak > streakData.currentStreak && newStreak >= FREE_STREAK_FREEZE_CADENCE_DAYS) {
+		const grantTier = Math.floor(newStreak / FREE_STREAK_FREEZE_CADENCE_DAYS)
+		const lastGrantTierStr = await redis.get(`user:${userId}:streak:freeFreezeTier`)
+		const lastGrantTier = lastGrantTierStr ? parseInt(lastGrantTierStr, 10) : 0
+		if (grantTier > lastGrantTier) {
+			const economy = await getUserEconomy(userId)
+			if (economy.streakFreezes < MAX_STREAK_FREEZES) {
+				await redis.hIncrBy(`user:${userId}:economy`, 'streakFreezes', 1)
+				freeFreezeGranted = true
+			}
+			// Always advance the tier marker so we don't keep retrying when
+			// the player is at the cap — they'll get the next grant on the
+			// next 7-day boundary if they've spent a freeze by then.
+			await redis.set(`user:${userId}:streak:freeFreezeTier`, grantTier.toString())
+		}
+	}
+
 	await Promise.all([
 		redis.set(`user:${userId}:streak:current`, newStreak.toString()),
 		redis.set(`user:${userId}:streak:longest`, newLongest.toString()),
@@ -394,6 +423,7 @@ const updateStreak = async (userId: string): Promise<StreakData> => {
 		currentStreak: newStreak,
 		longestStreak: newLongest,
 		lastPlayedDate: today,
+		freeFreezeGranted,
 	}
 }
 
@@ -627,6 +657,65 @@ gameRouter.get('/api/game/state', async (c) => {
 			// non-critical — defaults to false
 		}
 
+		// ─── Season progress (player rank + score) ─────────────────────────
+		// Always-on UI needs the player's standing on every state read so the
+		// home strip can show "Season 21 · Rank #4 · 80 pts" without an extra
+		// fetch.
+		let seasonProgress: { rank: number | null; score: number } | undefined
+		try {
+			if (currentSeason.isActive) {
+				const leaderboardKey = `season:${currentSeason.seasonId}:leaderboard`
+				const playerScore = await redis.zScore(leaderboardKey, userId)
+				if (playerScore !== undefined && playerScore !== null) {
+					const higherEntries = await redis.zRange(
+						leaderboardKey,
+						playerScore + 1,
+						Number.MAX_SAFE_INTEGER,
+						{ by: 'score' },
+					)
+					seasonProgress = {
+						rank: higherEntries.length + 1,
+						score: playerScore,
+					}
+				} else {
+					seasonProgress = { rank: null, score: 0 }
+				}
+			}
+		} catch (err) {
+			console.error('[State] Season progress fetch failed (non-critical):', err)
+		}
+
+		// ─── Next active daily mission (preview) ───────────────────────────
+		// Pick the first not-yet-completed daily mission so the home strip
+		// can show "Solve 3 puzzles: 1/3" with a progress bar. CoC-style:
+		// progression is always visible on the home screen, never hidden in
+		// a modal.
+		let nextMission: {
+			templateId: string
+			description: string
+			currentProgress: number
+			targetValue: number
+			coinReward: number
+		} | undefined
+		try {
+			const dailyState = await getMissionState(userId, 'daily')
+			const activeMission =
+				dailyState.missions.find((m) => !m.completed) ??
+				dailyState.missions.find((m) => !m.claimed) ??
+				dailyState.missions[0]
+			if (activeMission) {
+				nextMission = {
+					templateId: activeMission.templateId,
+					description: activeMission.description,
+					currentProgress: activeMission.currentProgress,
+					targetValue: activeMission.targetValue,
+					coinReward: activeMission.coinReward,
+				}
+			}
+		} catch (err) {
+			console.error('[State] Next mission fetch failed (non-critical):', err)
+		}
+
 		const gameState: GameState = {
 			puzzle: serializedPuzzle,
 			tutorialCompleted,
@@ -644,6 +733,12 @@ gameRouter.get('/api/game/state', async (c) => {
 			notifyOptIn,
 			hintsDismissed,
 			...(firstScreen !== undefined && { firstScreen }),
+			// Weekend Event — surfaced on every state read so the banner can
+			// render the latest "ends in" countdown without an extra fetch.
+			weekendEvent: getActiveWeekendEvent(new Date()),
+			// Always-on progression strip data
+			...(seasonProgress !== undefined && { seasonProgress }),
+			...(nextMission !== undefined && { nextMission }),
 		}
 
 		return c.json(gameState)
@@ -773,6 +868,12 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const body: CompleteRequest = await c.req.json()
 		const { mistakes = 0 } = body
 
+		// Run-again loop: client tells us how many puzzles the player has
+		// solved in this session (including this one). We clamp + sanitize on
+		// the server so a malicious client can't claim a 9999× multiplier.
+		const rawSessionRun = typeof body.sessionRun === 'number' ? body.sessionRun : 0
+		const sessionRun = Math.max(0, Math.min(Math.floor(rawSessionRun), 50))
+
 		// Server-side time tracking (security fix)
 		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
 		const startTimeStr = await redis.get(startTimeKey)
@@ -814,6 +915,32 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const preCompletionEconomy = await getUserEconomy(userId)
 
 		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak, mistakes, gridSize })
+
+		// ─── Run-again loop: session-streak coin bonus ─────────────────────
+		// On top of the standard reward, a player who keeps playing within a
+		// single session earns a bonus that scales with consecutive solves
+		// (capped at 2× of the base reward at sessionRun = 20+).
+		const sessionRunMultiplier = getSessionRunMultiplier(sessionRun)
+		const sessionRunBonusCoins = getSessionRunBonusCoins(coinReward.total, sessionRun)
+		if (sessionRunBonusCoins > 0) {
+			await Promise.all([
+				redis.hIncrBy(`user:${userId}:economy`, 'coins', sessionRunBonusCoins),
+				redis.hIncrBy(`user:${userId}:economy`, 'totalCoins', sessionRunBonusCoins),
+			])
+		}
+
+		// ─── Weekend Event coin bonus ──────────────────────────────────────
+		// Saturday/Sunday UTC apply a flat 1.5× multiplier to the displayed
+		// coin reward. Computed off the original total so the weekend boost
+		// stacks additively with the session-run bonus rather than compounding.
+		const weekendEvent = getActiveWeekendEvent(new Date())
+		const weekendBonusCoins = getWeekendEventBonusCoins(coinReward.total, weekendEvent)
+		if (weekendBonusCoins > 0) {
+			await Promise.all([
+				redis.hIncrBy(`user:${userId}:economy`, 'coins', weekendBonusCoins),
+				redis.hIncrBy(`user:${userId}:economy`, 'totalCoins', weekendBonusCoins),
+			])
+		}
 
 		const today = getTodayUTC()
 		await Promise.all([
@@ -1196,6 +1323,18 @@ gameRouter.post('/api/game/complete', async (c) => {
 			...(seasonRank !== null && { seasonRank }),
 			...(seasonPoints > 0 && { seasonPoints }),
 			...(autoChallengeUrl !== undefined && { autoChallengeUrl }),
+			// Run-again loop telemetry — used by the client to display the
+			// session-streak chip + apply the bonus to the displayed wallet.
+			sessionRun,
+			sessionRunMultiplier,
+			sessionRunBonusCoins,
+			// Streak forecast — drives the "Return tomorrow → +X" hook on the
+			// completion screen so the player can see the next reward bump.
+			streakForecast: forecastNextStreak(streak.currentStreak),
+			// Weekend Event payload — duplicated on /complete so the result
+			// screen can show "🎉 +N weekend bonus" + a fresh countdown.
+			weekendEvent,
+			weekendBonusCoins,
 		}
 
 		return c.json(response)

@@ -6,7 +6,6 @@
 import { redis } from '@devvit/web/server'
 import type { UserEconomy, CoinReward, ShopItem, TitleDef, StreakData } from '../../shared/types'
 import {
-	COIN_STREAK_MULTIPLIER,
 	COIN_SPEED_BONUS,
 	COIN_DAILY_BONUS,
 	COIN_PERFECT_BONUS,
@@ -19,6 +18,8 @@ import {
 	GRID_SIZE_MULTIPLIERS,
 } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
+import { getResultTier, getTierBonusMultiplier } from '../../shared/result-tiers'
+import { getStreakBonusForDay } from '../../shared/streak-rewards'
 import { fetchUsername } from './helpers'
 
 const ECONOMY_KEY_PREFIX = 'user'
@@ -67,7 +68,13 @@ export const saveUserEconomy = async (userId: string, economy: Partial<UserEcono
 }
 
 /**
- * Calculate coin reward for puzzle completion
+ * Calculate coin reward for puzzle completion.
+ *
+ * Bonus pool (perfect/speed/streak/login) is now scaled by a result-tier
+ * multiplier (Flawless 1.0 → Scrappy 0.25). This means a sloppy solve still
+ * earns base coins plus a partial bonus pool — never the harsh "you made a
+ * mistake, lose everything" feeling. Mirrors how Subway Surfers always pays
+ * out: even a 5-second run still earns coins and mission progress.
  */
 export const calculateCoinReward = (
 	timeTaken: number,
@@ -80,26 +87,45 @@ export const calculateCoinReward = (
 ): CoinReward => {
 	const config = getLevelConfig(level)
 	const parTime = config.expectedTime * PAR_TIME_MULTIPLIER
-	const speedBonus = timeTaken <= parTime ? COIN_SPEED_BONUS : 0
-	const perfectBonus = mistakes === 0 ? COIN_PERFECT_BONUS : 0
+	const speedBonusRaw = timeTaken <= parTime ? COIN_SPEED_BONUS : 0
+	const perfectBonusRaw = mistakes === 0 ? COIN_PERFECT_BONUS : 0
 
-	const loginBonus = isDailyFirst && consecutiveLoginDays > 0
+	const loginBonusRaw = isDailyFirst && consecutiveLoginDays > 0
 		? getDailyLoginBonus(consecutiveLoginDays)
 		: 0
 
 	const base = getCoinBaseForLevel(level)
 	const gridSizeMultiplier = GRID_SIZE_MULTIPLIERS[gridSize]
-	const bonuses = currentStreak * COIN_STREAK_MULTIPLIER + speedBonus + (isDailyFirst ? COIN_DAILY_BONUS : 0) + perfectBonus + loginBonus
+
+	// Determine the result tier and apply its bonus multiplier to the bonus
+	// pool. Daily bonus stays full strength because it represents "showed up
+	// today" — we don't want to punish first-of-the-day on a Scrappy solve.
+	const tier = getResultTier(mistakes, gridSize)
+	const tierMultiplier = getTierBonusMultiplier(tier.id)
+
+	// Streak bonus uses the escalating curve from streak-rewards.ts so that
+	// week / fortnight / month milestones feel like genuine "bumps" rather
+	// than another linear tick. Then tier-scale it like the other bonuses.
+	const streakBonusRaw = getStreakBonusForDay(currentStreak)
+	const streakBonus = Math.round(streakBonusRaw * tierMultiplier)
+	const speedBonus = Math.round(speedBonusRaw * tierMultiplier)
+	const perfectBonus = Math.round(perfectBonusRaw * tierMultiplier) // 0 unless Flawless
+	const loginBonus = Math.round(loginBonusRaw * tierMultiplier)
+	const dailyBonus = isDailyFirst ? COIN_DAILY_BONUS : 0
+
+	const bonuses = streakBonus + speedBonus + dailyBonus + perfectBonus + loginBonus
 
 	return {
 		base,
-		streakBonus: currentStreak * COIN_STREAK_MULTIPLIER,
+		streakBonus,
 		speedBonus,
-		dailyBonus: isDailyFirst ? COIN_DAILY_BONUS : 0,
+		dailyBonus,
 		perfectBonus,
 		loginBonus,
 		gridSizeMultiplier,
 		total: Math.round(base * gridSizeMultiplier + bonuses),
+		tierId: tier.id,
+		tierMultiplier,
 	}
 }
 
