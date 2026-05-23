@@ -70,10 +70,11 @@
 	role={locked ? undefined : "button"}
 	tabindex={locked ? undefined : 0}
 	class="
-		relative w-full aspect-square rounded-full
+		relative w-[90%] aspect-square rounded-full
 		flex items-center justify-center
 		touch-none select-none
 		transition-transform
+		m-auto
 		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
