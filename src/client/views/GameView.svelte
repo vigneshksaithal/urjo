@@ -228,7 +228,7 @@
 
 	const validation = $derived(validateGrid(grid, gridSize));
 	const boardSizeStyle = $derived(
-		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: 100%;`,
+		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-height: 100%;`,
 	);
 	const currentCompletionKey = $derived(
 		isCompleted ? `${timeTaken ?? 0}:${puzzleColors ?? ""}` : null,
@@ -452,11 +452,12 @@
 
 	<!-- Main game area -->
 	<main
-		class="flex-1 min-h-0 flex flex-col items-center justify-center relative"
+		class="flex-1 min-h-0 flex flex-col items-center justify-center relative overflow-hidden"
+		style="container-type: size;"
 	>
 		<!-- Board: square, never taller than available height -->
-		<div class="w-full min-h-0 flex items-center justify-center flex-1">
-			<div class="aspect-square" style={boardSizeStyle}>
+		<div class="w-full min-h-0 flex items-center justify-center flex-1 overflow-hidden">
+			<div class="aspect-square overflow-hidden" style={boardSizeStyle}>
 				<GameBoard
 					{grid}
 					{gridSize}
