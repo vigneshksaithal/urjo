@@ -17,6 +17,8 @@
         seasonPoints?: number;
         onCommentResult?: () => void;
         hasCommented?: boolean;
+        onChallenge?: () => void;
+        hasChallenged?: boolean;
     };
 
     let {
@@ -32,6 +34,8 @@
         seasonPoints = 0,
         onCommentResult,
         hasCommented = false,
+        onChallenge,
+        hasChallenged = false,
     }: Props = $props();
 
     let commenting = $state(false);
@@ -127,6 +131,17 @@
             </p>
         {/if}
     </div>
+
+    <!-- Share / Challenge result button -->
+    {#if onChallenge}
+        <button
+            onclick={onChallenge}
+            disabled={hasChallenged}
+            class="w-full px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+        >
+            {hasChallenged ? 'Challenge Created!' : 'Challenge Friends'}
+        </button>
+    {/if}
 
     <!-- Comment result button -->
     <button

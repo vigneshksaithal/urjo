@@ -543,6 +543,9 @@
 	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
 	 */
 	async function handleFirstScreenPlay() {
+		// Immediately track the first action since they interacted with the FirstScreen
+		void fireOnce("");
+
 		try {
 			await fetch("/api/game/tutorial-complete", { method: "POST" });
 		} catch {

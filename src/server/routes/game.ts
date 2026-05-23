@@ -1565,7 +1565,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 
 	try {
 		const body: ChallengeRequest = await c.req.json()
-		const { timeTaken, skillLevel, mistakes } = body
+		const { timeTaken, mistakes } = body
 
 		// Rate limit: one challenge post per user per day
 		const today = getTodayUTC()

@@ -83,13 +83,15 @@
         aria-label="Puzzle preview"
     >
         {#each previewCells as cell, index (index)}
-            <div
-                class="aspect-square rounded-md flex items-center justify-center text-xs font-bold text-theme-text-primary {getCellClass(
+            <button
+                onclick={onPlay}
+                class="aspect-square rounded-md flex items-center justify-center text-xs font-bold text-theme-text-primary cursor-pointer hover:opacity-80 active:scale-95 transition-all shadow-sm {getCellClass(
                     cell.color,
                 )}"
+                aria-label="Tap to start puzzle"
             >
                 {cell.number ?? ""}
-            </div>
+            </button>
         {/each}
     </div>
 

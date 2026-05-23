@@ -24,7 +24,7 @@ const withContext = <T>(postId: string, userId: string, fn: () => Promise<T>): P
         fn
     )
 
-const completeRequest = (body: object = { mistakes: 0 }) =>
+const completeRequest = (body: object = { timeTaken: 30, mistakes: 0 }) =>
     app.request('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

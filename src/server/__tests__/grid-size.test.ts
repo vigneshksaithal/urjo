@@ -252,7 +252,7 @@ test('POST /api/game/complete updates per-grid skill level only', async () => {
 
     await seedStartTime(userId, postId, 30)
 
-    const res = await withContext(postId, userId, () => completeRequest({ mistakes: 0 }))
+    const res = await withContext(postId, userId, () => completeRequest({ timeTaken: 30, mistakes: 0 }))
     expect(res.status).toBe(200)
 
     // 6×6 skill level may have changed (adaptive)
@@ -287,7 +287,7 @@ test('POST /api/game/complete records speed to grid-size-scoped leaderboard', as
 
     await seedStartTime(userId, postId, 45)
 
-    const res = await withContext(postId, userId, () => completeRequest({ mistakes: 0 }))
+    const res = await withContext(postId, userId, () => completeRequest({ timeTaken: 30, mistakes: 0 }))
     expect(res.status).toBe(200)
 
     // Speed entry should be in the 6×6 leaderboard

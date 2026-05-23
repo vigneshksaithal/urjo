@@ -75,7 +75,7 @@
 		onRace?: () => void;
 		isRaceResult?: boolean;
 		raceWon?: boolean;
-		postId?: string;
+		postId?: string | undefined;
 		autoChallengeUrl?: string | null;
 		hintsDismissed?: {
 			numberConstraint: boolean;
@@ -616,6 +616,8 @@
 								hasCommented={hasCommentedResult}
 								onCommentResult={() =>
 									(hasCommentedResult = true)}
+								onChallenge={() => showChallengeConfirm = true}
+								{hasChallenged}
 							/>
 						</div>
 					{/if}
