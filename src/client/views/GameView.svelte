@@ -280,9 +280,6 @@
 	}
 
 	const validation = $derived(validateGrid(grid, gridSize));
-	const boardSizeStyle = $derived(
-		`width: min(100%, calc(100vh - ${!isChallenge && onGridSizeChange ? "148px" : "116px"})); max-width: 100%;`,
-	);
 	const currentCompletionKey = $derived(
 		isCompleted ? `${timeTaken ?? 0}:${puzzleColors ?? ""}` : null,
 	);
@@ -581,11 +578,14 @@
 
 	<!-- Main game area -->
 	<main
-		class="flex-1 min-h-0 flex flex-col items-center justify-center relative"
+		class="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden p-2"
 	>
-		<!-- Board: square, never taller than available height -->
-		<div class="w-full min-h-0 flex items-center justify-center flex-1">
-			<div class="aspect-square" style={boardSizeStyle}>
+		<!-- Board wrapper: maintains square aspect ratio within available space.
+		     Uses w-full + h-full with aspect-square so the board fills the
+		     smaller dimension while staying square. The parent's overflow-hidden
+		     prevents any spillover. -->
+		<div class="w-full h-full flex items-center justify-center">
+			<div class="aspect-square h-full max-w-full">
 				<GameBoard
 					{grid}
 					{gridSize}
