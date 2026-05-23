@@ -12,6 +12,7 @@
 	import { validateGrid } from "../lib/validation";
 	import { hintShownStore, markShown } from "../stores/hints";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
+	import { firstActionLatchStore } from "../stores/first-action";
 	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -81,6 +82,8 @@
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
 		};
+		isFirstTimeUser?: boolean;
+		firstActionTarget?: { seconds: number; username?: string } | undefined;
 	};
 
 	let {
@@ -124,6 +127,8 @@
 			numberConstraint: false,
 			adjacencyViolation: false,
 		},
+		isFirstTimeUser = false,
+		firstActionTarget = undefined,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -275,6 +280,23 @@
 	});
 	const simplifiedCtas = $derived(
 		getSimplifiedCompletionCtas(completionContext),
+	);
+
+	// Show the "tap a cell to start" instruction pill for first-time users
+	// until they make their first action this session.
+	// Subscribing to the store via $-prefix keeps this reactive without $effect.
+	const showFirstActionStrip = $derived(
+		isFirstTimeUser &&
+			!isCompleted &&
+			!$firstActionLatchStore.latched,
+	);
+
+	const firstActionStripText = $derived(
+		firstActionTarget
+			? firstActionTarget.username && firstActionTarget.username !== "Anon"
+				? `🎯 Beat ${firstActionTarget.username}'s ${firstActionTarget.seconds}s · Tap a cell to start`
+				: `🎯 Beat ${firstActionTarget.seconds}s · Tap a cell to start`
+			: "Tap a cell to start",
 	);
 
 	function confirmShare(): void {
@@ -454,6 +476,17 @@
 	<main
 		class="flex-1 min-h-0 flex flex-col items-center justify-center relative"
 	>
+		<!-- First-time-user instruction strip — disappears on first cell tap -->
+		{#if showFirstActionStrip}
+			<div
+				class="flex-none mb-2 px-3 py-1.5 rounded-full bg-theme-text-primary text-theme-bg-primary text-sm font-semibold animate-bounce-in"
+				role="status"
+				aria-live="polite"
+			>
+				{firstActionStripText}
+			</div>
+		{/if}
+
 		<!-- Board: square, never taller than available height -->
 		<div class="w-full min-h-0 flex items-center justify-center flex-1">
 			<div class="aspect-square" style={boardSizeStyle}>

@@ -18,7 +18,6 @@
 	} from "../shared/race-types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
-	import FirstScreen from "./components/FirstScreen.svelte";
 	import ShopModal from "./components/ShopModal.svelte";
 	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
 	import RaceOverlay from "./components/RaceOverlay.svelte";
@@ -44,7 +43,7 @@
 		dailyFirstSolve: string | null;
 	};
 
-	type View = "game" | "tutorial" | "first-screen" | "error";
+	type View = "game" | "tutorial" | "error";
 
 	const PLACEHOLDER_COLORS = "brbbrbbrbrbbrbrbbrbbrbbrbrbbrbrbbrbbrbbrbbrb";
 	const PLACEHOLDER_NUMBERS = "----------------";
@@ -196,10 +195,7 @@
 			resetRaceState();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
-			currentView =
-				isFirstTimeUser && !tutorialCompleted && firstScreen
-					? "first-screen"
-					: "game";
+			currentView = "game";
 
 			// Load economy data
 			loadEconomy();
@@ -263,6 +259,19 @@
 
 		// Fire first-action POST exactly once per session (fire-and-forget)
 		void fireOnce("");
+
+		// First-tap counts as tutorial completion for first-time users.
+		// This replaces the old FirstScreen "Play" button — the cell tap IS the play action.
+		// Fire-and-forget; failures don't block gameplay.
+		if (isFirstTimeUser && !tutorialCompleted) {
+			tutorialCompleted = true;
+			isFirstTimeUser = false;
+			fetch("/api/game/tutorial-complete", { method: "POST" }).catch(
+				() => {
+					// Non-blocking — flag is informational only
+				},
+			);
+		}
 
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
@@ -539,21 +548,6 @@
 		currentView = "game";
 	}
 
-	/**
-	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
-	 */
-	async function handleFirstScreenPlay() {
-		try {
-			await fetch("/api/game/tutorial-complete", { method: "POST" });
-		} catch {
-			// Non-critical — the first-screen state is local for this session.
-		}
-		tutorialCompleted = true;
-		isFirstTimeUser = false;
-		currentView = "game";
-		startTime = Date.now();
-	}
-
 	// ─── Race flow handlers ──────────────────────────────────────────────────
 
 	/**
@@ -704,17 +698,6 @@
 			onComplete={handleTutorialComplete}
 			isReplay={tutorialCompleted}
 		/>
-	{:else if currentView === "first-screen"}
-		{#if firstScreen}
-			<FirstScreen
-				puzzle={firstScreen.samplePuzzle}
-				instruction={firstScreen.instruction}
-				targetToBeat={firstScreen.targetToBeat}
-				{puzzleNumber}
-				communityStats={firstScreen.communityStats}
-				onPlay={handleFirstScreenPlay}
-			/>
-		{/if}
 	{:else if currentView === "game"}
 		{@const gameProps = {
 			grid,
@@ -752,6 +735,8 @@
 			isRaceResult: raceResult !== null,
 			raceWon: raceResult === "won",
 			autoChallengeUrl,
+			isFirstTimeUser,
+			firstActionTarget: firstScreen?.targetToBeat,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}
