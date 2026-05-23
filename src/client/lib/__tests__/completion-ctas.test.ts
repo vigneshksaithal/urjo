@@ -91,17 +91,27 @@ describe('getSimplifiedCompletionCtas', () => {
         hasSubscribed: false,
     }
 
-    it('returns "Challenge Friends" as primary by default', () => {
+    it('always returns "Next Puzzle" as the primary CTA', () => {
         const result = getSimplifiedCompletionCtas(baseContext)
 
         expect(result.primary).toEqual({
-            id: 'challenge-friends',
-            label: 'Challenge Friends',
+            id: 'next-puzzle',
+            label: 'Next Puzzle',
             style: 'primary',
         })
     })
 
-    it('returns "Race Again" as primary after a race win', () => {
+    it('demotes "Challenge Friends" to secondary by default', () => {
+        const result = getSimplifiedCompletionCtas(baseContext)
+
+        expect(result.secondary).toContainEqual({
+            id: 'challenge-friends',
+            label: 'Challenge Friends',
+            style: 'secondary',
+        })
+    })
+
+    it('puts "Race Again" in secondary after a race win — primary stays Next Puzzle', () => {
         const context: CompletionContext = {
             ...baseContext,
             isRaceResult: true,
@@ -109,14 +119,15 @@ describe('getSimplifiedCompletionCtas', () => {
         }
         const result = getSimplifiedCompletionCtas(context)
 
-        expect(result.primary).toEqual({
+        expect(result.primary.id).toBe('next-puzzle')
+        expect(result.secondary).toContainEqual({
             id: 'race-rematch',
             label: 'Race Again',
-            style: 'primary',
+            style: 'secondary',
         })
     })
 
-    it('returns "View Challenge" as primary when already challenged', () => {
+    it('puts "View Challenge" in secondary when already challenged', () => {
         const context: CompletionContext = {
             ...baseContext,
             hasChallenged: true,
@@ -124,24 +135,15 @@ describe('getSimplifiedCompletionCtas', () => {
         }
         const result = getSimplifiedCompletionCtas(context)
 
-        expect(result.primary).toEqual({
+        expect(result.primary.id).toBe('next-puzzle')
+        expect(result.secondary).toContainEqual({
             id: 'view-challenge',
             label: 'View Challenge',
-            style: 'primary',
-        })
-    })
-
-    it('always contains "Next Puzzle" in secondary', () => {
-        const result = getSimplifiedCompletionCtas(baseContext)
-
-        expect(result.secondary).toContainEqual({
-            id: 'next-puzzle',
-            label: 'Next Puzzle',
             style: 'secondary',
         })
     })
 
-    it('returns "Challenge Friends" on race loss (not race rematch)', () => {
+    it('falls back to "Challenge Friends" in secondary on race loss', () => {
         const context: CompletionContext = {
             ...baseContext,
             isRaceResult: true,
@@ -149,10 +151,11 @@ describe('getSimplifiedCompletionCtas', () => {
         }
         const result = getSimplifiedCompletionCtas(context)
 
-        expect(result.primary).toEqual({
+        expect(result.primary.id).toBe('next-puzzle')
+        expect(result.secondary).toContainEqual({
             id: 'challenge-friends',
             label: 'Challenge Friends',
-            style: 'primary',
+            style: 'secondary',
         })
     })
 

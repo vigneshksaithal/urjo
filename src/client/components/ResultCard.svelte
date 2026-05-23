@@ -1,6 +1,7 @@
 <script lang="ts">
     import { showToast } from "@devvit/web/client";
     import type { ResultCardData } from "../../shared/growth-types";
+    import { getResultTier } from "../../shared/result-tiers";
     import MessageSquare from "lucide-svelte/icons/message-square";
     import Loader2 from "lucide-svelte/icons/loader-2";
 
@@ -47,6 +48,9 @@
         mistakes,
         streak,
     });
+    // Tier label shown on the embedded share card. We always use the positive
+    // spectrum (Flawless / Sharp / Solid / Scrappy) rather than "N mistakes".
+    const tier = $derived(getResultTier(mistakes, gridSize as 4 | 6 | 8));
 
     function buildColorGrid(
         colors: string,
@@ -112,7 +116,7 @@
             {/each}
         </div>
         <p class="text-xs text-theme-text-muted mt-1">
-            ⏱️ {timeTaken}s | 🎯 {mistakes} mistakes | 🔥 {streak} streak
+            ⏱️ {timeTaken}s | {tier.emoji} {tier.label} | 🔥 {streak} streak
         </p>
         {#if seasonNumber !== null && (seasonRank !== null || seasonPoints > 0)}
             <p class="text-xs text-theme-text-muted mt-0.5">

@@ -62,6 +62,33 @@ export type GameState = {
 	notifyOptIn?: boolean
 	hintsDismissed?: { numberConstraint: boolean; adjacencyViolation: boolean }
 	firstScreen?: FirstScreenData
+	/** Active weekend event payload — present on every state response so the
+	 *  banner has fresh "ends in" data on each (re)open. Inactive events are
+	 *  also returned (active=false) so the client can hide the banner. */
+	weekendEvent?: {
+		active: boolean
+		multiplier: number
+		name: string
+		emoji: string
+		endsAtMs: number | null
+		hoursLeft: number | null
+	}
+	/** Player's current season standing — feeds the always-on progression
+	 *  strip. Only populated when a season is active and the player has a
+	 *  score (rank may still be null if they haven't earned points yet). */
+	seasonProgress?: {
+		rank: number | null
+		score: number
+	}
+	/** First incomplete daily mission — preview shown in the always-on
+	 *  progression strip so missions feel alive without opening the modal. */
+	nextMission?: {
+		templateId: string
+		description: string
+		currentProgress: number
+		targetValue: number
+		coinReward: number
+	}
 }
 
 export type NextChallengeResponse = {
@@ -73,6 +100,9 @@ export type NextChallengeResponse = {
 export type CompleteRequest = {
 	timeTaken: number // seconds
 	mistakes?: number
+	/** How many puzzles the player has already completed in this session
+	 *  (incl. the one being reported). Used to apply the run-again bonus. */
+	sessionRun?: number
 }
 
 export type CompleteResponse = {
@@ -86,6 +116,33 @@ export type CompleteResponse = {
 	seasonPoints?: number
 	/** URL of auto-generated challenge post (only on perfect solves, opt-out model) */
 	autoChallengeUrl?: string
+	/** Run-again loop info — echoed back so client can display the multiplier
+	 *  alongside the coin reward. Bonus coins are already added to the wallet. */
+	sessionRun?: number
+	sessionRunMultiplier?: number
+	sessionRunBonusCoins?: number
+	/** Streak forecast — what tomorrow looks like for this player. Used by the
+	 *  result screen "Return tomorrow" hook. Includes a flag for whether
+	 *  tomorrow is a milestone bump so the UI can highlight it. */
+	streakForecast?: {
+		day: number
+		coinBonus: number
+		isMilestone: boolean
+		label: string
+	}
+	/** Weekend Event payload — identical shape to /api/game/state so the
+	 *  client can update its banner + show the per-completion bonus. */
+	weekendEvent?: {
+		active: boolean
+		multiplier: number
+		name: string
+		emoji: string
+		endsAtMs: number | null
+		hoursLeft: number | null
+	}
+	/** Coins added to the wallet by the active weekend event on this solve.
+	 *  0 when the event is inactive. */
+	weekendBonusCoins?: number
 }
 
 /** A single game record stored in user history */
@@ -101,6 +158,10 @@ export type StreakData = {
 	currentStreak: number
 	longestStreak: number
 	lastPlayedDate: string | null
+	/** True only on the response from a /complete that just granted a free
+	 *  weekly Streak Freeze (every 7 streak days). Optional + opt-in so all
+	 *  read-side endpoints (GET /api/game/streak etc.) can leave it unset. */
+	freeFreezeGranted?: boolean
 }
 
 /** Leaderboard entry */
@@ -190,6 +251,11 @@ export type CoinReward = {
 	total: number
 	multiplier?: number | undefined
 	mysteryBox?: MysteryBoxReward | undefined
+	/** Result tier id ('flawless' | 'sharp' | 'solid' | 'scrappy'). Optional
+	 *  for backwards compatibility — older completion records won't have it. */
+	tierId?: 'flawless' | 'sharp' | 'solid' | 'scrappy' | undefined
+	/** Tier bonus multiplier applied to the perfect/speed/streak pool (0-1). */
+	tierMultiplier?: number | undefined
 }
 
 /** Shop item with ownership/unlock status */

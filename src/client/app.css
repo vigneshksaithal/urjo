@@ -34,8 +34,11 @@
 	--theme-border: #e0e0e0;
 	--theme-hover: #f0f0f0;
 	--theme-overlay: rgba(0, 0, 0, 0.5);
-	--theme-empty-red: #F5A99C;
-	--theme-empty-blue: #9BCAEB;
+	/* Neutral empty cell — single tone, no longer split red/blue (less ambiguous to new players) */
+	--theme-empty-red: #d4d4d8;
+	--theme-empty-blue: #d4d4d8;
+	--theme-empty-cell: #d4d4d8;
+	--theme-empty-cell-border: #b8b8c0;
 }
 
 /* Dark mode */
@@ -50,9 +53,18 @@
 		--theme-border: rgba(255, 255, 255, 0.2);
 		--theme-hover: rgba(255, 255, 255, 0.1);
 		--theme-overlay: rgba(0, 0, 0, 0.7);
-		--theme-empty-red: #8B3A2B;
-		--theme-empty-blue: #2A5A7A;
+		/* Neutral empty cell — single tone, no longer split red/blue */
+		--theme-empty-red: #3a3a42;
+		--theme-empty-blue: #3a3a42;
+		--theme-empty-cell: #3a3a42;
+		--theme-empty-cell-border: rgba(255, 255, 255, 0.18);
 	}
+}
+
+@theme {
+	/* Expose the neutral-empty tokens to Tailwind utility classes */
+	--color-theme-empty-cell: var(--theme-empty-cell);
+	--color-theme-empty-cell-border: var(--theme-empty-cell-border);
 }
 
 @keyframes pulse-skeleton {
@@ -64,4 +76,35 @@
 		opacity: 0.7;
 		transform: scale(1);
 	}
+}
+
+/* Subtle ambient breathing for empty cells — signals the puzzle is "alive" */
+@keyframes empty-cell-breathe {
+	0%, 100% {
+		opacity: 0.85;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+.animate-empty-breathe {
+	animation: empty-cell-breathe 3s ease-in-out infinite;
+}
+
+/* Primary CTA pulse — gentle "look here" scale + glow, like Subway Surfers'
+ * Run Again button. Subtle enough not to distract from the result chrome. */
+@keyframes cta-pulse {
+	0%, 100% {
+		box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.0);
+		transform: scale(1);
+	}
+	50% {
+		box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.08);
+		transform: scale(1.015);
+	}
+}
+
+.animate-cta-pulse {
+	animation: cta-pulse 2.4s ease-in-out infinite;
 }
