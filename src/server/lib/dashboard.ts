@@ -180,6 +180,11 @@ export const formatDashboardMarkdown = (data: DashboardData): string => {
     lines.push(`| D3 Return Rate | ${data.daily.d3ReturnRate ?? 0} |`)
     lines.push(`| Daily Active Engagers | ${data.daily.growth?.dailyActiveEngagers ?? 0} |`)
     lines.push(`| Challenge K | ${data.daily.growth?.kFactor ?? 0} |`)
+    lines.push(`| Notify Opt-Ins (today) | ${data.daily.growth?.notifyOptIns ?? 0} |`)
+    lines.push(`| Subscribe Taps (today) | ${data.daily.growth?.subscribeTaps ?? 0} |`)
+    lines.push(
+        `| Race (today) | ${data.daily.growth?.raceJoins ?? 0} joins · ${data.daily.growth?.raceMatches ?? 0} matches · ${data.daily.growth?.raceCompletions ?? 0} completions |`,
+    )
     lines.push('')
 
     // Alerts

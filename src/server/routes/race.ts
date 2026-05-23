@@ -11,6 +11,8 @@ import type { GridSize } from '../../shared/constants'
 import { joinRace, getRaceStatus, completeRace, abandonRace } from '../lib/race'
 import { calculateCoinReward, getUserEconomy } from '../lib/economy'
 import { getTodayUTC, getDayDifference, updateLoginStreak } from '../lib/helpers'
+import { trackRaceJoin, trackRaceMatch, trackRaceComplete } from '../lib/analytics'
+import { recordChannelOpen } from '../lib/viral-tracker'
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 
@@ -148,6 +150,24 @@ raceRouter.post('/api/race/join', async (c: Context): Promise<Response> => {
         }
 
         const result = await joinRace(postId, userId, gridSize as GridSize)
+
+        // ─── Analytics: track race join (non-blocking) ────────────────────
+        // Fire only on a new queue entry or new match, not on resume of an
+        // existing race (status === 'already_racing'). Mirrors the dedup
+        // semantics of trackPostOpen / trackChallengeOpen.
+        if (result.status === 'waiting' || result.status === 'matched') {
+            try {
+                const today = getTodayUTC()
+                await trackRaceJoin(today, postId, userId)
+                await recordChannelOpen(today, 'race', userId)
+                if (result.status === 'matched') {
+                    await trackRaceMatch(today, postId, result.sessionId)
+                }
+            } catch (err) {
+                console.error('[Race] Join tracking failed (non-critical):', err)
+            }
+        }
+
         return c.json({ status: 'success', data: result })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
@@ -210,6 +230,13 @@ raceRouter.post('/api/race/complete/:sessionId', async (c: Context): Promise<Res
             const session = await redis.hGetAll(raceKey)
             const gridSizeRaw = parseInt(session?.['gridSize'] ?? '4', 10)
             const gridSize: GridSize = isValidGridSize(gridSizeRaw) ? gridSizeRaw : 4
+
+            // ─── Analytics: track race completion (non-blocking) ──────────
+            try {
+                await trackRaceComplete(getTodayUTC(), postId, sessionId, result.winnerId)
+            } catch (err) {
+                console.error('[Race] Complete tracking failed (non-critical):', err)
+            }
 
             try {
                 const { coinReward, streak } = await awardRaceCompletion(userId, timeTaken, gridSize)
