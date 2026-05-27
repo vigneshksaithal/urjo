@@ -124,6 +124,34 @@ const addDays = (date: string, days: number): string => {
     return iso
 }
 
+/**
+ * Return the current UTC date as YYYY-MM-DD.
+ * Extracted as `now` so callers can override for tests.
+ */
+const todayUTC = (now: Date = new Date()): string => {
+    const iso = now.toISOString().split('T')[0]
+    if (iso === undefined) throw new Error('Failed to format today as UTC')
+    return iso
+}
+
+/**
+ * A return-rate window for `date` over `days` requires the cohort set for
+ * `date + days` to be fully populated. That set is only complete after the
+ * UTC day `date + days` has finished — i.e. once "today" (UTC) is strictly
+ * later than `date + days`.
+ *
+ * Returns true when the window has fully closed and reads of the cohort set
+ * can be treated as final.
+ */
+export const isReturnWindowClosed = (
+    date: string,
+    days: number,
+    now: Date = new Date(),
+): boolean => {
+    const cohortDate = addDays(date, days)
+    return todayUTC(now) > cohortDate
+}
+
 const trackDailyActiveEngager = async (date: string, userId: string): Promise<void> => {
     await redis.zAdd(dailyActiveEngagersKey(date), {
         member: userId,
@@ -390,16 +418,32 @@ export type KFactorInput = {
     completions: number
     challengePosts: number
     newPlayerChallengeCompletions: number
-    challengeD1RetainedShare: number
+    /**
+     * Null when the D+1 window for the underlying cohort has not closed yet.
+     * The K-factor cannot be computed without it.
+     */
+    challengeD1RetainedShare: number | null
 }
 
+/**
+ * Compute K-factor (viral coefficient).
+ *
+ * Returns 0 when there are no completions or no challenge posts (no viral
+ * activity at all that day).
+ *
+ * Returns null when challengeD1RetainedShare is null — the D+1 retention
+ * window has not closed and the multiplier is genuinely unknown. Callers
+ * should render this as "—" rather than as 0; treating it as 0 systematically
+ * understates K on the most recent two days of any dashboard.
+ */
 export const computeKFactorPure = ({
     completions,
     challengePosts,
     newPlayerChallengeCompletions,
     challengeD1RetainedShare,
-}: KFactorInput): number => {
+}: KFactorInput): number | null => {
     if (completions <= 0 || challengePosts <= 0) return 0
+    if (challengeD1RetainedShare === null) return null
 
     const challengePostsPerCompleter = safeDivide(challengePosts, completions)
     const newCompletersPerChallenge = safeDivide(newPlayerChallengeCompletions, challengePosts)
@@ -501,6 +545,8 @@ export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
 
     const helpTapRate: number | null = postOpens === 0 ? null : safeDivide(helpTaps, postOpens)
 
+    const d1WindowIncomplete = !isReturnWindowClosed(date, 1)
+
     const [d1ReturnRate, d3ReturnRate, growth] = await Promise.all([
         computeD1ReturnRate(date),
         computeReturnRateForDate(date, 3),
@@ -519,7 +565,10 @@ export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
         d1ReturnRate,
         d3ReturnRate,
         estimatedDQE: completions,
-        dq: { firstActionMissing: dqFirstActionMissing },
+        dq: {
+            firstActionMissing: dqFirstActionMissing,
+            d1WindowIncomplete,
+        },
         helpTapRate,
         growth,
     }
@@ -544,7 +593,21 @@ export const computeD1ReturnRatePure = (
     return intersectionCount / dayDUsers.length
 }
 
-export const computeReturnRateForDate = async (date: string, days: number): Promise<number> => {
+/**
+ * Compute the day-D+N return rate against the cohort of completers on `date`.
+ *
+ * Returns null when the D+N window has not closed yet (today UTC ≤ date+N).
+ * Returning a hard zero in that case silently understates retention on the
+ * two most recent days of any dashboard read; null lets the UI render "—"
+ * and skips these days from rolling averages.
+ */
+export const computeReturnRateForDate = async (
+    date: string,
+    days: number,
+    now: Date = new Date(),
+): Promise<number | null> => {
+    if (!isReturnWindowClosed(date, days, now)) return null
+
     const returnDate = addDays(date, days)
     const [dayDUsers, returnUsers] = await Promise.all([
         readSortedSetMembers(completionUsersKey(date)),
@@ -554,7 +617,17 @@ export const computeReturnRateForDate = async (date: string, days: number): Prom
     return computeD1ReturnRatePure(dayDUsers, returnUsers)
 }
 
-const computeChallengeReturnRateForDate = async (date: string, days: number): Promise<number> => {
+/**
+ * D1 retention restricted to users acquired via challenge posts on `date`.
+ * Returns null on incomplete windows, same as computeReturnRateForDate.
+ */
+const computeChallengeReturnRateForDate = async (
+    date: string,
+    days: number,
+    now: Date = new Date(),
+): Promise<number | null> => {
+    if (!isReturnWindowClosed(date, days, now)) return null
+
     const returnDate = addDays(date, days)
     const [challengeCompleters, returnUsers] = await Promise.all([
         readSortedSetMembers(challengeNewCompletionUsersKey(date)),
@@ -566,23 +639,17 @@ const computeChallengeReturnRateForDate = async (date: string, days: number): Pr
 
 /**
  * Compute D1 return rate for a given date.
- * Returns the cached rate if already computed, or 0 if not yet available.
- * The dashboard scheduler calls storeD1ReturnRate after gathering user lists.
+ * Returns null when the D+1 window has not closed yet (today UTC ≤ date+1).
+ *
+ * Note: an earlier design cached the rate at `analytics:{date}:d1_return_rate`
+ * and a writer (`storeD1ReturnRate`) was intended to freeze yesterday's value
+ * once the window closed. The writer was never wired into a scheduler, so the
+ * cache was always cold and the live read silently returned 0 for the most
+ * recent two days. The cache layer has been removed; computation is now
+ * always live and honest about windowing.
  */
-export const computeD1ReturnRate = async (date: string): Promise<number> => {
-    const cachedRate = await redis.get(`analytics:${date}:d1_return_rate`)
-    if (cachedRate !== undefined) {
-        const parsed = parseFloat(cachedRate)
-        if (!Number.isNaN(parsed)) return parsed
-    }
-
-    return computeReturnRateForDate(date, 1)
-}
-
-/**
- * Store a pre-computed D1 return rate for a given date.
- * Called by the dashboard computation after gathering user lists.
- */
-export const storeD1ReturnRate = async (date: string, rate: number): Promise<void> => {
-    await redis.set(`analytics:${date}:d1_return_rate`, rate.toString())
-}
+export const computeD1ReturnRate = async (
+    date: string,
+    now: Date = new Date(),
+): Promise<number | null> =>
+    computeReturnRateForDate(date, 1, now)

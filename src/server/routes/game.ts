@@ -1530,9 +1530,12 @@ gameRouter.post('/api/game/share', async (c) => {
 		})
 
 		await redis.set(sharedKey, 'true')
+		// Aligns with viral channel `result_copy` recorded below.
+		// Previously this also incremented `trackResultComment`, which
+		// double-counted shares across two channel counters and made
+		// per-channel mix analysis unreliable.
 		await Promise.all([
 			trackResultCopy(getTodayUTC()),
-			trackResultComment(getTodayUTC(), userId),
 			incrementSharesCount(userId),
 		])
 
@@ -1629,8 +1632,10 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 		// Set dedup flag
 		await redis.set(dedupKey, '1')
 		await redis.expire(dedupKey, RESULT_COMMENT_TTL)
+		// Aligns with viral channel `result_comment` recorded below.
+		// Previously this also incremented `trackResultCopy`, which
+		// double-counted shares across two channel counters.
 		await Promise.all([
-			trackResultCopy(getTodayUTC()),
 			trackResultComment(getTodayUTC(), userId),
 			incrementSharesCount(userId),
 		])
