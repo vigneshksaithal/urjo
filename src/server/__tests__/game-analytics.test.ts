@@ -270,8 +270,11 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
     const resultComments = await withCtx(CTX, () => redis.get(`analytics:${today}:result_comments`))
     const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
 
-    expect(resultCopies).toBe('1')
+    // /api/game/result-comment should increment ONLY the result_comments
+    // counter. Previously it also incremented result_copies, which
+    // double-counted shares across two viral channel counters.
     expect(resultComments).toBe('1')
+    expect(resultCopies).toBeUndefined()
     expect(social['sharesCount']).toBe('1')
 
     vi.restoreAllMocks()
@@ -437,8 +440,11 @@ testShare('POST /api/game/share tracks result copy and share count on success', 
     const resultComments = await withCtx(CTX, () => redis.get(`analytics:${today}:result_comments`))
     const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
 
+    // /api/game/share should increment ONLY the result_copies counter,
+    // matching its result_copy viral channel. Previously it also
+    // incremented result_comments, inflating that counter on every share.
     expect(resultCopies).toBe('1')
-    expect(resultComments).toBe('1')
+    expect(resultComments).toBeUndefined()
     expect(social['sharesCount']).toBe('1')
 
     vi.restoreAllMocks()

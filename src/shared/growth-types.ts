@@ -51,7 +51,19 @@ export type DailyMetrics = {
     d1ReturnRate: number | null
     d3ReturnRate?: number | null
     estimatedDQE: number
-    dq: { firstActionMissing: boolean }
+    /**
+     * Data-quality flags. Each true value means the corresponding metric
+     * is unreliable for the given date and downstream consumers should
+     * treat the related rates as null rather than as zeros.
+     *
+     * - firstActionMissing: completions > 0 but first_actions == 0 (instrumentation gap)
+     * - d1WindowIncomplete: the D+1 cohort window has not closed yet,
+     *   so D1-derived rates (d1ReturnRate, challengeD1RetainedShare, kFactor) are unknown
+     */
+    dq: {
+        firstActionMissing: boolean
+        d1WindowIncomplete?: boolean
+    }
     helpTapRate: number | null
     growth?: GrowthLoopMetrics
 }
@@ -68,8 +80,16 @@ export type GrowthLoopMetrics = {
     subscribeTaps: number
     challengePostsPerCompleter: number
     newCompletersPerChallenge: number
-    challengeD1RetainedShare: number
-    kFactor: number
+    /**
+     * D1 return rate of users acquired via challenge posts on this date.
+     * Null when the D+1 cohort window has not closed yet.
+     */
+    challengeD1RetainedShare: number | null
+    /**
+     * Viral coefficient. Null when any input is unknown — most commonly
+     * because challengeD1RetainedShare's window has not closed yet.
+     */
+    kFactor: number | null
     shareRate: number | null
     viralCycleTimeHours: number | null
     perChannelMetrics: PerChannelMetrics | null

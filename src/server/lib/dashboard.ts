@@ -173,13 +173,13 @@ export const formatDashboardMarkdown = (data: DashboardData): string => {
     // Metrics table
     lines.push('| Metric | Value |')
     lines.push('|---|---|')
-    lines.push(`| DQE (7d avg) | ${data.rolling.dqe7d} |`)
-    lines.push(`| First Action Rate (7d) | ${data.rolling.firstActionRate7d} |`)
-    lines.push(`| Completion Rate (7d) | ${data.rolling.completionRate7d} |`)
-    lines.push(`| D1 Return Rate (7d) | ${data.rolling.d1ReturnRate7d} |`)
-    lines.push(`| D3 Return Rate | ${data.daily.d3ReturnRate ?? 0} |`)
+    lines.push(`| DQE (7d avg) | ${data.rolling.dqe7d ?? '—'} |`)
+    lines.push(`| First Action Rate (7d) | ${data.rolling.firstActionRate7d ?? '—'} |`)
+    lines.push(`| Completion Rate (7d) | ${data.rolling.completionRate7d ?? '—'} |`)
+    lines.push(`| D1 Return Rate (7d) | ${data.rolling.d1ReturnRate7d ?? '—'} |`)
+    lines.push(`| D3 Return Rate | ${data.daily.d3ReturnRate ?? '—'} |`)
     lines.push(`| Daily Active Engagers | ${data.daily.growth?.dailyActiveEngagers ?? 0} |`)
-    lines.push(`| Challenge K | ${data.daily.growth?.kFactor ?? 0} |`)
+    lines.push(`| Challenge K | ${data.daily.growth?.kFactor ?? '—'} |`)
     lines.push('')
 
     // Alerts

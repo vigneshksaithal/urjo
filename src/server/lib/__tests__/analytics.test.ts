@@ -26,6 +26,7 @@ import {
     computeD1ReturnRatePure,
     computeReturnRateForDate,
     computeKFactorPure,
+    isReturnWindowClosed,
     trackRaceJoin,
     trackRaceMatch,
     trackRaceComplete,
@@ -226,6 +227,110 @@ describe('computeKFactorPure', () => {
             challengeD1RetainedShare: 0.4,
         })).toBe(0)
     })
+
+    it('returns null when challengeD1RetainedShare is null (window incomplete)', () => {
+        expect(computeKFactorPure({
+            completions: 20,
+            challengePosts: 5,
+            newPlayerChallengeCompletions: 10,
+            challengeD1RetainedShare: null,
+        })).toBeNull()
+    })
+
+    it('the no-activity short-circuit takes precedence over null retention', () => {
+        // When there is no viral activity at all, K is unambiguously 0 even
+        // if the D+1 window is still open — there is nothing to retain.
+        expect(computeKFactorPure({
+            completions: 0,
+            challengePosts: 0,
+            newPlayerChallengeCompletions: 0,
+            challengeD1RetainedShare: null,
+        })).toBe(0)
+    })
+})
+
+// ─── isReturnWindowClosed ──────────────────────────────────────────────────────
+
+describe('isReturnWindowClosed', () => {
+    it('returns false when today UTC equals date+days (window still open)', () => {
+        const now = new Date('2026-05-27T18:00:00Z')
+        expect(isReturnWindowClosed('2026-05-26', 1, now)).toBe(false)
+    })
+
+    it('returns false when today UTC is before date+days', () => {
+        const now = new Date('2026-05-27T18:00:00Z')
+        expect(isReturnWindowClosed('2026-05-27', 1, now)).toBe(false)
+    })
+
+    it('returns true when today UTC is strictly after date+days', () => {
+        const now = new Date('2026-05-28T00:00:01Z')
+        expect(isReturnWindowClosed('2026-05-26', 1, now)).toBe(true)
+    })
+
+    it('returns true for ancient dates regardless of days', () => {
+        const now = new Date('2026-05-27T00:00:00Z')
+        expect(isReturnWindowClosed('2025-01-15', 1, now)).toBe(true)
+        expect(isReturnWindowClosed('2025-01-15', 3, now)).toBe(true)
+    })
+
+    it('handles the UTC-day-rollover boundary correctly', () => {
+        // At exactly 00:00 UTC on date+days+1, the comparison is
+        // todayUTC ('2026-05-28') > cohortDate ('2026-05-27') → true.
+        const justAfterRollover = new Date('2026-05-28T00:00:00Z')
+        expect(isReturnWindowClosed('2026-05-26', 1, justAfterRollover)).toBe(true)
+    })
+})
+
+// ─── Window-aware return-rate semantics ────────────────────────────────────────
+
+const testWindowOpen = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testWindowOpen('computeReturnRateForDate returns null when window is open', async () => {
+    // Seed a cohort on a "yesterday" date relative to a fixed `now`.
+    await trackCompletion('2026-05-26', 't3_p1', 't2_u1', 't5_testsub')
+    await trackCompletion('2026-05-26', 't3_p1', 't2_u2', 't5_testsub')
+
+    const now = new Date('2026-05-27T12:00:00Z')
+
+    // Window for D+1 of 2026-05-26 closes at the end of 2026-05-27, so at
+    // 12:00 on 2026-05-27 the window is still open.
+    expect(await computeReturnRateForDate('2026-05-26', 1, now)).toBeNull()
+})
+
+const testWindowClosed = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testWindowClosed('computeReturnRateForDate returns the rate once the window closes', async () => {
+    await trackCompletion('2026-05-26', 't3_p1', 't2_u1', 't5_testsub')
+    await trackCompletion('2026-05-26', 't3_p1', 't2_u2', 't5_testsub')
+    await trackCompletion('2026-05-27', 't3_p2', 't2_u2', 't5_testsub')
+
+    const now = new Date('2026-05-28T00:00:01Z')
+
+    // After UTC-day rollover the window for 2026-05-26 → D+1 has closed
+    // and the rate is the real cohort overlap (1 of 2 returned).
+    expect(await computeReturnRateForDate('2026-05-26', 1, now)).toBe(0.5)
+})
+
+const testD1WindowFlag = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testD1WindowFlag('getDailyMetrics flags d1WindowIncomplete for today and recent days', async () => {
+    // Seed minimal activity so the metrics object has non-zero rates where
+    // expected. The date is "today" relative to the system clock, so the
+    // D+1 window is genuinely open.
+    const today = new Date().toISOString().split('T')[0]!
+    await trackPostOpen(today, 't3_today', 't2_u1', 't5_testsub')
+    await trackFirstAction(today, 't3_today', 't2_u1', 't5_testsub')
+    await trackCompletion(today, 't3_today', 't2_u1', 't5_testsub')
+
+    const metrics = await getDailyMetrics(today)
+
+    expect(metrics.dq.d1WindowIncomplete).toBe(true)
+    expect(metrics.d1ReturnRate).toBeNull()
+    // K-factor is null for today because challengeD1RetainedShare is null.
+    // (The no-activity short-circuit doesn't apply here only if there's a
+    // challenge post; without one, K returns 0 from the short-circuit.)
+    // Either 0 or null is acceptable — the contract is "never silently lie".
+    expect([null, 0]).toContain(metrics.growth?.kFactor ?? null)
 })
 
 // ─── getDailyMetrics ───────────────────────────────────────────────────────────
