@@ -150,3 +150,78 @@ adminRouter.get('/api/admin/installations', async (c) => {
         return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
     }
 })
+
+// ─── POST /api/admin/qe/upload ─────────────────────────────────────────────────
+// Manual ingestion of Reddit's Qualified Engagers numbers for a date.
+// Reddit does not (yet) expose this metric via API, so a moderator pastes
+// it from the payout console. Drift detection runs against the most recent
+// upload for each date.
+
+import {
+    formatDriftLogLine,
+    readDriftRecords,
+    runDriftCheck,
+    storeRedditQEUpload,
+    validateRedditQEUpload,
+    type RedditQEUpload,
+} from '../lib/drift'
+
+adminRouter.post('/api/admin/qe/upload', async (c) => {
+    try {
+        const body = await c.req.json().catch(() => null)
+        const validationError = validateRedditQEUpload(body)
+        if (validationError !== null) {
+            return c.json({ status: 'error', message: validationError }, HTTP_STATUS_BAD_REQUEST)
+        }
+
+        const result = await storeRedditQEUpload(body as RedditQEUpload)
+        return c.json({ status: 'success', data: result })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
+// ─── POST /api/admin/drift/check ──────────────────────────────────────────────
+// On-demand drift evaluation. Same logic the nightly cron uses; useful for
+// debugging an upload immediately rather than waiting for 02:00 UTC.
+
+adminRouter.post('/api/admin/drift/check', async (c) => {
+    try {
+        const body = await c.req.json().catch(() => ({}))
+        const date = (body as { date?: unknown }).date
+        if (!isValidISODate(date)) {
+            return c.json({ status: 'error', message: 'Invalid date — expected YYYY-MM-DD' }, HTTP_STATUS_BAD_REQUEST)
+        }
+
+        const records = await runDriftCheck(date)
+        for (const rec of records) {
+            if (rec.severity !== 'none') {
+                console.error(formatDriftLogLine(rec))
+            }
+        }
+
+        return c.json({ status: 'success', data: records })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
+// ─── GET /api/admin/drift ─────────────────────────────────────────────────────
+// Read previously-computed drift records for a date.
+
+adminRouter.get('/api/admin/drift', async (c) => {
+    const date = c.req.query('date')
+    if (!isValidISODate(date)) {
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_BAD_REQUEST)
+    }
+
+    try {
+        const records = await readDriftRecords(date)
+        return c.json({ status: 'success', data: records })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})

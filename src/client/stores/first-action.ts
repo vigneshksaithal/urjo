@@ -1,5 +1,7 @@
 import { writable } from 'svelte/store'
 
+import { sessionHeaders } from '../lib/session-id'
+
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 /**
@@ -18,6 +20,9 @@ export const firstActionLatchStore = writable<{ latched: boolean }>({ latched: f
  *
  * Checks the latch synchronously, sets it to true, then POSTs fire-and-forget.
  * Failures are silently swallowed — gameplay must never be blocked (Req 1.4).
+ *
+ * Sends the per-page-load session id via the `x-urjo-session` header so the
+ * server-side DQP gate can correlate this tap with referrer + dwell.
  */
 export const fireOnce = async (postId: string): Promise<void> => {
     let alreadyLatched = false
@@ -35,7 +40,7 @@ export const fireOnce = async (postId: string): Promise<void> => {
     try {
         await fetch('/api/game/first-action', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: sessionHeaders(),
             body: JSON.stringify({ postId }),
         })
     } catch {

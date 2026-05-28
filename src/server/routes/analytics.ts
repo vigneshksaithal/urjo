@@ -60,3 +60,101 @@ analyticsRouter.get('/api/analytics/dashboard', async (c) => {
         return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
     }
 })
+
+
+// ─── New scorecard endpoints (DQP / D7 / S2R / Drift) ──────────────────────────
+
+import { buildScorecard, formatScorecardMarkdown } from '../lib/scorecard'
+import {
+    computeGlobalD7Retention,
+    computePerSubD7Retention,
+    readGlobalDQP,
+    readPerSubDQP,
+} from '../lib/qualified'
+import { readS2RAllBuckets, readS2RGlobal } from '../lib/s2r'
+
+const isISODate = (value: unknown): value is string =>
+    typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+
+/**
+ * GET /api/analytics/scorecard?date=YYYY-MM-DD&format=json|markdown
+ *
+ * The 80/20 honest report. Returns DQP, per-sub vector, D7 retention,
+ * S2R, and Reddit-QE drift. Default format=json; pass format=markdown
+ * to get the same content rendered as the Reddit-comment payload.
+ */
+analyticsRouter.get('/api/analytics/scorecard', async (c) => {
+    const date = c.req.query('date')
+    if (!isISODate(date)) {
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+    try {
+        const data = await buildScorecard(date)
+        const format = c.req.query('format') ?? 'json'
+        if (format === 'markdown') {
+            return c.text(formatScorecardMarkdown(data))
+        }
+        return c.json({ status: 'success', data })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
+/**
+ * GET /api/analytics/dqp?date=YYYY-MM-DD&sub=t5_xxx
+ *
+ * Returns the DQP cardinality for a (date, sub) — or just the global if
+ * `sub` is omitted. Includes the closed-window D7 retention when
+ * available; renders null otherwise.
+ */
+analyticsRouter.get('/api/analytics/dqp', async (c) => {
+    const date = c.req.query('date')
+    if (!isISODate(date)) {
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+    const sub = c.req.query('sub')
+
+    try {
+        if (sub !== undefined && sub.length > 0) {
+            if (!sub.startsWith('t5_')) {
+                return c.json({ status: 'error', message: '`sub` must start with t5_' }, HTTP_STATUS_INTERNAL_ERROR)
+            }
+            const [dqp, d7] = await Promise.all([
+                readPerSubDQP(date, sub),
+                computePerSubD7Retention(date, sub),
+            ])
+            return c.json({ status: 'success', data: { date, sub, dqp, d7Retention: d7 } })
+        }
+        const [dqp, d7] = await Promise.all([
+            readGlobalDQP(date),
+            computeGlobalD7Retention(date),
+        ])
+        return c.json({ status: 'success', data: { date, sub: '_global', dqp, d7Retention: d7 } })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
+/**
+ * GET /api/analytics/s2r?date=YYYY-MM-DD
+ *
+ * Returns the global S2R rate plus the per-bucket breakdown.
+ */
+analyticsRouter.get('/api/analytics/s2r', async (c) => {
+    const date = c.req.query('date')
+    if (!isISODate(date)) {
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+    try {
+        const [global, buckets] = await Promise.all([
+            readS2RGlobal(date),
+            readS2RAllBuckets(date),
+        ])
+        return c.json({ status: 'success', data: { date, global, buckets } })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})

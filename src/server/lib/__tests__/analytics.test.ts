@@ -374,7 +374,9 @@ testMetricsComputed('getDailyMetrics computes correct rates from counters', asyn
     expect(metrics.resultCopies).toBe(2)
     expect(metrics.firstActionRate).toBe(0.5)
     expect(metrics.completionRate).toBe(0.5)
-    expect(metrics.estimatedDQE).toBe(1)
+    // estimatedDQE now reflects the daily_active_engagers sorted set, which
+    // includes both first-action users (2) — not just completers (1).
+    expect(metrics.estimatedDQE).toBe(2)
 })
 
 // ─── computeD1ReturnRatePure ───────────────────────────────────────────────────

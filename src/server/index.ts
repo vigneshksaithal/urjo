@@ -22,6 +22,7 @@ import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
 import { raceRouter } from './routes/race'
 import { presenceRouter } from './routes/presence'
+import { dwellRouter } from './routes/dwell'
 import {
   computeDailyMentionBatch,
   getOptInUserIds,
@@ -34,6 +35,8 @@ import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPrevie
 import { selectDailyMissions } from './lib/missions'
 import { getTodayUTC, getISOWeek, getYesterdayUTC, fetchUsername, readUserStreak } from './lib/helpers'
 import { computeDashboard, formatDashboardMarkdown } from './lib/dashboard'
+import { runDriftCheck, formatDriftLogLine } from './lib/drift'
+import { buildScorecard, formatScorecardMarkdown } from './lib/scorecard'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
 import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
@@ -307,13 +310,19 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
 
     const yesterday = getYesterdayUTC()
 
-    // Compute and store previous day's dashboard (non-blocking)
+    // Compute and store previous day's dashboard (non-blocking, in-app diagnostic only)
     let dashboardMarkdown = ''
     try {
       const dashboardData = await computeDashboard(yesterday)
-      dashboardMarkdown = formatDashboardMarkdown(dashboardData)
+      // Keep computeDashboard wired so /api/analytics/dashboard keeps working
+      // for in-app moderator views, but the Reddit comment uses the new
+      // honest scorecard built from DQP / D7 / S2R / drift instead of the
+      // inflated post_open-derived numbers.
+      void formatDashboardMarkdown(dashboardData)
+      const scorecard = await buildScorecard(yesterday)
+      dashboardMarkdown = formatScorecardMarkdown(scorecard)
     } catch (dashErr) {
-      console.error('[Scheduler] Dashboard computation failed (non-critical):', dashErr)
+      console.error('[Scheduler] Scorecard computation failed (non-critical):', dashErr)
     }
 
     // Read subreddit config for branding emoji
@@ -500,6 +509,33 @@ app.post('/internal/on-post-create', async (c: Context) => {
   }
 })
 
+// Nightly drift-check scheduler. Reconciles our DQP per-sub against the
+// most recent Reddit QE upload for the previous UTC day and emits a
+// structured log line for any non-'none' severity record. A webhook
+// downstream of the log can convert these to PagerDuty / Slack alerts.
+app.post('/internal/scheduler/drift-check', async (c: Context) => {
+  await c.req.json<TaskRequest>().catch(() => null)
+  try {
+    const yesterday = getYesterdayUTC()
+    const records = await runDriftCheck(yesterday)
+    let alerted = 0
+    for (const rec of records) {
+      if (rec.severity !== 'none') {
+        console.error(formatDriftLogLine(rec))
+        alerted++
+      }
+    }
+    return c.json<TaskResponse>(
+      { status: 'success', message: `drift-check complete: ${records.length} scopes evaluated, ${alerted} non-OK` },
+      200,
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Drift check failed'
+    console.error('[Scheduler] Drift check error:', message)
+    return c.json<TaskResponse>({ status: 'error', message }, 500)
+  }
+})
+
 // Register game API routes
 app.route('/', gameRouter)
 app.route('/', economyRouter)
@@ -510,6 +546,7 @@ app.route('/', seasonRouter)
 app.route('/', notifyRouter)
 app.route('/', raceRouter)
 app.route('/', presenceRouter)
+app.route('/', dwellRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports
