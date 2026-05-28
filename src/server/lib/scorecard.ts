@@ -22,7 +22,6 @@ import {
     isD7WindowClosed,
     readGlobalDQP,
     readPerSubDQP,
-    readPerSubDQPMembers,
     computePerSubD7Retention,
 } from './qualified'
 import { readS2RAllBuckets, readS2RGlobal, type S2RBucketSnapshot } from './s2r'
@@ -230,10 +229,9 @@ export const formatScorecardMarkdown = (data: ScorecardData): string => {
     lines.push('|---|---|---|')
     lines.push(`| Daily Qualified Players (DQP) | ${formatCount(data.dqpGlobal)} | ${dateLabel(data.date)} |`)
     lines.push(
-        `| Qualified D7 Retention | ${formatPercent(data.d7Global)} | ${
-            data.d7WindowClosed
-                ? `cohort ${dateLabel(data.date)} → ${dateLabel(addDaysISO(data.date, 7))}`
-                : `cohort ${dateLabel(data.date)} (window open until ${dateLabel(addDaysISO(data.date, 8))})`
+        `| Qualified D7 Retention | ${formatPercent(data.d7Global)} | ${data.d7WindowClosed
+            ? `cohort ${dateLabel(data.date)} → ${dateLabel(addDaysISO(data.date, 7))}`
+            : `cohort ${dateLabel(data.date)} (window open until ${dateLabel(addDaysISO(data.date, 8))})`
         } |`,
     )
     lines.push(

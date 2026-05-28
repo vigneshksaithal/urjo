@@ -1754,7 +1754,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 
 	try {
 		const body: ChallengeRequest = await c.req.json()
-		const { timeTaken, skillLevel, mistakes } = body
+		const { timeTaken, mistakes } = body
 
 		// Rate limit: one challenge post per user per day
 		const today = getTodayUTC()
@@ -1870,7 +1870,7 @@ Think you can beat it? Play above! 🎯`,
 				rows.push(cells.slice(i, i + gridSizeNum).join(''))
 			}
 			const fullEmojiGrid = rows.join('\n')
-			
+
 			// VIRAL OPTIMIZATION: Mask 60% of cells to create curiosity gap
 			// Shows enough pattern to intrigue, not enough to satisfy
 			const maskedGrid = maskPuzzleGrid(fullEmojiGrid, gridSizeNum, newPost.id, 0.4)

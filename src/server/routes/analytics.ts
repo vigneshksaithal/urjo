@@ -10,6 +10,7 @@ import { computeDashboard } from '../lib/dashboard'
 import { requireModerator } from '../lib/moderator'
 
 const HTTP_STATUS_INTERNAL_ERROR = 500
+const HTTP_STATUS_BAD_REQUEST = 400
 
 export const analyticsRouter = new Hono()
 
@@ -86,7 +87,7 @@ const isISODate = (value: unknown): value is string =>
 analyticsRouter.get('/api/analytics/scorecard', async (c) => {
     const date = c.req.query('date')
     if (!isISODate(date)) {
-        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_INTERNAL_ERROR)
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_BAD_REQUEST)
     }
     try {
         const data = await buildScorecard(date)
@@ -111,14 +112,14 @@ analyticsRouter.get('/api/analytics/scorecard', async (c) => {
 analyticsRouter.get('/api/analytics/dqp', async (c) => {
     const date = c.req.query('date')
     if (!isISODate(date)) {
-        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_INTERNAL_ERROR)
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_BAD_REQUEST)
     }
     const sub = c.req.query('sub')
 
     try {
         if (sub !== undefined && sub.length > 0) {
             if (!sub.startsWith('t5_')) {
-                return c.json({ status: 'error', message: '`sub` must start with t5_' }, HTTP_STATUS_INTERNAL_ERROR)
+                return c.json({ status: 'error', message: '`sub` must start with t5_' }, HTTP_STATUS_BAD_REQUEST)
             }
             const [dqp, d7] = await Promise.all([
                 readPerSubDQP(date, sub),
@@ -145,7 +146,7 @@ analyticsRouter.get('/api/analytics/dqp', async (c) => {
 analyticsRouter.get('/api/analytics/s2r', async (c) => {
     const date = c.req.query('date')
     if (!isISODate(date)) {
-        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_INTERNAL_ERROR)
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_BAD_REQUEST)
     }
     try {
         const [global, buckets] = await Promise.all([
