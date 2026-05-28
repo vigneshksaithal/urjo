@@ -639,13 +639,15 @@ gameRouter.get('/api/game/state', async (c) => {
 		}
 
 		// ─── Community stats (for all users) ───────────────────────────────────
-		let communityStats: { activePlayers: number; collectiveStreakDays: number } | undefined
+		let communityStats: { activePlayers: number; collectiveStreakDays: number; totalPlays: number } | undefined
 		try {
 			const cachedActive = await redis.get('stats:activePlayers:7d')
 			const cachedStreaks = await redis.get('stats:collectiveStreaks')
+			const cachedPlays = await redis.get('stats:totalPlays')
 			communityStats = {
 				activePlayers: cachedActive !== undefined ? parseInt(cachedActive, 10) : 0,
 				collectiveStreakDays: cachedStreaks !== undefined ? parseInt(cachedStreaks, 10) : 0,
+				totalPlays: cachedPlays !== undefined ? parseInt(cachedPlays, 10) : 0,
 			}
 		} catch {
 			// non-critical
@@ -662,7 +664,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			? {
 				samplePuzzle: serializedPuzzle,
 				instruction: 'Fill each row and column with equal reds and blues.',
-				communityStats: communityStats ?? { activePlayers: 0, collectiveStreakDays: 0 },
+				communityStats: communityStats ?? { activePlayers: 0, collectiveStreakDays: 0, totalPlays: 0 },
 				...(firstScreenTarget !== undefined && { targetToBeat: firstScreenTarget }),
 			}
 			: undefined

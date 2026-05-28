@@ -224,6 +224,7 @@ export const trackCompletion = async (
     await Promise.all([
         redis.incrBy(completionCounterKey(date), 1),
         redis.incrBy(subredditCompletionKey(date, subredditId), 1),
+        redis.incrBy('stats:totalPlays', 1),
         redis.zAdd(completionUsersKey(date), { member: userId, score: dateTimestamp }),
         redis.zAdd(userCompletionDatesKey(userId), { member: date, score: dateTimestamp }),
         trackDailyActiveEngager(date, userId),

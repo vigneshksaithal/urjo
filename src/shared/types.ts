@@ -27,6 +27,7 @@ export type SerializedPuzzle = {
 export type CommunityStats = {
 	activePlayers: number
 	collectiveStreakDays: number
+	totalPlays: number
 }
 
 export type FirstScreenData = {

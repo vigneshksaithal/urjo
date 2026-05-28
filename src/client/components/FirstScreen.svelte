@@ -18,6 +18,7 @@
         communityStats?: {
             activePlayers: number;
             collectiveStreakDays: number;
+            totalPlays: number;
         };
         targetToBeat?: TargetToBeat | undefined;
         onPlay: () => void;
@@ -27,7 +28,7 @@
         puzzle,
         puzzleNumber = 0,
         instruction = "Fill each row and column with equal reds and blues.",
-        communityStats = { activePlayers: 0, collectiveStreakDays: 0 },
+        communityStats = { activePlayers: 0, collectiveStreakDays: 0, totalPlays: 0 },
         targetToBeat = undefined,
         onPlay,
     }: Props = $props();
@@ -109,9 +110,9 @@
         Play
     </button>
 
-    {#if communityStats.activePlayers > 0 || communityStats.collectiveStreakDays > 0}
+    {#if communityStats.activePlayers > 0 || communityStats.collectiveStreakDays > 0 || communityStats.totalPlays > 0}
         <p class="text-xs text-theme-text-muted text-center">
-            👥 {communityStats.activePlayers.toLocaleString()} active players · 🔥
+            🎮 {communityStats.totalPlays.toLocaleString()} plays · 👥 {communityStats.activePlayers.toLocaleString()} active players · 🔥
             {communityStats.collectiveStreakDays.toLocaleString()} collective streak
             days
         </p>
