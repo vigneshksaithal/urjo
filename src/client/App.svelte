@@ -37,6 +37,8 @@
 		incrementSessionRun,
 		getSessionRun,
 	} from "./stores/session-run";
+	import { startHeartbeat, type HeartbeatHandle } from "./lib/dwell-heartbeat";
+	import { getSessionId, sessionHeaders } from "./lib/session-id";
 
 	type EconomyResponse = {
 		coins: number;
@@ -174,12 +176,21 @@
 
 	onMount(() => {
 		void loadGame();
+		// DQP dwell heartbeat: starts a single per-page-load session and
+		// emits /api/dwell/tick every ~5s of active foreground time. Stops
+		// itself once the server-side cap is reached.
+		const heartbeat: HeartbeatHandle = startHeartbeat({
+			sessionId: getSessionId(),
+		});
+		return () => heartbeat.stop();
 	});
 
 	async function loadGame() {
 		resetLatch();
 		try {
-			const response = await fetch("/api/game/state");
+			const response = await fetch("/api/game/state", {
+				headers: sessionHeaders(),
+			});
 			if (!response.ok) throw new Error("Failed to load game");
 
 			const data: GameState = await response.json();

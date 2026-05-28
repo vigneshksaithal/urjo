@@ -55,7 +55,6 @@ import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlocke
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
 import {
-	trackPostOpen,
 	trackFirstAction,
 	trackCompletion,
 	trackResultCopy,
@@ -65,6 +64,16 @@ import {
 	trackChallengeCompletion,
 	trackHelpTap,
 } from '../lib/analytics'
+import {
+	captureReferrer,
+	markFirstTapAndCommit,
+	getSessionIdFromHeader,
+} from '../lib/qualified'
+import {
+	isDifficulty,
+	markS2REligible,
+	tryConvertS2R,
+} from '../lib/s2r'
 import {
 	recordCompleter,
 	recordSharer,
@@ -578,15 +587,27 @@ gameRouter.get('/api/game/state', async (c) => {
 		}
 		const today = getTodayUTC()
 
-		// ─── Analytics: track post open (non-blocking) ────────────────────────
+		// ─── Analytics: capture session-scoped qualification signals ─────────
+		// Replaces the old trackPostOpen() pre-intent counter. We only
+		// capture the Reddit referrer here; the qualification gate
+		// (referrer + first-tap + dwell) is evaluated when all three are
+		// satisfied via /api/dwell/tick or /api/game/first-action.
 		try {
 			const { subredditId } = context
-			await trackPostOpen(today, postId, userId, subredditId)
+			const sessionId = getSessionIdFromHeader(c.req.raw.headers)
+			if (sessionId !== null) {
+				const referer = c.req.raw.headers.get('referer')
+				await captureReferrer(sessionId, userId, subredditId, referer)
+				// S2R: if this state-load is within 60s of a prior completion
+				// in the same session and a different post, count it as a
+				// "started puzzle 2" conversion.
+				await tryConvertS2R(sessionId, postId)
+			}
 			if (isChallenge) {
 				await trackChallengeOpen(today, postId, userId)
 			}
 		} catch (err) {
-			console.error('[Analytics] Post open tracking failed (non-critical):', err)
+			console.error('[Analytics] Open instrumentation failed (non-critical):', err)
 		}
 
 		// ─── Notify opt-in and hints dismissal (for GameView) ────────────────
@@ -815,6 +836,17 @@ gameRouter.post('/api/game/first-action', async (c) => {
 	try {
 		const today = getTodayUTC()
 		const isNew = await trackFirstAction(today, postId, userId, subredditId)
+
+		// ─── DQP gate: mark first-tap and commit if all conditions are met ────
+		try {
+			const sessionId = getSessionIdFromHeader(c.req.raw.headers)
+			if (sessionId !== null) {
+				await markFirstTapAndCommit(sessionId, today, userId, subredditId)
+			}
+		} catch (err) {
+			console.error('[DQP] First-tap commit failed (non-critical):', err)
+		}
+
 		return c.json({ tracked: isNew })
 	} catch (error) {
 		console.error('[Analytics] First action tracking failed:', error)
@@ -1099,6 +1131,19 @@ gameRouter.post('/api/game/complete', async (c) => {
 			}
 		} catch (err) {
 			console.error('[Analytics] Completion tracking failed (non-critical):', err)
+		}
+
+		// ─── S2R: mark this completion as eligible for "started puzzle 2" ────
+		// Eligibility expires in 60s server-side. The next /api/game/state
+		// call from the same session within that window converts the
+		// eligibility into a "puzzle 2 started" event.
+		try {
+			const today = getTodayUTC()
+			const sessionId = getSessionIdFromHeader(c.req.raw.headers)
+			const difficulty = isDifficulty(puzzle?.difficulty) ? puzzle.difficulty : 'easy'
+			await markS2REligible(sessionId, today, currentLevel, difficulty, userId, postId)
+		} catch (err) {
+			console.error('[S2R] markS2REligible failed (non-critical):', err)
 		}
 
 		// ─── Viral tracking: record completer + cycle time + conversion (non-blocking) ─
@@ -1709,7 +1754,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 
 	try {
 		const body: ChallengeRequest = await c.req.json()
-		const { timeTaken, skillLevel, mistakes } = body
+		const { timeTaken, mistakes } = body
 
 		// Rate limit: one challenge post per user per day
 		const today = getTodayUTC()
@@ -1825,7 +1870,7 @@ Think you can beat it? Play above! 🎯`,
 				rows.push(cells.slice(i, i + gridSizeNum).join(''))
 			}
 			const fullEmojiGrid = rows.join('\n')
-			
+
 			// VIRAL OPTIMIZATION: Mask 60% of cells to create curiosity gap
 			// Shows enough pattern to intrigue, not enough to satisfy
 			const maskedGrid = maskPuzzleGrid(fullEmojiGrid, gridSizeNum, newPost.id, 0.4)

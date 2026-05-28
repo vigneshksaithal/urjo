@@ -66,7 +66,7 @@ const testPostOpen = createDevvitTest({
     postId: 't3_testpost',
 })
 
-testPostOpen('GET /api/game/state increments post_open counter on first load', async () => {
+testPostOpen('GET /api/game/state does NOT increment post_open counter (DQP gate replaces pre-intent count)', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'test_player' } as never)
 
     await withCtx(CTX, () => seedPuzzle('t3_testpost'))
@@ -74,27 +74,34 @@ testPostOpen('GET /api/game/state increments post_open counter on first load', a
     const res = await withCtx(CTX, () => app.request('/api/game/state'))
     expect(res.status).toBe(200)
 
-    // Check that the post_open counter was incremented
+    // Pre-intent post_open counter is dead (kill list, 80/20 plan).
+    // The DQP gate (lib/qualified.ts) is now the engagement instrument.
     const today = new Date().toISOString().split('T')[0] ?? ''
     const counter = await withCtx(CTX, () => redis.get(`analytics:${today}:post_opens`))
-    expect(counter).toBe('1')
+    expect(counter).toBeUndefined()
 
     vi.restoreAllMocks()
 })
 
-testPostOpen('GET /api/game/state deduplicates post_open for same user/post/day', async () => {
+testPostOpen('GET /api/game/state captures referrer when x-urjo-session header is present (DQP gate)', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'test_player' } as never)
 
     await withCtx(CTX, () => seedPuzzle('t3_testpost'))
 
-    // First load
-    await withCtx(CTX, () => app.request('/api/game/state'))
-    // Second load — should be deduplicated
-    await withCtx(CTX, () => app.request('/api/game/state'))
+    const sessionId = 'test-session-state-1'
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/state', {
+            headers: {
+                'x-urjo-session': sessionId,
+                referer: 'https://www.reddit.com/r/testsub/comments/abc123/x/',
+            },
+        }),
+    )
+    expect(res.status).toBe(200)
 
-    const today = new Date().toISOString().split('T')[0] ?? ''
-    const counter = await withCtx(CTX, () => redis.get(`analytics:${today}:post_opens`))
-    expect(counter).toBe('1') // Still 1, not 2
+    const flags = await withCtx(CTX, () => redis.hGetAll(`qe:session:${sessionId}:flags`))
+    expect(flags.referrer).toBe('1')
+    expect(flags.userId).toBe('t2_player1')
 
     vi.restoreAllMocks()
 })

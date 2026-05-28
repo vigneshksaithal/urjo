@@ -169,10 +169,10 @@ test('scheduler analytics reply contains markdown table with DQE and rates', asy
     expect(analyticsCall).toBeDefined()
     const text = (analyticsCall![0] as { text: string }).text
 
-    // Should contain markdown table headers and key metrics
-    expect(text).toContain('| Metric | Value |')
-    expect(text).toContain('DQE')
-    expect(text).toContain('Phase')
+    // Should contain markdown table headers and key metrics from the new scorecard
+    expect(text).toContain('| Metric | Value | Window |')
+    expect(text).toContain('DQP')
+    expect(text).toContain('S2R')
 })
 
 test('scheduler sticky comment does not ask for upvotes', async () => {

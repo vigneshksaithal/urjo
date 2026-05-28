@@ -164,6 +164,13 @@ const trackDailyActiveEngager = async (date: string, userId: string): Promise<vo
 /**
  * Track a post open event (deduplicated per user per post per day).
  * Returns true if this was a new event, false if duplicate.
+ *
+ * @deprecated Pre-intent counter — the moment a webview mounts is not a
+ * meaningful engagement signal. The new DQP gate (see lib/qualified.ts)
+ * supersedes this. The function is kept for any straggler callers and so
+ * existing dashboards do not throw, but it is no longer wired into
+ * /api/game/state. Will be removed once the new report is the single
+ * source of truth for engagement reporting.
  */
 export const trackPostOpen = async (
     date: string,
@@ -523,14 +530,22 @@ const readGrowthMetrics = async (date: string, completions: number): Promise<Gro
  * When dq.firstActionMissing is true, firstActionRate and completionRate are
  * returned as null rather than 0 to distinguish missing data from poor performance.
  * helpTapRate is null when postOpens is 0 (no sessions to compute a rate against).
+ *
+ * `estimatedDQE` reflects the cardinality of the daily-active-engagers sorted
+ * set (unique userIds that performed any tracked engagement event that day).
+ * Previously it returned `completions`, which double-counted nothing but
+ * also failed to credit users who first-actioned, opted in, opened a
+ * challenge, etc., without completing — the result was a number labelled
+ * "engagers" that actually meant "completers".
  */
 export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
-    const [postOpens, firstActions, completions, resultCopies, helpTaps] = await Promise.all([
+    const [postOpens, firstActions, completions, resultCopies, helpTaps, dailyActiveEngagers] = await Promise.all([
         readCounter(postOpenCounterKey(date)),
         readCounter(firstActionCounterKey(date)),
         readCounter(completionCounterKey(date)),
         readCounter(resultCopyCounterKey(date)),
         readCounter(helpTapCounterKey(date)),
+        readSortedSetMembers(dailyActiveEngagersKey(date)).then((members) => members.length),
     ])
 
     const dqFirstActionMissing = isFirstActionMissing(completions, firstActions)
@@ -564,7 +579,7 @@ export const getDailyMetrics = async (date: string): Promise<DailyMetrics> => {
         completionRate,
         d1ReturnRate,
         d3ReturnRate,
-        estimatedDQE: completions,
+        estimatedDQE: dailyActiveEngagers,
         dq: {
             firstActionMissing: dqFirstActionMissing,
             d1WindowIncomplete,

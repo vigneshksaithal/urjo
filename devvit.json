@@ -46,6 +46,10 @@
       "daily-puzzle": {
         "endpoint": "/internal/scheduler/daily-puzzle",
         "cron": "0 16 * * *"
+      },
+      "drift-check": {
+        "endpoint": "/internal/scheduler/drift-check",
+        "cron": "0 2 * * *"
       }
     }
   },

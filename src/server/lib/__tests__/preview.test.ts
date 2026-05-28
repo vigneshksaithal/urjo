@@ -47,17 +47,17 @@ describe('buildChallengePreview', () => {
         expect(body?.style).toBe('body')
     })
 
-    it('includes "Can you beat it?" CTA', () => {
+    it('includes "Play now" CTA', () => {
         const result = buildChallengePreview(sampleData)
         const cta = result.blocks[3]
-        expect(cta?.content).toBe('Can you beat it?')
+        expect(cta?.content).toBe('Play now')
         expect(cta?.style).toBe('cta')
     })
 
     it('includes attempts and beats stats', () => {
         const result = buildChallengePreview(sampleData)
         const stats = result.blocks[4]
-        expect(stats?.content).toContain('12 attempts')
+        expect(stats?.content).toContain('12 attempting')
         expect(stats?.content).toContain('5 beaten')
         expect(stats?.style).toBe('stats')
     })
@@ -91,7 +91,7 @@ describe('buildChallengePreview', () => {
         }
         const result = buildChallengePreview(data)
         const stats = result.blocks[4]
-        expect(stats?.content).toBe('0 attempts · 0 beaten')
+        expect(stats?.content).toBe('Be the first to attempt!')
     })
 
     it('handles 6x6 grid size', () => {
