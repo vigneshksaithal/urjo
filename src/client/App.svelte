@@ -831,7 +831,7 @@
 			mistakes: $mistakeCount,
 			hasSubscribed,
 			isChallenge,
-			postId,
+			...(postId !== undefined && { postId }),
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
@@ -857,11 +857,11 @@
 			sessionRun,
 			sessionRunMultiplier,
 			sessionRunBonusCoins,
-			streakForecast,
-			weekendEvent,
+			...(streakForecast !== undefined && { streakForecast }),
+			...(weekendEvent !== undefined && { weekendEvent }),
+			...(seasonProgress !== undefined && { seasonProgress }),
+			...(nextMission !== undefined && { nextMission }),
 			weekendBonusCoins,
-			seasonProgress,
-			nextMission,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}
@@ -883,7 +883,7 @@
 	<RaceOverlay
 		sessionId={raceSessionId}
 		{postId}
-		state={raceOverlayState}
+			raceState={raceOverlayState}
 		onCancel={handleRaceCancel}
 		onRaceAgain={handleRaceAgain}
 		onChallenge={handleRaceChallenge}
