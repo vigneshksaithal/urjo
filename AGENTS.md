@@ -227,13 +227,95 @@ Use MCP tools proactively — they give better answers than guessing.
 
 **Svelte MCP:** `list-sections` → `get-documentation` → write code → `svelte-autofixer` (loop until zero issues)
 
-**Devvit MCP:** `devvit_search` for any Devvit/Redis/Reddit API question. Natural language queries work well.
+**Devvit MCP:** `devvit_search` for any Devvit/Redis/Reddit API question. Natural language queries work well. Also use `devvit_logs` to stream live server logs from a playtest subreddit.
 
 **Sequential Thinking MCP:** `sequentialthinking` for breaking down complex problems into step-by-step reasoning chains. Use when facing multi-step logic, architectural decisions, debugging complex issues, or any task that benefits from structured thinking before acting.
+
+**Playwright MCP:** Visual UI review after any Svelte component or CSS change. See [UI Review Workflow](#ui-review-workflow) below.
 
 ### Web Search
 
 If unsure about an API, library version, or best practice — search the web first. Don't guess. Prefer official docs and recent sources.
+
+---
+
+## UI Review Workflow
+
+**Trigger:** Any task that creates or modifies `.svelte` files or CSS.
+
+This workflow closes the visual feedback loop — Kiro codes, then visually inspects and iterates.
+
+### How Devvit local testing works
+
+Devvit apps **cannot run fully offline** — the backend (Redis, Reddit API) requires Reddit's infrastructure. There are two ways to test UI:
+
+**Option A — Frontend-only (Vite dev server)**
+- Runs the Svelte client at `http://localhost:4173` via `bun run local`
+- API calls to `/api/*` will 502 (no backend) — the error screen is expected
+- Good for: layout, styling, component structure, static UI states
+
+**Option B — Full playtest (requires Reddit account + subreddit)**
+- Run `bun run dev` (which runs `devvit playtest`)
+- Devvit uploads the app to Reddit's servers and opens a live test URL like:
+  `https://www.reddit.com/r/<your-subreddit>/?playtest=<app-name>`
+- Full backend (Redis, Reddit API) works here
+- Good for: end-to-end flows, game state, API integration
+
+### Prerequisites for visual review
+
+For frontend-only review (Option A):
+```bash
+bun run local   # starts Vite at http://localhost:4173
+```
+
+For full playtest (Option B):
+```bash
+bun run dev     # uploads to Reddit + opens playtest URL
+```
+
+If neither server is running, ask the user to start one before proceeding.
+
+### Steps (frontend-only review)
+
+1. Ensure `bun run local` is running at `http://localhost:4173`
+2. `browser_navigate` → `http://localhost:4173`
+3. `browser_screenshot` → capture the current state
+4. `browser_console_messages` → check for JS errors
+5. Analyze the screenshot for layout/visual issues (see checklist below)
+6. `browser_click` / `browser_type` → test interactive elements
+7. Resize to 375px width — primary Reddit webview target
+8. Fix issues in the Svelte/CSS code
+9. Re-screenshot to confirm the fix
+10. Repeat until production-quality
+
+### Steps (full playtest review)
+
+1. Ensure `bun run dev` is running and the playtest URL is active
+2. `browser_navigate` → the Reddit playtest URL
+3. Click "Launch App" on the Reddit post
+4. `browser_screenshot` → capture the webview
+5. Interact and review as above
+6. Use `devvit_logs` MCP tool to stream server logs if debugging backend issues:
+   `{ subreddit: "your-test-subreddit", since: "5m" }`
+
+### What to check per component type
+
+| Component | Key checks |
+|-----------|-----------|
+| Modals | Centered, scrollable content, backdrop, close button reachable |
+| Buttons | Consistent size, clear tap targets (≥44px), disabled state visible |
+| Game board | Grid alignment, cells don't overflow, fits narrow screens |
+| Overlays | Z-index correct, doesn't block interaction behind it |
+| Lists/leaderboards | Scrollable, items don't clip, rank numbers aligned |
+| Badges/chips | Text doesn't overflow, consistent border-radius |
+
+### Viewport sizes to test
+
+- **375×667** — iPhone SE / narrow Reddit webview (primary target)
+- **390×844** — iPhone 14
+- **768×1024** — tablet (secondary)
+
+Use `browser_snapshot` to get the accessibility tree if visual inspection isn't enough to diagnose an issue.
 
 ---
 
