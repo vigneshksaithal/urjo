@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "/opt/homebrew/bin/bunx",
+      "args": [
+        "@playwright/mcp@latest"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "browser_navigate",
+        "browser_screenshot",
+        "browser_click",
+        "browser_type",
+        "browser_scroll",
+        "browser_wait_for",
+        "browser_snapshot",
+        "browser_close",
+        "browser_console_messages",
+        "browser_take_screenshot",
+        "browser_resize",
+        "browser_evaluate",
+        "browser_run_code_unsafe",
+        "browser_press_key"
+      ]
+    },
+    "devvit": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": [
+        "-y",
+        "@devvit/mcp"
+      ],
+      "env": {
+        "DEVVIT_DISABLE_METRICS": "true"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "devvit_search",
+        "devvit_logs"
+      ]
+    }
+  }
+}
