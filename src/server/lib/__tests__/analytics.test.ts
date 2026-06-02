@@ -14,6 +14,7 @@ import {
 import {
     trackPostOpen,
     trackFirstAction,
+    normalizeFirstActionSource,
     trackCompletion,
     trackResultCopy,
     trackResultComment,
@@ -86,6 +87,34 @@ testFirstActionDedup('trackFirstAction skips counter on duplicate', async () => 
 
     const counter = await redis.get('analytics:2025-01-15:first_actions')
     expect(counter).toBe('1')
+})
+
+describe('normalizeFirstActionSource', () => {
+    it('accepts known first-intent sources', () => {
+        expect(normalizeFirstActionSource('play')).toBe('play')
+        expect(normalizeFirstActionSource('cell')).toBe('cell')
+        expect(normalizeFirstActionSource('result-comment')).toBe('result-comment')
+    })
+
+    it('falls back to unknown for unsupported values', () => {
+        expect(normalizeFirstActionSource('bad-source')).toBe('unknown')
+        expect(normalizeFirstActionSource(undefined)).toBe('unknown')
+    })
+})
+
+const testFirstActionSource = createDevvitTest({ userId: 't2_testuser', subredditId: 't5_testsub' })
+
+testFirstActionSource('trackFirstAction records the deduped source counter', async () => {
+    await trackFirstAction('2025-01-15', 't3_post1', 't2_testuser', 't5_testsub', 'play')
+    await trackFirstAction('2025-01-15', 't3_post1', 't2_testuser', 't5_testsub', 'cell')
+
+    const firstActions = await redis.get('analytics:2025-01-15:first_actions')
+    const playSource = await redis.get('analytics:2025-01-15:first_actions:source:play')
+    const cellSource = await redis.get('analytics:2025-01-15:first_actions:source:cell')
+
+    expect(firstActions).toBe('1')
+    expect(playSource).toBe('1')
+    expect(cellSource).toBeUndefined()
 })
 
 // ─── trackCompletion ───────────────────────────────────────────────────────────

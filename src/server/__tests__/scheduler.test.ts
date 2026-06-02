@@ -108,6 +108,30 @@ test('scheduler uses subreddit config branding emoji in post title', async () =>
     )
 })
 
+test('scheduler skips speed window when config is once_daily', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-02T08:00:00Z'))
+    mockRedditApis('t3_speed_skip')
+
+    await withCtx(() =>
+        redis.hSet('subreddit:t5_testsub:config', {
+            postFrequency: 'once_daily',
+            defaultGridSize: '4',
+            brandingEmoji: '🧩',
+            welcomeMessage: 'Welcome!',
+        })
+    )
+
+    const res = await withCtx(() => schedulerRequest())
+    const body = await res.json() as { status: string; message: string }
+
+    expect(res.status).toBe(200)
+    expect(body.message).toContain('speed_window disabled')
+    expect(reddit.submitCustomPost).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+})
+
 test('scheduler stores daily preview data in Redis after post creation', async () => {
     mockRedditApis('t3_preview1')
 

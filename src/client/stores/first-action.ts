@@ -1,6 +1,9 @@
 import { writable } from 'svelte/store'
 
 import { sessionHeaders } from '../lib/session-id'
+import type { FirstActionSource } from '../../shared/first-action'
+
+export type { FirstActionSource } from '../../shared/first-action'
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
@@ -24,7 +27,10 @@ export const firstActionLatchStore = writable<{ latched: boolean }>({ latched: f
  * Sends the per-page-load session id via the `x-urjo-session` header so the
  * server-side DQP gate can correlate this tap with referrer + dwell.
  */
-export const fireOnce = async (postId: string): Promise<void> => {
+export const fireOnce = async (
+    postId: string,
+    source: FirstActionSource = 'unknown',
+): Promise<void> => {
     let alreadyLatched = false
 
     firstActionLatchStore.update((state) => {
@@ -41,7 +47,7 @@ export const fireOnce = async (postId: string): Promise<void> => {
         await fetch('/api/game/first-action', {
             method: 'POST',
             headers: sessionHeaders(),
-            body: JSON.stringify({ postId }),
+            body: JSON.stringify({ postId, source }),
         })
     } catch {
         // Fire-and-forget: failures do not affect gameplay (Req 1.4)

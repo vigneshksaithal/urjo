@@ -12,6 +12,7 @@
 	import { validateGrid } from "../lib/validation";
 	import { computeBoardSize } from "../lib/board-layout";
 	import { hintShownStore, markShown } from "../stores/hints";
+	import { fireOnce } from "../stores/first-action";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
 	import { getResultTier } from "../../shared/result-tiers";
 	import { get } from "svelte/store";
@@ -80,7 +81,7 @@
 		onRace?: () => void;
 		isRaceResult?: boolean;
 		raceWon?: boolean;
-		postId?: string;
+		postId?: string | undefined;
 		autoChallengeUrl?: string | null;
 		/** Run-again loop: number of solves this session (incl. the latest). */
 		sessionRun?: number;
@@ -96,7 +97,7 @@
 			coinBonus: number;
 			isMilestone: boolean;
 			label: string;
-		};
+		} | undefined;
 		/** Active Weekend Event payload — when active, shows a persistent
 		 *  banner with countdown + applies a coin multiplier to all solves. */
 		weekendEvent?: {
@@ -106,7 +107,7 @@
 			emoji: string;
 			endsAtMs: number | null;
 			hoursLeft: number | null;
-		};
+		} | undefined;
 		/** Coins added by the weekend event on the latest completion. */
 		weekendBonusCoins?: number;
 		/** Always-on progression strip data — player rank/score in the
@@ -114,7 +115,7 @@
 		seasonProgress?: {
 			rank: number | null;
 			score: number;
-		};
+		} | undefined;
 		/** First incomplete daily mission for the always-on strip preview. */
 		nextMission?: {
 			templateId: string;
@@ -122,7 +123,7 @@
 			currentProgress: number;
 			targetValue: number;
 			coinReward: number;
-		};
+		} | undefined;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -272,6 +273,7 @@
 	// Fire-and-forget — failures are silently ignored so gameplay is never blocked.
 
 	function handleHelpTap(): void {
+		void fireOnce(postId ?? "", "help");
 		showHowToPlay = true;
 		if (helpTapFired) return;
 		helpTapFired = true;
@@ -361,6 +363,7 @@
 		// remain in sync with completion-ctas.ts.
 		const id = simplifiedCtas.primary.id;
 		if (id === "next-puzzle") {
+			void fireOnce(postId ?? "", "next-puzzle");
 			onNextChallenge();
 		}
 	}
@@ -370,8 +373,10 @@
 		// here so "Challenge Friends" / "Race Again" / "View Challenge" still
 		// work — they just live in the secondary slot now.
 		if (id === "challenge-friends") {
+			void fireOnce(postId ?? "", "challenge");
 			showChallengeConfirm = true;
 		} else if (id === "race-rematch") {
+			void fireOnce(postId ?? "", "race");
 			onRace?.();
 		} else if (id === "view-challenge") {
 			openChallenge();
@@ -388,7 +393,23 @@
 
 	function confirmSubscribe(): void {
 		showSubscribeConfirm = false;
+		void fireOnce(postId ?? "", "subscribe");
 		onSubscribe?.();
+	}
+
+	function handleRaceClick(): void {
+		void fireOnce(postId ?? "", "race");
+		onRace?.();
+	}
+
+	function handleHeaderNextPuzzle(): void {
+		void fireOnce(postId ?? "", "next-puzzle");
+		onNextChallenge();
+	}
+
+	function handleGridSizeSelect(size: number): void {
+		void fireOnce(postId ?? "", "grid-size");
+		onGridSizeChange?.(size);
 	}
 
 	function dismissMysteryBox(): void {
@@ -407,6 +428,7 @@
 	// Notify toggle handler — optimistic update, revert on failure (Req 13.5)
 	async function handleNotifyToggle(): Promise<void> {
 		if (notifySubmitting) return;
+		void fireOnce(postId ?? "", "notify");
 		notifySubmitting = true;
 		notifyError = null;
 		const previous = localNotifyOptIn;
@@ -523,7 +545,7 @@
 			<div class="flex items-center gap-1 shrink-0">
 				{#if onRace}
 					<button
-						onclick={onRace}
+						onclick={handleRaceClick}
 						class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
 						aria-label="Race"
 					>
@@ -531,7 +553,7 @@
 					</button>
 				{/if}
 				<button
-					onclick={onNextChallenge}
+					onclick={handleHeaderNextPuzzle}
 					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
 					aria-label="New Puzzle"
 				>
@@ -587,7 +609,7 @@
 	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
 	{#if !isChallenge && onGridSizeChange}
 		<div class="flex-none flex justify-center">
-			<GridSizeSelector {gridSize} {onGridSizeChange} />
+			<GridSizeSelector {gridSize} onGridSizeChange={handleGridSizeSelect} />
 		</div>
 	{/if}
 
@@ -896,6 +918,31 @@
 							🧊 Free Streak Freeze granted! Stored in your shop.
 						</div>
 					{/if}
+
+					<div class="grid grid-cols-2 gap-2 w-full">
+						<button
+							onclick={handleNotifyToggle}
+							disabled={notifySubmitting}
+							class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50"
+						>
+							{localNotifyOptIn ? "Notify on" : "Notify me"}
+						</button>
+						{#if onSubscribe && !hasSubscribed}
+							<button
+								onclick={() => (showSubscribeConfirm = true)}
+								class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
+							>
+								Subscribe
+							</button>
+						{:else}
+							<button
+								onclick={() => (showSeasonLeaderboard = true)}
+								class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
+							>
+								Season
+							</button>
+						{/if}
+					</div>
 
 					<!-- "More" button — toggles collapsible panel -->
 					<button

@@ -88,6 +88,14 @@ describe('fireOnce', () => {
         const body = JSON.parse(init.body as string) as Record<string, unknown>
         expect(body['postId']).toBe('t3_xyz789')
     })
+
+    it('sends source in the request body', async () => {
+        const spy = mockFetch()
+        await fireOnce('t3_xyz789', 'play')
+        const [, init] = spy.mock.calls[0] as [string, RequestInit]
+        const body = JSON.parse(init.body as string) as Record<string, unknown>
+        expect(body['source']).toBe('play')
+    })
 })
 
 describe('resetLatch', () => {

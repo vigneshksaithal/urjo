@@ -23,9 +23,22 @@
     let { isOpen, onClose }: Props = $props();
 
     type Tab = "overview" | "daily";
+    type RewardsStatus = {
+        date: string;
+        currentTier: number;
+        tierEligibility: string;
+        redditQualifiedEngagers: number;
+        redditQualifiedEngagers7d: number;
+        internalDqp: number;
+        internalVsRedditDrift: number | null;
+        tier3Target: number;
+        gapToTier3: number;
+        multiplierToTier3: number | null;
+    };
 
     let activeTab = $state<Tab>("overview");
     let dashboards = $state<DashboardData[]>([]);
+    let rewards = $state<RewardsStatus | null>(null);
     let loading = $state(false);
     let error = $state<string | null>(null);
 
@@ -61,11 +74,24 @@
         loading = true;
         error = null;
         try {
-            const res = await fetch("/api/analytics/dashboard");
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const json = await res.json();
-            if (json.status === "error") throw new Error(json.message);
-            dashboards = json.data as DashboardData[];
+            const [dashboardRes, rewardsRes] = await Promise.all([
+                fetch("/api/analytics/dashboard"),
+                fetch("/api/analytics/rewards"),
+            ]);
+            if (!dashboardRes.ok) throw new Error(`HTTP ${dashboardRes.status}`);
+            if (!rewardsRes.ok) throw new Error(`HTTP ${rewardsRes.status}`);
+
+            const dashboardJson = await dashboardRes.json();
+            if (dashboardJson.status === "error") {
+                throw new Error(dashboardJson.message);
+            }
+            const rewardsJson = await rewardsRes.json();
+            if (rewardsJson.status === "error") {
+                throw new Error(rewardsJson.message);
+            }
+
+            dashboards = dashboardJson.data as DashboardData[];
+            rewards = rewardsJson.data as RewardsStatus | null;
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load analytics";
         } finally {
@@ -75,6 +101,8 @@
 
     const pct = (n: number | null): string =>
         n === null ? "—" : `${(n * 100).toFixed(1)}%`;
+    const ratio = (n: number | null): string =>
+        n === null ? "—" : `${n.toFixed(2)}×`;
     const num = (n: number): string => n.toLocaleString();
 
     // Show race columns only when at least one day has race data
@@ -263,6 +291,84 @@
                                         </li>
                                     {/each}
                                 </ul>
+                            {/if}
+                        </div>
+
+                        <!-- Reddit Rewards status -->
+                        <div
+                            class="rounded-lg border border-theme-border bg-theme-hover p-3"
+                        >
+                            <div class="flex items-center justify-between">
+                                <span
+                                    class="text-xs text-theme-text-muted uppercase tracking-wide"
+                                    >Developer Rewards</span
+                                >
+                                {#if rewards}
+                                    <span class="text-xs text-theme-text-muted"
+                                        >{rewards.date}</span
+                                    >
+                                {/if}
+                            </div>
+                            {#if rewards}
+                                <div class="grid grid-cols-2 gap-2 mt-2">
+                                    <div>
+                                        <p class="text-xs text-theme-text-muted">
+                                            Reddit QE 7d
+                                        </p>
+                                        <p
+                                            class="text-xl font-bold text-theme-text-primary"
+                                        >
+                                            {num(
+                                                Math.round(
+                                                    rewards.redditQualifiedEngagers7d,
+                                                ),
+                                            )}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-theme-text-muted">
+                                            Tier
+                                        </p>
+                                        <p
+                                            class="text-xl font-bold {rewards.currentTier >=
+                                            3
+                                                ? 'text-emerald-400'
+                                                : 'text-yellow-400'}"
+                                        >
+                                            {rewards.tierEligibility}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-theme-text-muted">
+                                            Gap to Tier 3
+                                        </p>
+                                        <p class="font-semibold text-theme-text-primary">
+                                            {num(Math.ceil(rewards.gapToTier3))}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-theme-text-muted">
+                                            Needed Lift
+                                        </p>
+                                        <p class="font-semibold text-theme-text-primary">
+                                            {ratio(rewards.multiplierToTier3)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div
+                                    class="mt-2 flex justify-between text-xs text-theme-text-muted"
+                                >
+                                    <span>Internal DQP: {num(rewards.internalDqp)}</span>
+                                    <span
+                                        >Drift: {pct(
+                                            rewards.internalVsRedditDrift,
+                                        )}</span
+                                    >
+                                </div>
+                            {:else}
+                                <p class="mt-2 text-sm text-theme-text-muted">
+                                    Reddit QE CSV has not been uploaded yet.
+                                </p>
                             {/if}
                         </div>
 

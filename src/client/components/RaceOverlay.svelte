@@ -15,8 +15,7 @@
 
     let {
         sessionId,
-        postId,
-        state,
+        state: raceState,
         onCancel,
         onRaceAgain,
         onChallenge,
@@ -98,10 +97,10 @@
 
     // Manage intervals based on state changes
     $effect(() => {
-        if (state === "waiting") {
+        if (raceState === "waiting") {
             startCountdown();
             stopPolling();
-        } else if (state === "racing") {
+        } else if (raceState === "racing") {
             stopCountdown();
             startPolling();
         } else {
@@ -117,7 +116,7 @@
 
     // Update result data when entering finished state
     $effect(() => {
-        if (state === "finished") {
+        if (raceState === "finished") {
             stopPolling();
         }
     });
@@ -142,7 +141,7 @@
 </script>
 
 <!-- Race overlay — does NOT block puzzle interaction (pointer-events-none on backdrop) -->
-{#if state === "waiting"}
+{#if raceState === "waiting"}
     <div class="absolute top-0 left-0 right-0 z-40 flex justify-center p-3">
         <div
             class="bg-theme-bg-modal border border-theme-border rounded-xl px-4 py-3 shadow-lg max-w-xs w-full"
@@ -193,7 +192,7 @@
             {/if}
         </div>
     </div>
-{:else if state === "racing"}
+{:else if raceState === "racing"}
     <div
         class="absolute top-0 left-0 right-0 z-40 flex justify-center p-3 pointer-events-none"
     >
@@ -231,7 +230,7 @@
             </div>
         </div>
     </div>
-{:else if state === "finished"}
+{:else if raceState === "finished"}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div

@@ -123,3 +123,46 @@ testDashboard('GET /api/analytics/dashboard returns 14 days of dashboard data', 
     expect(entry).toHaveProperty('currentPhase')
     expect(entry).toHaveProperty('seasonParticipants')
 })
+
+// ─── GET /api/analytics/rewards — canonical Reddit rewards status ────────────
+
+const testRewardsStatus = createDevvitTest({
+    userId: 't2_moduser',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testRewardsStatus('GET /api/analytics/rewards returns canonical Reddit rewards status', async () => {
+    await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        async () => {
+            await seedModCache('t5_testsub', 't2_moduser')
+            await redis.hSet('rewards:qe:2026-06-01', {
+                date: '2026-06-01',
+                qualifiedInstalls: '0',
+                qualifiedEngagers: '2586',
+                qualifiedEngagersLoggedIn: '2586',
+                qualifiedEngagersLoggedOut: '0',
+                qualifiedEngagers7d: '1742.7',
+                qualifiedEngagers7dLoggedIn: '1741.6',
+                qualifiedEngagers7dLoggedOut: '1.3',
+                qualifiedEngagers14d: '1193.4',
+                qualifiedEngagers14dLoggedIn: '1192.4',
+                qualifiedEngagers14dLoggedOut: '1.1',
+                tierEligibility: 'Tier 2',
+            })
+            await redis.set('rewards:qe:latest', '2026-06-01')
+        },
+    )
+
+    const res = await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => app.request('/api/analytics/rewards'),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { status: string; data: { canonicalSource: string; gapToTier3: number } }
+    expect(body.status).toBe('success')
+    expect(body.data.canonicalSource).toBe('reddit')
+    expect(body.data.gapToTier3).toBeCloseTo(8257.3)
+})

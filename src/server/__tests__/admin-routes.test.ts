@@ -222,3 +222,38 @@ testRoadmapInvalid('POST /api/admin/roadmap returns 400 for invalid date', async
 
     expect(res.status).toBe(400)
 })
+
+// ─── POST /api/admin/qe/csv-upload — ingests Reddit rewards CSV ──────────────
+
+const testRewardsCsvUpload = createDevvitTest({
+    userId: 't2_moduser',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testRewardsCsvUpload('POST /api/admin/qe/csv-upload ingests Reddit rewards CSV', async () => {
+    await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => seedModCache('t5_testsub', 't2_moduser'),
+    )
+
+    const csv = [
+        'Date,Qualified Installs,Qualified Engagers,Qualified Engagers (Logged-in),Qualified Engagers (Logged-out),Qualified Engagers (7 day average),Qualified Engagers (7 day average, logged-in),Qualified Engagers (7 day average, logged-out),Qualified Engagers (14 day average),Qualified Engagers (14 day average, logged-in),Qualified Engagers (14 day average, logged-out),Tier Eligibility',
+        '2026-06-01,0,2586,2586,0,1742.7,1741.6,1.3,1193.4,1192.4,1.1,Tier 2',
+    ].join('\n')
+
+    const res = await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => app.request('/api/admin/qe/csv-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csv }),
+        }),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { status: string; data: { rowsStored: number; latest: { date: string } } }
+    expect(body.status).toBe('success')
+    expect(body.data.rowsStored).toBe(1)
+    expect(body.data.latest.date).toBe('2026-06-01')
+})

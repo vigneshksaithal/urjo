@@ -2,6 +2,7 @@
     import { showToast } from "@devvit/web/client";
     import type { ResultCardData } from "../../shared/growth-types";
     import { getResultTier } from "../../shared/result-tiers";
+    import { fireOnce } from "../stores/first-action";
     import MessageSquare from "lucide-svelte/icons/message-square";
     import Loader2 from "lucide-svelte/icons/loader-2";
 
@@ -70,6 +71,7 @@
 
     async function handleComment() {
         if (commenting || hasCommented) return;
+        void fireOnce("", "result-comment");
         commenting = true;
         commentError = null;
 
@@ -105,9 +107,9 @@
             Urjo #{puzzleNumber} 🧩 {gridSize}×{gridSize} ⭐{skillLevel}
         </p>
         <div class="flex flex-col items-center gap-0 leading-none">
-            {#each colorGrid as row}
+            {#each colorGrid as row, rowIndex (rowIndex)}
                 <div class="flex">
-                    {#each row as cell}
+                    {#each row as cell, colIndex (colIndex)}
                         <span class="text-sm leading-none"
                             >{cell === "red" ? "🟥" : "🟦"}</span
                         >

@@ -39,6 +39,12 @@ import { runDriftCheck, formatDriftLogLine } from './lib/drift'
 import { buildScorecard, formatScorecardMarkdown } from './lib/scorecard'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
+import {
+  claimGrowthPostSlot,
+  getGrowthPostSlot,
+  isGrowthPostSlotEnabled,
+  type GrowthPostSlot,
+} from './lib/growth-safety'
 import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
 import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-types'
 
@@ -150,6 +156,20 @@ const formatLeaderboardSection = (
     ...leaders.map(({ medal, username, score }) => `${medal} u/${username} (${formatScore(score)})`),
     '',
   ]
+}
+
+const buildGrowthPostTitle = (
+  slot: GrowthPostSlot,
+  puzzleNumber: number,
+  brandingEmoji: string
+): string => {
+  if (slot === 'speed_window') {
+    return `${brandingEmoji} Urjo Speed Window #${puzzleNumber} - set the fastest solve`
+  }
+  if (slot === 'race_hour') {
+    return `${brandingEmoji} Urjo Race Hour #${puzzleNumber} - find a rival now`
+  }
+  return `${brandingEmoji} Urjo Puzzle #${puzzleNumber} - Beat today's board`
 }
 
 // Build a stats comment for the daily puzzle post.
@@ -297,7 +317,7 @@ const buildSeasonRecapComment = async (previousSeasonId: string): Promise<string
   return lines.join('\n')
 }
 
-// Scheduler endpoint for twice-daily puzzle posts
+// Scheduler endpoint for capped r/urjo growth-slot puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
   await c.req.json<TaskRequest>()
   try {
@@ -325,12 +345,22 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       console.error('[Scheduler] Scorecard computation failed (non-critical):', dashErr)
     }
 
-    // Read subreddit config for branding emoji
+    // Read subreddit config for branding/frequency and gate the active slot.
     const subredditConfig = await getSubredditConfig(context.subredditId)
+    const slot = getGrowthPostSlot(new Date())
+    if (!isGrowthPostSlotEnabled(subredditConfig.postFrequency, slot)) {
+      return c.json<TaskResponse>({ status: 'success', message: `${slot} disabled by config` }, 200)
+    }
+
+    const slotClaimed = await claimGrowthPostSlot(today, context.subredditId, slot)
+    if (!slotClaimed) {
+      return c.json<TaskResponse>({ status: 'success', message: `${slot} already posted today` }, 200)
+    }
+
     const brandingEmoji = subredditConfig.brandingEmoji
 
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
-    const title = `${brandingEmoji} Urjo Puzzle #${puzzleNumber} — Beat today's board`
+    const title = buildGrowthPostTitle(slot, puzzleNumber, brandingEmoji)
 
     console.log(`[Scheduler] Creating post: ${title}`)
 

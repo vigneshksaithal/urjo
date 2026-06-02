@@ -301,6 +301,7 @@
 
 	async function handleSubscribe() {
 		if (hasSubscribed) return;
+		void fireOnce(postId ?? "", "subscribe");
 		try {
 			const response = await fetch("/api/subscribe", { method: "POST" });
 			if (response.ok) {
@@ -325,7 +326,7 @@
 		onCellChange(row, col, color, grid, gridSize);
 
 		// Fire first-action POST exactly once per session (fire-and-forget)
-		void fireOnce("");
+		void fireOnce(postId ?? "", "cell");
 
 		// Update grid immutably to ensure Svelte reactivity
 		grid = grid.map((r, ri) =>
@@ -497,6 +498,7 @@
 	 */
 	async function handleChallenge() {
 		if (hasChallenged) return;
+		void fireOnce(postId ?? "", "challenge");
 		try {
 			const response = await fetch("/api/game/challenge", {
 				method: "POST",
@@ -527,6 +529,7 @@
 		challengeUrl = null;
 		autoChallengeUrl = null;
 		resetLatch();
+		void fireOnce(postId ?? "", "next-puzzle");
 		resetHints();
 		try {
 			const timeSpent = Math.round((Date.now() - startTime) / 1000);
@@ -585,6 +588,7 @@
 	 * Reverts to previous size on failure (non-disruptive).
 	 */
 	async function handleGridSizeChange(newSize: number) {
+		void fireOnce(postId ?? "", "grid-size");
 		const previousSize = gridSizePreference;
 		gridSizePreference = newSize;
 		resetLatch();
@@ -645,6 +649,7 @@
 	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
 	 */
 	async function handleFirstScreenPlay() {
+		void fireOnce(postId ?? "", "play");
 		try {
 			await fetch("/api/game/tutorial-complete", { method: "POST" });
 		} catch {
@@ -663,6 +668,7 @@
 	 */
 	async function handleRace() {
 		if (!postId) return;
+		void fireOnce(postId, "race");
 
 		try {
 			const response = await fetch("/api/race/join", {

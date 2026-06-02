@@ -7,7 +7,11 @@
 import { redis } from '@devvit/web/server'
 
 import type { DailyMetrics, GrowthLoopMetrics } from '../../shared/growth-types'
+import type { FirstActionSource } from '../../shared/first-action'
 import { readViralMetricsForDate } from './viral-tracker'
+
+export type { FirstActionSource } from '../../shared/first-action'
+export { normalizeFirstActionSource } from '../../shared/first-action'
 
 // ─── TTL Constants ─────────────────────────────────────────────────────────────
 
@@ -21,6 +25,9 @@ const postOpenCounterKey = (date: string): string =>
 
 const firstActionCounterKey = (date: string): string =>
     `analytics:${date}:first_actions`
+
+const firstActionSourceCounterKey = (date: string, source: FirstActionSource): string =>
+    `analytics:${date}:first_actions:source:${source}`
 
 const completionCounterKey = (date: string): string =>
     `analytics:${date}:completions`
@@ -194,12 +201,14 @@ export const trackFirstAction = async (
     postId: string,
     userId: string,
     _subredditId: string,
+    source: FirstActionSource = 'unknown',
 ): Promise<boolean> => {
     const isNew = await trySetDedup(actedDedupKey(date, postId, userId), TTL_24H)
     if (!isNew) return false
 
     await Promise.all([
         redis.incrBy(firstActionCounterKey(date), 1),
+        redis.incrBy(firstActionSourceCounterKey(date, source), 1),
         trackDailyActiveEngager(date, userId),
     ])
     return true

@@ -8,6 +8,7 @@ import { Hono } from 'hono'
 import { getDailyMetrics } from '../lib/analytics'
 import { computeDashboard } from '../lib/dashboard'
 import { requireModerator } from '../lib/moderator'
+import { readLatestRewardsStatus } from '../lib/rewards'
 
 const HTTP_STATUS_INTERNAL_ERROR = 500
 const HTTP_STATUS_BAD_REQUEST = 400
@@ -56,6 +57,18 @@ analyticsRouter.get('/api/analytics/dashboard', async (c) => {
         const dashboards = await Promise.all(dates.map((d) => computeDashboard(d)))
 
         return c.json({ status: 'success', data: dashboards })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
+// ─── GET /api/analytics/rewards ───────────────────────────────────────────────
+
+analyticsRouter.get('/api/analytics/rewards', async (c) => {
+    try {
+        const status = await readLatestRewardsStatus()
+        return c.json({ status: 'success', data: status })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)

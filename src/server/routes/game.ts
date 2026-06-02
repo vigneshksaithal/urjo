@@ -63,6 +63,7 @@ import {
 	trackChallengeOpen,
 	trackChallengeCompletion,
 	trackHelpTap,
+	normalizeFirstActionSource,
 } from '../lib/analytics'
 import {
 	captureReferrer,
@@ -99,6 +100,7 @@ import type { EngagementCompletionData, MissionEvent, UserStats } from '../../sh
 import { getSessionRunMultiplier, getSessionRunBonusCoins } from '../../shared/session-run'
 import { forecastNextStreak } from '../../shared/streak-rewards'
 import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
+import { claimAutoChallengeSlot } from '../lib/growth-safety'
 
 // ─── Par Time Defaults ───────────────────────────────────────────────────────
 
@@ -834,8 +836,14 @@ gameRouter.post('/api/game/first-action', async (c) => {
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
 	try {
+		const body = await c.req.json().catch(() => null)
+		const source = normalizeFirstActionSource(
+			body !== null && typeof body === 'object'
+				? (body as Record<string, unknown>).source
+				: undefined,
+		)
 		const today = getTodayUTC()
-		const isNew = await trackFirstAction(today, postId, userId, subredditId)
+		const isNew = await trackFirstAction(today, postId, userId, subredditId, source)
 
 		// ─── DQP gate: mark first-tap and commit if all conditions are met ────
 		try {
@@ -1233,7 +1241,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 		// opt-out countries have 90%+ organ donation; opt-in have 15%.
 		let autoChallengeUrl: string | undefined
 		try {
-			const { subredditName } = context
+			const { subredditName, subredditId } = context
 			if (
 				mistakes === 0 &&
 				!isChallengePost &&
@@ -1243,12 +1251,13 @@ gameRouter.post('/api/game/complete', async (c) => {
 				const optOutKey = `user:${userId}:autoChallenge:optOut`
 				const optedOut = await redis.get(optOutKey)
 
-				// Check daily rate limit for auto-challenges (max 3/day to avoid spam)
-				const autoChallengeCountKey = `user:${userId}:autoChallenge:count:${today}`
-				const autoChallengeCountStr = await redis.get(autoChallengeCountKey)
-				const autoChallengeCount = autoChallengeCountStr ? parseInt(autoChallengeCountStr, 10) : 0
+				const canAutoChallenge = optedOut !== 'true' && await claimAutoChallengeSlot({
+					date: today,
+					subredditId,
+					userId,
+				})
 
-				if (optedOut !== 'true' && autoChallengeCount < 3) {
+				if (canAutoChallenge) {
 					// Fetch username
 					let challengeUsername = 'Anon'
 					try {
@@ -1339,10 +1348,6 @@ gameRouter.post('/api/game/complete', async (c) => {
 							fullGrid,
 						})
 					}
-
-					// Increment daily auto-challenge counter
-					await redis.set(autoChallengeCountKey, (autoChallengeCount + 1).toString())
-					await redis.expire(autoChallengeCountKey, 86400)
 
 					// Track viral metrics
 					await incrementChallengesCreated(userId)
