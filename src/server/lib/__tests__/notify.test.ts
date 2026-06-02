@@ -197,11 +197,15 @@ describe('Mention Comment Round-Trip — Property 12', () => {
      * For all valid (username, streak, postId) triples, extracting substrings
      * from buildMentionCommentText output recovers the original triple.
      */
-    // Exclude usernames that start with t1_-t5_ to avoid false positives in the
-    // "no t[1-5]_ prefix" check — the requirement targets internal IDs, not usernames.
+    // Exclude usernames that contain a t1_-t5_ substring anywhere to avoid false
+    // positives in the "no t[1-5]_ prefix" check — the requirement targets internal
+    // thing-id prefixes leaked by code (e.g. an unstripped postId), not usernames
+    // that coincidentally embed such a substring (e.g. "0t1_a"). The check must not
+    // be start-anchored: the assertion below searches for the substring anywhere, so
+    // the generator must exclude it anywhere to test the property's true intent.
     const usernameArb = fc
         .stringMatching(/^[A-Za-z0-9_-]{1,20}$/)
-        .filter((u) => !/^t[1-5]_/.test(u))
+        .filter((u) => !/t[1-5]_/.test(u))
     const streakArb = fc.integer({ min: 1, max: 9999 })
     const postIdArb = fc.stringMatching(/^t3_[a-z0-9]{1,10}$/)
 

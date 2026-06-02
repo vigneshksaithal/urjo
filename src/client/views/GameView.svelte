@@ -10,6 +10,7 @@
 	import type { SeasonInfo } from "../../shared/growth-types";
 	import type { CompletionContext } from "../../shared/race-types";
 	import { validateGrid } from "../lib/validation";
+	import { computeBoardSize } from "../lib/board-layout";
 	import { hintShownStore, markShown } from "../stores/hints";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
 	import { getResultTier } from "../../shared/result-tiers";
@@ -280,6 +281,18 @@
 	}
 
 	const validation = $derived(validateGrid(grid, gridSize));
+
+	// ─── Board square sizing ─────────────────────────────────────────────────
+	// Measure the board wrapper's content-box via bind:clientWidth/Height and
+	// clamp the board to a square whose side is min(width, height). This keeps
+	// the board within the viewport width on narrow screens (no right-column
+	// clipping) while staying square. See src/client/lib/board-layout.ts.
+	let availableWidth = $state(0);
+	let availableHeight = $state(0);
+	const boardSize = $derived(
+		computeBoardSize(availableWidth, availableHeight),
+	);
+
 	const currentCompletionKey = $derived(
 		isCompleted ? `${timeTaken ?? 0}:${puzzleColors ?? ""}` : null,
 	);
@@ -315,9 +328,7 @@
 	// Result tier — replaces the binary Perfect/Mistakes framing with a
 	// positive spectrum (Flawless / Sharp / Solid / Scrappy). gridSize is
 	// always 4|6|8 in practice, so the cast is safe.
-	const resultTier = $derived(
-		getResultTier(mistakes, gridSize as 4 | 6 | 8),
-	);
+	const resultTier = $derived(getResultTier(mistakes, gridSize as 4 | 6 | 8));
 	// Build CompletionContext for simplified CTAs (social viral mechanics)
 	const completionContext = $derived<CompletionContext>({
 		isRaceResult,
@@ -452,7 +463,10 @@
 
 <div class="h-full w-full flex flex-col p-3 gap-2 overflow-hidden">
 	<!-- Header: help | streak · coins · trophy | shuffle -->
-	<header class="flex-none flex items-center justify-between gap-3">
+	<!-- flex-wrap lets trailing controls drop to a second line instead of
+	     clipping when the row can't fit; the side clusters stay shrink-0 so
+	     icon tap targets are preserved and only the centre cluster compresses. -->
+	<header class="flex-none flex flex-wrap items-center justify-between gap-2">
 		<button
 			onclick={handleHelpTap}
 			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
@@ -461,8 +475,9 @@
 			<CircleHelp class="w-5 h-5 text-urjo-blue" />
 		</button>
 
-		<!-- Centre cluster -->
-		<div class="flex items-center gap-3 flex-1 justify-center">
+		<!-- Centre cluster — min-w-0 lets it shrink below its content width so
+		     the shrink-0 trailing controls are never pushed off-screen. -->
+		<div class="flex items-center gap-2 flex-1 min-w-0 justify-center">
 			<StreakBadge streak={streakData} />
 			{#if sessionRun >= 2}
 				<!-- Session run chip — Subway Surfers' "5 in a row" momentum
@@ -581,11 +596,16 @@
 		class="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden p-2"
 	>
 		<!-- Board wrapper: maintains square aspect ratio within available space.
-		     Uses w-full + h-full with aspect-square so the board fills the
-		     smaller dimension while staying square. The parent's overflow-hidden
-		     prevents any spillover. -->
-		<div class="w-full h-full flex items-center justify-center">
-			<div class="aspect-square h-full max-w-full">
+		     The outer div is measured (bind:clientWidth/Height) to get the
+		     available content-box; the inner square is sized to
+		     min(width, height) via boardSize so it never overflows the width.
+		     The parent's overflow-hidden prevents any spillover. -->
+		<div
+			class="w-full h-full flex items-center justify-center"
+			bind:clientWidth={availableWidth}
+			bind:clientHeight={availableHeight}
+		>
+			<div style="width: {boardSize}px; height: {boardSize}px">
 				<GameBoard
 					{grid}
 					{gridSize}
@@ -613,7 +633,11 @@
 							class="flex items-center gap-2 flex-wrap justify-center"
 						>
 							{#if coinReward && coinReward.total > 0}
-								{@const finalCoinValue = coinReward.total + (coinReward.mysteryBox?.type === "coins" ? coinReward.mysteryBox.value : 0)}
+								{@const finalCoinValue =
+									coinReward.total +
+									(coinReward.mysteryBox?.type === "coins"
+										? coinReward.mysteryBox.value
+										: 0)}
 								<button
 									onclick={() =>
 										(showCoinBreakdown =
@@ -623,15 +647,25 @@
 								>
 									<CountUp
 										to={finalCoinValue}
-										durationMs={Math.min(1400, 600 + finalCoinValue * 8)}
+										durationMs={Math.min(
+											1400,
+											600 + finalCoinValue * 8,
+										)}
 										prefix="+"
 										suffix=" 🪙"
-										onTick={() => playCoinChime({ tier: "small", volume: 0.12 })}
+										onTick={() =>
+											playCoinChime({
+												tier: "small",
+												volume: 0.12,
+											})}
 										onComplete={() => {
 											if (finalCoinValue >= 50) {
 												playTierFanfare(0.18);
 											} else {
-												playCoinChime({ tier: "big", volume: 0.18 });
+												playCoinChime({
+													tier: "big",
+													volume: 0.18,
+												});
 											}
 										}}
 									/>
@@ -650,7 +684,9 @@
 										class="px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/50 text-xs font-bold text-orange-300"
 										title="Earned by playing {sessionRun} puzzles in a row"
 									>
-										🏃 +{sessionRunBonusCoins} ({sessionRunMultiplier.toFixed(2)}×)
+										🏃 +{sessionRunBonusCoins} ({sessionRunMultiplier.toFixed(
+											2,
+										)}×)
 									</span>
 								{/if}
 								{#if weekendEvent?.active && weekendBonusCoins > 0}
@@ -659,7 +695,8 @@
 										class="px-2 py-0.5 rounded-full bg-fuchsia-500/20 border border-fuchsia-500/50 text-xs font-bold text-fuchsia-200"
 										title="{weekendEvent.name} {weekendEvent.multiplier}× — ends in {weekendEvent.hoursLeft}h"
 									>
-										{weekendEvent.emoji} +{weekendBonusCoins} ({weekendEvent.multiplier}×)
+										{weekendEvent.emoji} +{weekendBonusCoins}
+										({weekendEvent.multiplier}×)
 									</span>
 								{/if}
 							{/if}
@@ -674,14 +711,18 @@
 								<span
 									class="px-2 py-0.5 rounded-full text-sm font-semibold {resultTier.bgClass} {resultTier.colorClass} border {resultTier.borderClass}"
 								>
-									{resultTier.emoji} {resultTier.headline}
+									{resultTier.emoji}
+									{resultTier.headline}
 								</span>
 							{:else}
 								<span
 									class="px-2 py-0.5 rounded-full text-sm font-semibold {resultTier.bgClass} {resultTier.colorClass} border {resultTier.borderClass}"
-									title="{mistakes} mistake{mistakes === 1 ? '' : 's'}"
+									title="{mistakes} mistake{mistakes === 1
+										? ''
+										: 's'}"
 								>
-									{resultTier.emoji} {resultTier.headline}
+									{resultTier.emoji}
+									{resultTier.headline}
 								</span>
 							{/if}
 						</div>
@@ -728,10 +769,15 @@
 
 					<!-- Auto-challenge toast (VIRAL: shows when challenge was auto-posted) -->
 					{#if autoChallengeUrl && autoChallengeToastVisible && !autoChallengeDismissed}
-						<div class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-between gap-2 animate-bounce-in">
+						<div
+							class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-between gap-2 animate-bounce-in"
+						>
 							<div class="flex items-center gap-2 min-w-0">
 								<span class="text-lg shrink-0">🎯</span>
-								<span class="text-sm text-green-400 font-medium truncate">Your perfect solve is live!</span>
+								<span
+									class="text-sm text-green-400 font-medium truncate"
+									>Your perfect solve is live!</span
+								>
 							</div>
 							<div class="flex items-center gap-1 shrink-0">
 								<a
@@ -823,7 +869,9 @@
 								: 'bg-theme-hover text-theme-text-secondary'}"
 						>
 							{#if streakForecast.isMilestone}
-								🎉 Tomorrow → <span class="font-bold">{streakForecast.label}</span>
+								🎉 Tomorrow → <span class="font-bold"
+									>{streakForecast.label}</span
+								>
 								· +{streakForecast.coinBonus} 🪙
 							{:else}
 								🔥 Return tomorrow → Day {streakForecast.day}
@@ -834,8 +882,8 @@
 						<div
 							class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
 						>
-							🔥 Return tomorrow for +{tomorrowStreakBonus} streak bonus
-							coins
+							🔥 Return tomorrow for +{tomorrowStreakBonus} streak
+							bonus coins
 						</div>
 					{/if}
 
