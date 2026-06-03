@@ -37,6 +37,26 @@
         "devvit_search",
         "devvit_logs"
       ]
+    },
+    "svelte": {
+      "url": "https://mcp.svelte.dev/mcp",
+      "disabled": false,
+      "autoApprove": [
+        "list-sections",
+        "get-documentation",
+        "svelte-autofixer",
+        "playground-link"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "/opt/homebrew/bin/bunx",
+      "args": [
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "disabled": false,
+      "autoApprove": [
+        "sequentialthinking"
+      ]
     }
   }
 }
