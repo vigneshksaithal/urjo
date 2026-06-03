@@ -1,11 +1,6 @@
 <script lang="ts">
 	import { navigateTo, showLoginPrompt } from "@devvit/web/client";
-	import type {
-		CellColor,
-		Grid,
-		StreakData,
-		CoinReward,
-	} from "../../shared/types";
+	import type { CellColor, Grid, StreakData } from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
 	import type { CompletionContext } from "../../shared/social-types";
@@ -15,7 +10,6 @@
 	import { fireOnce } from "../stores/first-action";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
 	import { getLoginGate, LOGIN_CTA } from "../lib/login-gate";
-	import { getResultTier } from "../../shared/result-tiers";
 	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -33,10 +27,8 @@
 	import ResultCard from "../components/ResultCard.svelte";
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
 	import PresenceBar from "../components/PresenceBar.svelte";
-	import CountUp from "../components/CountUp.svelte";
 	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
-	import { playCoinChime, playTierFanfare } from "../lib/coin-sound";
 	import Trophy from "lucide-svelte/icons/trophy";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
 	import Shuffle from "lucide-svelte/icons/shuffle";
@@ -57,7 +49,6 @@
 		challengeUrl: string | null;
 		onShare: () => void;
 		onChallenge: () => void;
-		coinReward?: CoinReward;
 		coins?: number;
 		onOpenShop?: () => void;
 		onOpenAnalytics?: () => void;
@@ -87,19 +78,6 @@
 		sessionRun?: number;
 		/** Coin multiplier already applied for this session run. */
 		sessionRunMultiplier?: number;
-		/** Coins added by the session-run bonus on the latest completion. */
-		sessionRunBonusCoins?: number;
-		/** Streak forecast for tomorrow — drives the "come back" retention
-		 *  hook on the completion overlay. Optional because it only arrives
-		 *  after a successful /api/game/complete. */
-		streakForecast?:
-			| {
-					day: number;
-					coinBonus: number;
-					isMilestone: boolean;
-					label: string;
-			  }
-			| undefined;
 		/** Active Weekend Event payload — when active, shows a persistent
 		 *  banner with countdown + applies a coin multiplier to all solves. */
 		weekendEvent?:
@@ -112,8 +90,6 @@
 					hoursLeft: number | null;
 			  }
 			| undefined;
-		/** Coins added by the weekend event on the latest completion. */
-		weekendBonusCoins?: number;
 		/** Always-on progression strip data — player rank/score in the
 		 *  current season. Optional; the strip hides cleanly without it. */
 		seasonProgress?:
@@ -149,7 +125,6 @@
 		challengeUrl,
 		onShare,
 		onChallenge,
-		coinReward,
 		coins,
 		onOpenShop,
 		onOpenAnalytics,
@@ -174,10 +149,7 @@
 		autoChallengeUrl = null,
 		sessionRun = 0,
 		sessionRunMultiplier = 1,
-		sessionRunBonusCoins = 0,
-		streakForecast = undefined,
 		weekendEvent = undefined,
-		weekendBonusCoins = 0,
 		seasonProgress = undefined,
 		nextMission = undefined,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
@@ -200,7 +172,6 @@
 	let showSeasonLeaderboard = $state(false);
 	let hasCommentedResult = $state(false);
 	let openMoreActionsKey = $state<string | null>(null);
-	let showCoinBreakdown = $state(false);
 	let showOptInTutorial = $state(false);
 	let autoChallengeToastVisible = $state(true);
 	let autoChallengeDismissed = $state(false);
@@ -326,17 +297,6 @@
 			openMoreActionsKey === currentCompletionKey,
 	);
 
-	// Tomorrow's streak bonus: current streak + 1 day worth of bonus coins
-	const tomorrowStreakBonus = $derived(
-		streakData.currentStreak > 0
-			? Math.min(streakData.currentStreak + 1, 30)
-			: 1,
-	);
-
-	// Result tier — replaces the binary Perfect/Mistakes framing with a
-	// positive spectrum (Flawless / Sharp / Solid / Scrappy). gridSize is
-	// always 4|6|8 in practice, so the cast is safe.
-	const resultTier = $derived(getResultTier(mistakes, gridSize as 4 | 6 | 8));
 	// Build CompletionContext for simplified CTAs (social viral mechanics)
 	const completionContext = $derived<CompletionContext>({
 		timeTaken: timeTaken ?? 0,
@@ -667,133 +627,6 @@
 				<div
 					class="flex flex-col items-center gap-3 max-w-sm w-full my-auto"
 				>
-					<!-- ── Zone 1: Celebration header ── -->
-					<!-- Single row: coins · streak · perfect/mistakes · multiplier -->
-					<div
-						class="flex flex-col items-center gap-1 animate-bounce-in"
-					>
-						<div
-							class="flex items-center gap-2 flex-wrap justify-center"
-						>
-							{#if coinReward && coinReward.total > 0}
-								{@const finalCoinValue =
-									coinReward.total +
-									(coinReward.mysteryBox?.type === "coins"
-										? coinReward.mysteryBox.value
-										: 0)}
-								<button
-									onclick={() =>
-										(showCoinBreakdown =
-											!showCoinBreakdown)}
-									class="text-2xl font-bold text-yellow-400 hover:opacity-80 transition-opacity"
-									aria-label="Toggle coin breakdown"
-								>
-									<CountUp
-										to={finalCoinValue}
-										durationMs={Math.min(
-											1400,
-											600 + finalCoinValue * 8,
-										)}
-										prefix="+"
-										suffix=" 🪙"
-										onTick={() =>
-											playCoinChime({
-												tier: "small",
-												volume: 0.12,
-											})}
-										onComplete={() => {
-											if (finalCoinValue >= 50) {
-												playTierFanfare(0.18);
-											} else {
-												playCoinChime({
-													tier: "big",
-													volume: 0.18,
-												});
-											}
-										}}
-									/>
-								</button>
-								{#if coinReward.multiplier}
-									<span
-										class="px-2 py-0.5 rounded-full bg-yellow-500/20 border border-yellow-500/50 text-xs font-bold text-yellow-400"
-									>
-										{coinReward.multiplier}× BONUS!
-									</span>
-								{/if}
-								{#if sessionRun >= 2 && sessionRunBonusCoins > 0}
-									<!-- Run-again loop: shows the bonus the
-									     player just earned for chaining solves. -->
-									<span
-										class="px-2 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/50 text-xs font-bold text-orange-300"
-										title="Earned by playing {sessionRun} puzzles in a row"
-									>
-										🏃 +{sessionRunBonusCoins} ({sessionRunMultiplier.toFixed(
-											2,
-										)}×)
-									</span>
-								{/if}
-								{#if weekendEvent?.active && weekendBonusCoins > 0}
-									<!-- Weekend Event bonus on this completion. -->
-									<span
-										class="px-2 py-0.5 rounded-full bg-fuchsia-500/20 border border-fuchsia-500/50 text-xs font-bold text-fuchsia-200"
-										title="{weekendEvent.name} {weekendEvent.multiplier}× — ends in {weekendEvent.hoursLeft}h"
-									>
-										{weekendEvent.emoji} +{weekendBonusCoins}
-										({weekendEvent.multiplier}×)
-									</span>
-								{/if}
-							{/if}
-							{#if streakData.currentStreak > 0}
-								<span
-									class="px-2 py-0.5 rounded-full bg-theme-hover border border-theme-border text-xs font-bold text-theme-text-primary"
-								>
-									🔥 {streakData.currentStreak}
-								</span>
-							{/if}
-							{#if mistakes === 0}
-								<span
-									class="px-2 py-0.5 rounded-full text-sm font-semibold {resultTier.bgClass} {resultTier.colorClass} border {resultTier.borderClass}"
-								>
-									{resultTier.emoji}
-									{resultTier.headline}
-								</span>
-							{:else}
-								<span
-									class="px-2 py-0.5 rounded-full text-sm font-semibold {resultTier.bgClass} {resultTier.colorClass} border {resultTier.borderClass}"
-									title="{mistakes} mistake{mistakes === 1
-										? ''
-										: 's'}"
-								>
-									{resultTier.emoji}
-									{resultTier.headline}
-								</span>
-							{/if}
-						</div>
-
-						<!-- Coin breakdown — collapsed by default, tap coin total to expand -->
-						{#if showCoinBreakdown && coinReward}
-							<div
-								class="flex gap-2 text-xs text-gray-400 flex-wrap justify-center"
-							>
-								{#if coinReward.streakBonus > 0}<span
-										>🔥 +{coinReward.streakBonus}</span
-									>{/if}
-								{#if coinReward.speedBonus > 0}<span
-										>⚡ +{coinReward.speedBonus}</span
-									>{/if}
-								{#if coinReward.dailyBonus > 0}<span
-										>📅 +{coinReward.dailyBonus}</span
-									>{/if}
-								{#if coinReward.perfectBonus > 0}<span
-										>🎯 +{coinReward.perfectBonus}</span
-									>{/if}
-								{#if coinReward.loginBonus > 0}<span
-										>🎁 +{coinReward.loginBonus} login bonus</span
-									>{/if}
-							</div>
-						{/if}
-					</div>
-
 					<!-- New achievement unlocks -->
 					{#if engagement?.newAchievements && engagement.newAchievements.length > 0}
 						<div class="flex flex-col items-center gap-1">
@@ -930,37 +763,6 @@
 								{LOGIN_CTA.button}
 							</button>
 						</div>
-					{/if}
-
-					<!-- Retention hook — promoted visibility. The forecast comes
-					     from the server (escalating curve in streak-rewards.ts)
-					     so milestone bumps get a glow + clearer label.
-					     Account-scoped: hidden for logged-out players. -->
-					{#if loginGate.showStreak}
-						{#if streakForecast}
-							<div
-								class="text-sm text-center px-3 py-1 rounded-full {streakForecast.isMilestone
-									? 'bg-yellow-500/15 border border-yellow-500/40 text-yellow-300 font-semibold'
-									: 'bg-theme-hover text-theme-text-secondary'}"
-							>
-								{#if streakForecast.isMilestone}
-									🎉 Tomorrow → <span class="font-bold"
-										>{streakForecast.label}</span
-									>
-									· +{streakForecast.coinBonus} 🪙
-								{:else}
-									🔥 Return tomorrow → Day {streakForecast.day}
-									· +{streakForecast.coinBonus} 🪙
-								{/if}
-							</div>
-						{:else}
-							<div
-								class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
-							>
-								🔥 Return tomorrow for +{tomorrowStreakBonus} streak
-								bonus coins
-							</div>
-						{/if}
 					{/if}
 
 					<!-- Free-freeze grant celebration — fires when the server's

@@ -1,7 +1,6 @@
 <script lang="ts">
     import { showToast } from "@devvit/web/client";
     import type { ResultCardData } from "../../shared/growth-types";
-    import { getResultTier } from "../../shared/result-tiers";
     import { fireOnce } from "../stores/first-action";
     import MessageSquare from "lucide-svelte/icons/message-square";
     import Loader2 from "lucide-svelte/icons/loader-2";
@@ -53,9 +52,6 @@
         mistakes,
         streak,
     });
-    // Tier label shown on the embedded share card. We always use the positive
-    // spectrum (Flawless / Sharp / Solid / Scrappy) rather than "N mistakes".
-    const tier = $derived(getResultTier(mistakes, gridSize as 4 | 6 | 8));
 
     function buildColorGrid(
         colors: string,
@@ -103,30 +99,15 @@
 </script>
 
 <div class="flex flex-col gap-2 w-full">
-    <!-- Emoji grid preview -->
+    <!-- Summary card — only time + season rank -->
     <div
         class="bg-theme-bg-secondary rounded-lg p-3 border border-theme-border text-center"
     >
-        <p class="text-xs text-theme-text-muted mb-1">
-            Urjo #{puzzleNumber} 🧩 {gridSize}×{gridSize} ⭐{skillLevel}
-        </p>
-        <div class="flex flex-col items-center gap-0 leading-none">
-            {#each colorGrid as row, rowIndex (rowIndex)}
-                <div class="flex">
-                    {#each row as cell, colIndex (colIndex)}
-                        <span class="text-sm leading-none"
-                            >{cell === "red" ? "🟥" : "🟦"}</span
-                        >
-                    {/each}
-                </div>
-            {/each}
-        </div>
-        <p class="text-xs text-theme-text-muted mt-1">
-            ⏱️ {timeTaken}s | {tier.emoji}
-            {tier.label} | 🔥 {streak} streak
+        <p class="text-sm text-theme-text-secondary font-semibold">
+            ⏱️ {timeTaken}s
         </p>
         {#if seasonNumber !== null && (seasonRank !== null || seasonPoints > 0)}
-            <p class="text-xs text-theme-text-muted mt-0.5">
+            <p class="text-xs text-theme-text-muted mt-1">
                 🏆 Season {seasonNumber}
                 {#if seasonRank !== null}<span
                         class="font-semibold text-yellow-400"

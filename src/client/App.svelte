@@ -790,7 +790,7 @@
 			...(engagement !== undefined && { engagement }),
 		}}
 		{#if coinReward}
-			<GameView {...gameProps} {coinReward} />
+			<GameView {...gameProps} />
 		{:else}
 			<GameView {...gameProps} />
 		{/if}
