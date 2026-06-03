@@ -78,7 +78,8 @@
                 fetch("/api/analytics/dashboard"),
                 fetch("/api/analytics/rewards"),
             ]);
-            if (!dashboardRes.ok) throw new Error(`HTTP ${dashboardRes.status}`);
+            if (!dashboardRes.ok)
+                throw new Error(`HTTP ${dashboardRes.status}`);
             if (!rewardsRes.ok) throw new Error(`HTTP ${rewardsRes.status}`);
 
             const dashboardJson = await dashboardRes.json();
@@ -104,11 +105,6 @@
     const ratio = (n: number | null): string =>
         n === null ? "—" : `${n.toFixed(2)}×`;
     const num = (n: number): string => n.toLocaleString();
-
-    // Show race columns only when at least one day has race data
-    let hasRaceData = $derived(
-        dashboards.some((d) => (d.daily.growth?.raceJoins ?? 0) > 0),
-    );
 
     function alertBg(type: "kill" | "scale"): string {
         return type === "kill"
@@ -312,7 +308,9 @@
                             {#if rewards}
                                 <div class="grid grid-cols-2 gap-2 mt-2">
                                     <div>
-                                        <p class="text-xs text-theme-text-muted">
+                                        <p
+                                            class="text-xs text-theme-text-muted"
+                                        >
                                             Reddit QE 7d
                                         </p>
                                         <p
@@ -326,7 +324,9 @@
                                         </p>
                                     </div>
                                     <div>
-                                        <p class="text-xs text-theme-text-muted">
+                                        <p
+                                            class="text-xs text-theme-text-muted"
+                                        >
                                             Tier
                                         </p>
                                         <p
@@ -339,18 +339,26 @@
                                         </p>
                                     </div>
                                     <div>
-                                        <p class="text-xs text-theme-text-muted">
+                                        <p
+                                            class="text-xs text-theme-text-muted"
+                                        >
                                             Gap to Tier 3
                                         </p>
-                                        <p class="font-semibold text-theme-text-primary">
+                                        <p
+                                            class="font-semibold text-theme-text-primary"
+                                        >
                                             {num(Math.ceil(rewards.gapToTier3))}
                                         </p>
                                     </div>
                                     <div>
-                                        <p class="text-xs text-theme-text-muted">
+                                        <p
+                                            class="text-xs text-theme-text-muted"
+                                        >
                                             Needed Lift
                                         </p>
-                                        <p class="font-semibold text-theme-text-primary">
+                                        <p
+                                            class="font-semibold text-theme-text-primary"
+                                        >
                                             {ratio(rewards.multiplierToTier3)}
                                         </p>
                                     </div>
@@ -358,7 +366,11 @@
                                 <div
                                     class="mt-2 flex justify-between text-xs text-theme-text-muted"
                                 >
-                                    <span>Internal DQP: {num(rewards.internalDqp)}</span>
+                                    <span
+                                        >Internal DQP: {num(
+                                            rewards.internalDqp,
+                                        )}</span
+                                    >
                                     <span
                                         >Drift: {pct(
                                             rewards.internalVsRedditDrift,
@@ -581,20 +593,6 @@
                                     <th class="px-3 py-2 text-right font-medium"
                                         >D1 Ret%</th
                                     >
-                                    {#if hasRaceData}
-                                        <th
-                                            class="px-3 py-2 text-right font-medium"
-                                            >Races</th
-                                        >
-                                        <th
-                                            class="px-3 py-2 text-right font-medium"
-                                            >R.Compl</th
-                                        >
-                                        <th
-                                            class="px-3 py-2 text-right font-medium"
-                                            >Win%</th
-                                        >
-                                    {/if}
                                 </tr>
                             </thead>
                             <tbody>
@@ -690,34 +688,6 @@
                                                 {pct(d.daily.d1ReturnRate)}
                                             {/if}
                                         </td>
-                                        {#if hasRaceData}
-                                            <td
-                                                class="px-3 py-2 text-right text-theme-text-primary"
-                                                >{num(
-                                                    d.daily.growth
-                                                        ?.raceMatches ?? 0,
-                                                )}</td
-                                            >
-                                            <td
-                                                class="px-3 py-2 text-right text-theme-text-primary"
-                                                >{num(
-                                                    d.daily.growth
-                                                        ?.raceCompletions ?? 0,
-                                                )}</td
-                                            >
-                                            <td
-                                                class="px-3 py-2 text-right text-theme-text-primary"
-                                                >{d.daily.growth
-                                                    ?.raceWinRate === null ||
-                                                d.daily.growth?.raceWinRate ===
-                                                    undefined
-                                                    ? "—"
-                                                    : pct(
-                                                          d.daily.growth
-                                                              .raceWinRate,
-                                                      )}</td
-                                            >
-                                        {/if}
                                     </tr>
                                 {/each}
                             </tbody>

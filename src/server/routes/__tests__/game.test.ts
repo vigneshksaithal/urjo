@@ -284,7 +284,6 @@ testPreviewNonDaily('POST /api/game/complete does not update preview for challen
             beatsCount: 0,
             attemptsCount: 0,
             fastestTime: null,
-            activeRacers: 0,
         }),
     })
 

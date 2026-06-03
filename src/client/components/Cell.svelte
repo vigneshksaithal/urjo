@@ -99,7 +99,7 @@
 	     keeps the board feeling alive while the player is thinking. -->
 	{#if !isLoading && color === null}
 		<div
-			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell border border-theme-empty-cell-border animate-empty-breathe"
+			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell animate-empty-breathe"
 		></div>
 	{/if}
 

@@ -19,7 +19,7 @@ export type ResultCardData = {
 // ─── Viral Loop ────────────────────────────────────────────────────────────────
 
 /** Distinct mechanism through which existing users expose the game to potential new users */
-export type InviteChannel = 'challenge_post' | 'result_comment' | 'result_copy' | 'race'
+export type InviteChannel = 'challenge_post' | 'result_comment' | 'result_copy'
 
 /** Metrics for a single invite channel */
 export type ChannelMetrics = {
@@ -33,7 +33,6 @@ export type PerChannelMetrics = {
     challenge_post: ChannelMetrics
     result_comment: ChannelMetrics
     result_copy: ChannelMetrics
-    race: ChannelMetrics
 }
 
 // ─── Analytics ─────────────────────────────────────────────────────────────────
@@ -93,11 +92,6 @@ export type GrowthLoopMetrics = {
     shareRate: number | null
     viralCycleTimeHours: number | null
     perChannelMetrics: PerChannelMetrics | null
-    raceJoins: number
-    raceMatches: number
-    raceCompletions: number
-    raceWinRate: number | null
-    avgRaceDuration: number | null
 }
 
 /** 7-day rolling averages for key growth metrics */

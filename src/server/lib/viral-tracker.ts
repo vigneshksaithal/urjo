@@ -28,7 +28,6 @@ const INVITE_CHANNELS: readonly InviteChannel[] = [
     'challenge_post',
     'result_comment',
     'result_copy',
-    'race',
 ] as const
 
 // ─── Key Builders ──────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import { redis } from '@devvit/web/server'
 
 import type { PostFrequency } from '../../shared/growth-types'
 
-export type GrowthPostSlot = 'speed_window' | 'daily_puzzle' | 'race_hour'
+export type GrowthPostSlot = 'speed_window' | 'daily_puzzle' | 'evening_puzzle'
 
 export type AutoChallengeClaim = {
     date: string
@@ -27,7 +27,7 @@ const DAILY_SLOT_TTL_SECONDS = 48 * 3600
 export const getGrowthPostSlot = (date: Date): GrowthPostSlot => {
     const hour = date.getUTCHours()
     if (hour === 8) return 'speed_window'
-    if (hour === 23) return 'race_hour'
+    if (hour === 23) return 'evening_puzzle'
     return 'daily_puzzle'
 }
 

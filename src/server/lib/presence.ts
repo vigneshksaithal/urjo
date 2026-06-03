@@ -7,14 +7,13 @@
 
 import { redis } from '@devvit/web/server'
 
-import type { PresenceData, PresencePlayer } from '../../shared/race-types'
+import type { PresenceData, PresencePlayer } from '../../shared/social-types'
 
 const STALE_THRESHOLD_MS = 60_000
 const PRESENCE_TTL_SECONDS = 300
 const MAX_PLAYERS_RETURNED = 10
 
 const presenceKey = (postId: string): string => `presence:${postId}`
-const activeRaceKey = (userId: string): string => `user:${userId}:activeRace`
 
 /**
  * Record a heartbeat for a user on a post and return current presence data.
@@ -23,7 +22,7 @@ const activeRaceKey = (userId: string): string => `user:${userId}:activeRace`
  * 2. ZREMRANGEBYSCORE to prune entries older than 60s
  * 3. EXPIRE 300s on the sorted set
  * 4. ZRANGE by score to read active members (last 60s)
- * 5. Check isRacing for each active member (max 10)
+ * 5. Build the player list (max 10)
  */
 export const heartbeat = async (postId: string, userId: string): Promise<PresenceData> => {
     const key = presenceKey(postId)
@@ -43,12 +42,11 @@ export const heartbeat = async (postId: string, userId: string): Promise<Presenc
     const activeMembers = await redis.zRange(key, staleThreshold, now, { by: 'score' })
 
     // Build player list (max 10)
-    const players = await buildPlayerList(activeMembers.slice(0, MAX_PLAYERS_RETURNED))
+    const players = buildPlayerList(activeMembers.slice(0, MAX_PLAYERS_RETURNED))
 
     return {
         activeCount: activeMembers.length,
         players,
-        racingCount: players.filter((p) => p.isRacing).length,
     }
 }
 
@@ -56,7 +54,7 @@ export const heartbeat = async (postId: string, userId: string): Promise<Presenc
  * Read-only presence check — does not add the caller to the set.
  * Steps:
  * 1. ZRANGE by score to read active members (last 60s)
- * 2. Check isRacing for each active member (max 10)
+ * 2. Build the player list (max 10)
  */
 export const getPresence = async (postId: string): Promise<PresenceData> => {
     const key = presenceKey(postId)
@@ -65,25 +63,18 @@ export const getPresence = async (postId: string): Promise<PresenceData> => {
 
     const activeMembers = await redis.zRange(key, staleThreshold, now, { by: 'score' })
 
-    const players = await buildPlayerList(activeMembers.slice(0, MAX_PLAYERS_RETURNED))
+    const players = buildPlayerList(activeMembers.slice(0, MAX_PLAYERS_RETURNED))
 
     return {
         activeCount: activeMembers.length,
         players,
-        racingCount: players.filter((p) => p.isRacing).length,
     }
 }
 
-const buildPlayerList = async (
+const buildPlayerList = (
     members: { member: string; score: number }[]
-): Promise<PresencePlayer[]> =>
-    Promise.all(
-        members.map(async ({ member }) => {
-            const raceSession = await redis.get(activeRaceKey(member))
-            return {
-                userId: member,
-                username: member, // Username resolution deferred to route layer
-                isRacing: raceSession !== undefined,
-            }
-        })
-    )
+): PresencePlayer[] =>
+    members.map(({ member }) => ({
+        userId: member,
+        username: member, // Username resolution deferred to route layer
+    }))

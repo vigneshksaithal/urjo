@@ -10,7 +10,6 @@ export type FirstActionSource =
     | 'play'
     | 'cell'
     | 'help'
-    | 'race'
     | 'next-puzzle'
     | 'result-comment'
     | 'challenge'
@@ -24,7 +23,6 @@ export const FIRST_ACTION_SOURCES: readonly FirstActionSource[] = [
     'play',
     'cell',
     'help',
-    'race',
     'next-puzzle',
     'result-comment',
     'challenge',

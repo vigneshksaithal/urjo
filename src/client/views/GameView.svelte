@@ -8,7 +8,7 @@
 	} from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
-	import type { CompletionContext } from "../../shared/race-types";
+	import type { CompletionContext } from "../../shared/social-types";
 	import { validateGrid } from "../lib/validation";
 	import { computeBoardSize } from "../lib/board-layout";
 	import { hintShownStore, markShown } from "../stores/hints";
@@ -42,7 +42,6 @@
 	import BarChart2 from "lucide-svelte/icons/bar-chart-2";
 	import ExternalLink from "lucide-svelte/icons/external-link";
 	import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
-	import Zap from "lucide-svelte/icons/zap";
 
 	type Props = {
 		grid: Grid;
@@ -78,9 +77,6 @@
 		seasonPoints?: number;
 		currentSeason?: SeasonInfo | undefined;
 		notifyOptIn?: boolean;
-		onRace?: () => void;
-		isRaceResult?: boolean;
-		raceWon?: boolean;
 		postId?: string | undefined;
 		autoChallengeUrl?: string | null;
 		/** Run-again loop: number of solves this session (incl. the latest). */
@@ -161,9 +157,6 @@
 		seasonPoints = 0,
 		currentSeason,
 		notifyOptIn = false,
-		onRace,
-		isRaceResult = false,
-		raceWon = false,
 		postId,
 		autoChallengeUrl = null,
 		sessionRun = 0,
@@ -333,8 +326,6 @@
 	const resultTier = $derived(getResultTier(mistakes, gridSize as 4 | 6 | 8));
 	// Build CompletionContext for simplified CTAs (social viral mechanics)
 	const completionContext = $derived<CompletionContext>({
-		isRaceResult,
-		raceWon,
 		timeTaken: timeTaken ?? 0,
 		mistakes,
 		streak: streakData.currentStreak,
@@ -370,14 +361,11 @@
 
 	function handleSecondaryCta(id: string): void {
 		// Secondary CTA is the demoted social action. Old primary handlers move
-		// here so "Challenge Friends" / "Race Again" / "View Challenge" still
-		// work — they just live in the secondary slot now.
+		// here so "Challenge Friends" / "View Challenge" still work — they just
+		// live in the secondary slot now.
 		if (id === "challenge-friends") {
 			void fireOnce(postId ?? "", "challenge");
 			showChallengeConfirm = true;
-		} else if (id === "race-rematch") {
-			void fireOnce(postId ?? "", "race");
-			onRace?.();
 		} else if (id === "view-challenge") {
 			openChallenge();
 		} else if (id === "next-puzzle") {
@@ -395,11 +383,6 @@
 		showSubscribeConfirm = false;
 		void fireOnce(postId ?? "", "subscribe");
 		onSubscribe?.();
-	}
-
-	function handleRaceClick(): void {
-		void fireOnce(postId ?? "", "race");
-		onRace?.();
 	}
 
 	function handleHeaderNextPuzzle(): void {
@@ -543,15 +526,6 @@
 
 		{#if !isCompleted}
 			<div class="flex items-center gap-1 shrink-0">
-				{#if onRace}
-					<button
-						onclick={handleRaceClick}
-						class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
-						aria-label="Race"
-					>
-						<Zap class="w-5 h-5 text-yellow-400" />
-					</button>
-				{/if}
 				<button
 					onclick={handleHeaderNextPuzzle}
 					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
@@ -867,7 +841,7 @@
 					</button>
 
 					<!-- Secondary CTA — ghost/outline styling. This is where
-					     "Challenge Friends" / "Race Again" / "View Challenge"
+					     "Challenge Friends" / "View Challenge"
 					     now live (demoted from primary). -->
 					{#each simplifiedCtas.secondary as cta (cta.id)}
 						<button
@@ -1054,15 +1028,11 @@
 
 	<!-- Footer -->
 	<footer class="flex-none flex flex-col items-center justify-center gap-0.5">
-		<p class="text-xs text-theme-text-muted text-center">
-			{#if isCompleted}
+		{#if isCompleted}
+			<p class="text-xs text-theme-text-muted text-center">
 				Solved in {timeTaken ?? 0}s
-			{:else if mistakes === 0}
-				✓ Perfect so far
-			{:else}
-				Mistakes: {mistakes}
-			{/if}
-		</p>
+			</p>
+		{/if}
 		{#if !isCompleted && postId}
 			<PresenceBar {postId} />
 		{/if}

@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { buildChallengePreview, buildDailyPreview, buildChallengeBeatPreview } from '../preview'
-import type { ChallengePreviewData, DailyPreviewData } from '../../../shared/race-types'
+import type { ChallengePreviewData, DailyPreviewData } from '../../../shared/social-types'
 import type { ChallengeBeatPreviewData } from '../preview'
 
 describe('buildChallengePreview', () => {
@@ -16,7 +16,6 @@ describe('buildChallengePreview', () => {
         beatsCount: 5,
         attemptsCount: 12,
         fastestTime: 38,
-        activeRacers: 3,
     }
 
     it('returns a valid block structure with correct number of blocks', () => {

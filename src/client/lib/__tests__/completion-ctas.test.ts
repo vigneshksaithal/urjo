@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CompletionContext } from '../../../shared/race-types'
+import type { CompletionContext } from '../../../shared/social-types'
 import {
     getCompletionCtas,
     getSimplifiedCompletionCtas,
@@ -80,8 +80,6 @@ describe('getCompletionCtas', () => {
 
 describe('getSimplifiedCompletionCtas', () => {
     const baseContext: CompletionContext = {
-        isRaceResult: false,
-        raceWon: false,
         timeTaken: 45,
         mistakes: 1,
         streak: 3,
@@ -111,22 +109,6 @@ describe('getSimplifiedCompletionCtas', () => {
         })
     })
 
-    it('puts "Race Again" in secondary after a race win — primary stays Next Puzzle', () => {
-        const context: CompletionContext = {
-            ...baseContext,
-            isRaceResult: true,
-            raceWon: true,
-        }
-        const result = getSimplifiedCompletionCtas(context)
-
-        expect(result.primary.id).toBe('next-puzzle')
-        expect(result.secondary).toContainEqual({
-            id: 'race-rematch',
-            label: 'Race Again',
-            style: 'secondary',
-        })
-    })
-
     it('puts "View Challenge" in secondary when already challenged', () => {
         const context: CompletionContext = {
             ...baseContext,
@@ -143,13 +125,8 @@ describe('getSimplifiedCompletionCtas', () => {
         })
     })
 
-    it('falls back to "Challenge Friends" in secondary on race loss', () => {
-        const context: CompletionContext = {
-            ...baseContext,
-            isRaceResult: true,
-            raceWon: false,
-        }
-        const result = getSimplifiedCompletionCtas(context)
+    it('falls back to "Challenge Friends" in secondary by default', () => {
+        const result = getSimplifiedCompletionCtas(baseContext)
 
         expect(result.primary.id).toBe('next-puzzle')
         expect(result.secondary).toContainEqual({

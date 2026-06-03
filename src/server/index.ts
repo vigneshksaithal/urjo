@@ -12,7 +12,7 @@ import { Hono } from 'hono'
 
 import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from './post'
 import { buildDailyPreview } from './lib/preview'
-import type { DailyPreviewData } from '../shared/race-types'
+import type { DailyPreviewData } from '../shared/social-types'
 import { gameRouter } from './routes/game'
 import { economyRouter } from './routes/economy'
 import { engagementRouter } from './routes/engagement'
@@ -20,7 +20,6 @@ import { analyticsRouter } from './routes/analytics'
 import { adminRouter } from './routes/admin'
 import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
-import { raceRouter } from './routes/race'
 import { presenceRouter } from './routes/presence'
 import { dwellRouter } from './routes/dwell'
 import {
@@ -166,8 +165,8 @@ const buildGrowthPostTitle = (
   if (slot === 'speed_window') {
     return `${brandingEmoji} Urjo Speed Window #${puzzleNumber} - set the fastest solve`
   }
-  if (slot === 'race_hour') {
-    return `${brandingEmoji} Urjo Race Hour #${puzzleNumber} - find a rival now`
+  if (slot === 'evening_puzzle') {
+    return `${brandingEmoji} Urjo Evening Puzzle #${puzzleNumber} - unwind with a board`
   }
   return `${brandingEmoji} Urjo Puzzle #${puzzleNumber} - Beat today's board`
 }
@@ -574,7 +573,6 @@ app.route('/', analyticsRouter)
 app.route('/', adminRouter)
 app.route('/', seasonRouter)
 app.route('/', notifyRouter)
-app.route('/', raceRouter)
 app.route('/', presenceRouter)
 app.route('/', dwellRouter)
 

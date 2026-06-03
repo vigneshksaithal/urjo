@@ -58,18 +58,8 @@ export const generateMarkdownSnapshot = (
     lines.push('## 14-Day Metrics')
     lines.push('')
 
-    // Detect if any day has race data
-    const hasRaceData = dashboards.some(
-        (d) => (d.daily.growth?.raceJoins ?? 0) > 0,
-    )
-
     const headerCols = ['Date', 'Opens', 'Actions', 'Completions', '1st Act%', 'Compl%', 'D1 Ret%', 'Share%', 'K', 'Cycle']
     const separatorCols = ['---', '---', '---', '---', '---', '---', '---', '---', '---', '---']
-
-    if (hasRaceData) {
-        headerCols.push('Races', 'R.Compl', 'Win%')
-        separatorCols.push('---', '---', '---')
-    }
 
     lines.push(`| ${headerCols.join(' | ')} |`)
     lines.push(`|${separatorCols.join('|')}|`)
@@ -88,14 +78,6 @@ export const generateMarkdownSnapshot = (
 
         const rowCols = [date, opens, actions, completions, firstActPct, complPct, d1Ret, shareRate, kFactor, cycle]
 
-        if (hasRaceData) {
-            rowCols.push(
-                (d.daily.growth?.raceMatches ?? 0).toString(),
-                (d.daily.growth?.raceCompletions ?? 0).toString(),
-                formatMetricValue(d.daily.growth?.raceWinRate ?? null, 'percent'),
-            )
-        }
-
         lines.push(`| ${rowCols.join(' | ')} |`)
     }
 
@@ -110,11 +92,6 @@ export const generateMarkdownSnapshot = (
     lines.push('- **Share%** = share rate (completers who shared)')
     lines.push('- **K** = K-factor (viral coefficient)')
     lines.push('- **Cycle** = viral cycle time (hours from share to new player completion)')
-    if (hasRaceData) {
-        lines.push('- **Races** = race matches started')
-        lines.push('- **R.Compl** = races completed')
-        lines.push('- **Win%** = race win rate (completions / matches × 2)')
-    }
     lines.push('')
 
     return lines.join('\n')

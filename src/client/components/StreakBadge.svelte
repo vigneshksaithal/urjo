@@ -26,9 +26,4 @@
 			{displayText}
 		</span>
 	</div>
-	{#if streak.longestStreak > 0 && streak.longestStreak > streak.currentStreak}
-		<span class="text-[10px] text-theme-text-muted mt-0.5">
-			Best: {streak.longestStreak}
-		</span>
-	{/if}
 </div>

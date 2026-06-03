@@ -18,8 +18,6 @@ describe('heartbeat', () => {
         expect(result.activeCount).toBe(1)
         expect(result.players).toHaveLength(1)
         expect(result.players[0]?.userId).toBe('t2_user1')
-        expect(result.players[0]?.isRacing).toBe(false)
-        expect(result.racingCount).toBe(0)
     })
 
     test('multiple heartbeats from different users returns correct count', async () => {
@@ -44,16 +42,6 @@ describe('heartbeat', () => {
         expect(result.activeCount).toBe(1)
         expect(result.players.some((p) => p.userId === 't2_stale')).toBe(false)
         expect(result.players[0]?.userId).toBe('t2_fresh')
-    })
-
-    test('isRacing is true when activeRace key exists', async () => {
-        // Set up an active race for user
-        await redis.set('user:t2_racer:activeRace', 'session-123')
-
-        const result = await heartbeat('t3_post1', 't2_racer')
-
-        expect(result.players[0]?.isRacing).toBe(true)
-        expect(result.racingCount).toBe(1)
     })
 
     test('returns max 10 players even if more are active', async () => {
@@ -90,22 +78,5 @@ describe('getPresence', () => {
 
         expect(result.activeCount).toBe(0)
         expect(result.players).toHaveLength(0)
-        expect(result.racingCount).toBe(0)
-    })
-
-    test('returns racing status correctly', async () => {
-        await redis.set('user:t2_racer:activeRace', 'session-abc')
-        await heartbeat('t3_post1', 't2_racer')
-        await heartbeat('t3_post1', 't2_viewer')
-
-        const result = await getPresence('t3_post1')
-
-        expect(result.activeCount).toBe(2)
-        expect(result.racingCount).toBe(1)
-
-        const racer = result.players.find((p) => p.userId === 't2_racer')
-        const viewer = result.players.find((p) => p.userId === 't2_viewer')
-        expect(racer?.isRacing).toBe(true)
-        expect(viewer?.isRacing).toBe(false)
     })
 })

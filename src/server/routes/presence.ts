@@ -8,7 +8,7 @@ import type { Context } from 'hono'
 import { context, reddit } from '@devvit/web/server'
 
 import { heartbeat } from '../lib/presence'
-import type { PresenceData, PresencePlayer } from '../../shared/race-types'
+import type { PresenceData, PresencePlayer } from '../../shared/social-types'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 const HTTP_STATUS_INTERNAL_ERROR = 500
@@ -71,7 +71,6 @@ const heartbeatHandler = async (c: Context): Promise<Response> => {
         const response: PresenceData = {
             activeCount: presenceData.activeCount,
             players: playersWithUsernames,
-            racingCount: presenceData.racingCount,
         }
 
         return c.json(response)

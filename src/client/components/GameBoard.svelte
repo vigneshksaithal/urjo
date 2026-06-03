@@ -23,7 +23,7 @@
 	);
 </script>
 
-<div class="grid gap-1 w-full h-full" style={gridStyle}>
+<div class="grid gap-0.5 w-full h-full" style={gridStyle}>
 	{#each grid as row, rowIndex}
 		{#each row as cell, colIndex}
 			<Cell

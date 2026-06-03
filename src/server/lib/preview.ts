@@ -7,7 +7,7 @@
  * information to maximize click-through from the Reddit feed.
  */
 
-import type { ChallengePreviewData, DailyPreviewData } from '../../shared/race-types'
+import type { ChallengePreviewData, DailyPreviewData } from '../../shared/social-types'
 
 // ─── Preview Block Types ─────────────────────────────────────────────────────
 

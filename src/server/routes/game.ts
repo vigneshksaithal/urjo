@@ -89,7 +89,7 @@ import {
 import { getHintsDismissed, markHintDismissed } from '../lib/hints'
 import type { HintKind } from '../lib/hints'
 import { buildChallengePreview, buildChallengeBeatPreview, maskPuzzleGrid } from '../lib/preview'
-import type { ChallengePreviewData } from '../../shared/race-types'
+import type { ChallengePreviewData } from '../../shared/social-types'
 import { isModeratorCached } from '../lib/moderator'
 import { isOptedIn } from '../lib/notify'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
@@ -1343,7 +1343,6 @@ gameRouter.post('/api/game/complete', async (c) => {
 								beatsCount: 0,
 								attemptsCount: 0,
 								fastestTime: null,
-								activeRacers: 0,
 							}),
 							fullGrid,
 						})
@@ -1888,7 +1887,6 @@ Think you can beat it? Play above! 🎯`,
 				beatsCount: 0,
 				attemptsCount: 0,
 				fastestTime: null,
-				activeRacers: 0,
 			}
 			buildChallengePreview(previewData)
 
