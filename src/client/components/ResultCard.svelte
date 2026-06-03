@@ -19,6 +19,9 @@
         seasonPoints?: number;
         onCommentResult?: () => void;
         hasCommented?: boolean;
+        /** When false, the "Comment Result" social action is hidden (used for
+         *  logged-out viewers who can't post). Defaults to true. */
+        showCommentAction?: boolean;
     };
 
     let {
@@ -34,6 +37,7 @@
         seasonPoints = 0,
         onCommentResult,
         hasCommented = false,
+        showCommentAction = true,
     }: Props = $props();
 
     let commenting = $state(false);
@@ -118,7 +122,8 @@
             {/each}
         </div>
         <p class="text-xs text-theme-text-muted mt-1">
-            ⏱️ {timeTaken}s | {tier.emoji} {tier.label} | 🔥 {streak} streak
+            ⏱️ {timeTaken}s | {tier.emoji}
+            {tier.label} | 🔥 {streak} streak
         </p>
         {#if seasonNumber !== null && (seasonRank !== null || seasonPoints > 0)}
             <p class="text-xs text-theme-text-muted mt-0.5">
@@ -135,21 +140,23 @@
     </div>
 
     <!-- Comment result button -->
-    <button
-        onclick={handleComment}
-        disabled={commenting || hasCommented}
-        class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-    >
-        {#if commenting}
-            <Loader2 class="w-4 h-4 animate-spin" /><span>Posting...</span>
-        {:else if hasCommented}
-            <span>✅ Posted!</span>
-        {:else}
-            <MessageSquare class="w-4 h-4" /><span>Comment Result</span>
-        {/if}
-    </button>
+    {#if showCommentAction}
+        <button
+            onclick={handleComment}
+            disabled={commenting || hasCommented}
+            class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+            {#if commenting}
+                <Loader2 class="w-4 h-4 animate-spin" /><span>Posting...</span>
+            {:else if hasCommented}
+                <span>✅ Posted!</span>
+            {:else}
+                <MessageSquare class="w-4 h-4" /><span>Comment Result</span>
+            {/if}
+        </button>
 
-    {#if commentError}
-        <p class="text-xs text-red-400 text-center">{commentError}</p>
+        {#if commentError}
+            <p class="text-xs text-red-400 text-center">{commentError}</p>
+        {/if}
     {/if}
 </div>

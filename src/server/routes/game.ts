@@ -22,7 +22,7 @@ import type {
 	GridSizeResponse,
 	FirstScreenData,
 } from '../../shared/types'
-import { MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize } from '../../shared/constants'
+import { MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize, DEFAULT_GRID_SIZE } from '../../shared/constants'
 import { MAX_STREAK_FREEZES } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
 import { FREE_STREAK_FREEZE_CADENCE_DAYS } from '../../shared/streak-rewards'
@@ -101,6 +101,7 @@ import { getSessionRunMultiplier, getSessionRunBonusCoins } from '../../shared/s
 import { forecastNextStreak } from '../../shared/streak-rewards'
 import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
 import { claimAutoChallengeSlot } from '../lib/growth-safety'
+import { buildLoggedOutGameState, buildLoggedOutCompleteResponse } from '../lib/logged-out'
 
 // ─── Par Time Defaults ───────────────────────────────────────────────────────
 
@@ -500,7 +501,49 @@ gameRouter.get('/api/game/state', async (c) => {
 	const { postId, userId } = context
 
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
-	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	// ─── Logged-out path ─────────────────────────────────────────────────
+	// Reddit serves a large base of logged-out users via SEO/shared links.
+	// They must be able to play immediately (no login wall). We serve the
+	// post's baked-in puzzle with no per-user state. See lib/logged-out.ts.
+	if (!userId) {
+		try {
+			const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
+			if (!postPuzzle || !postPuzzle.colors) {
+				return c.json({ error: 'Game not found' }, 404)
+			}
+
+			const serializedPuzzle: SerializedPuzzle = {
+				colors: postPuzzle.colors,
+				numbers: postPuzzle.numbers ?? '',
+				solution: postPuzzle.solution ?? '',
+				difficulty: (postPuzzle.difficulty ?? 'easy') as SerializedPuzzle['difficulty'],
+				gridSize: parseInt(postPuzzle.gridSize ?? '4', 10),
+			}
+			const isChallenge = Boolean(postPuzzle.challengeBy)
+
+			let puzzleNumber: number | undefined
+			try {
+				const counterStr = await redis.get('stats:puzzleCounter')
+				puzzleNumber = counterStr !== undefined ? parseInt(counterStr, 10) : undefined
+			} catch {
+				// non-critical
+			}
+
+			return c.json(
+				buildLoggedOutGameState({
+					puzzle: serializedPuzzle,
+					postId,
+					isChallenge,
+					weekendEvent: getActiveWeekendEvent(new Date()),
+					...(puzzleNumber !== undefined && { puzzleNumber }),
+				}),
+			)
+		} catch (error) {
+			console.error('Error fetching logged-out game state:', error)
+			return c.json({ error: 'Failed to fetch game state' }, 500)
+		}
+	}
 
 	try {
 		// Run one-time migration for existing users
@@ -742,6 +785,7 @@ gameRouter.get('/api/game/state', async (c) => {
 		const gameState: GameState = {
 			puzzle: serializedPuzzle,
 			tutorialCompleted,
+			isLoggedIn: true,
 			skillLevel,
 			gridSizePreference,
 			postId,
@@ -776,7 +820,6 @@ gameRouter.get('/api/game/state', async (c) => {
 gameRouter.post('/api/game/grid-size', async (c) => {
 	const { postId, userId } = context
 
-	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
 
 	try {
@@ -793,6 +836,19 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 		}
 
 		const gridSize: GridSize = parsed
+
+		// ─── Logged-out path ─────────────────────────────────────────────
+		// Serve a fresh puzzle at the requested size without persisting the
+		// preference or a per-user puzzle override (nothing to key on).
+		if (!userId) {
+			const newPuzzle = generatePuzzleForGridLevel(gridSize, MIN_SKILL_LEVEL)
+			const response: GridSizeResponse = {
+				puzzle: newPuzzle,
+				skillLevel: MIN_SKILL_LEVEL,
+				gridSizePreference: gridSize,
+			}
+			return c.json(response)
+		}
 
 		// Persist preference
 		await setGridSizePreference(userId, gridSize)
@@ -902,7 +958,40 @@ gameRouter.post('/api/game/complete', async (c) => {
 	const { postId, userId } = context
 
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
-	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	// ─── Logged-out path ─────────────────────────────────────────────────
+	// Logged-out users get a completion result (so the "nice time" screen +
+	// login CTA can show) but nothing is persisted — there is no user to
+	// key streak/coins/season on. Time is taken from the client since we
+	// can't store a server-side start time without a userId.
+	if (!userId) {
+		try {
+			const body = await c.req.json().catch(() => null)
+			const clientTime = body && typeof body === 'object' ? (body as CompleteRequest).timeTaken : undefined
+			if (typeof clientTime !== 'number' || clientTime <= 0) {
+				return c.json({ error: 'Invalid timeTaken' }, 400)
+			}
+			const mistakes = body && typeof (body as CompleteRequest).mistakes === 'number'
+				? (body as CompleteRequest).mistakes ?? 0
+				: 0
+
+			const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
+			const rawGridSize = postPuzzle?.gridSize ? parseInt(postPuzzle.gridSize, 10) : 4
+			const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
+
+			return c.json(
+				buildLoggedOutCompleteResponse({
+					timeTaken: clientTime,
+					mistakes,
+					gridSize,
+					weekendEvent: getActiveWeekendEvent(new Date()),
+				}),
+			)
+		} catch (error) {
+			console.error('Error completing logged-out game:', error)
+			return c.json({ error: 'Failed to record completion' }, 500)
+		}
+	}
 
 	try {
 		const body: CompleteRequest = await c.req.json()
@@ -1366,6 +1455,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 			performanceScore,
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
+			isLoggedIn: true,
 			streak,
 			coinReward,
 			...(engagement !== undefined && { engagement }),
@@ -1393,13 +1483,118 @@ gameRouter.post('/api/game/complete', async (c) => {
 	}
 })
 
-// ─── POST /api/game/next-challenge ───────────────────────────────────────────
+// ─── POST /api/game/migrate-logged-out-score ─────────────────────────────────
+
+/**
+ * Credit a returning (newly logged-in) user for a puzzle they solved while
+ * logged out. The client replays the score it stashed in localStorage before
+ * the login reload. We apply the same streak + coin + season crediting as a
+ * normal completion, but skip all viral/auto-challenge side effects (the
+ * solve already happened, off-platform).
+ *
+ * Idempotent: a per-user/post key guards against double-crediting if the
+ * client retries or replays the stored score more than once.
+ */
+gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
+	const { postId, userId } = context
+
+	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	try {
+		const body = await c.req.json().catch(() => null)
+		if (!body || typeof body !== 'object') {
+			return c.json({ error: 'Invalid request body' }, 400)
+		}
+
+		const { timeTaken, mistakes: rawMistakes } = body as Record<string, unknown>
+		if (typeof timeTaken !== 'number' || timeTaken <= 0) {
+			return c.json({ error: 'Invalid timeTaken' }, 400)
+		}
+		const mistakes = typeof rawMistakes === 'number' && rawMistakes >= 0 ? rawMistakes : 0
+
+		// Idempotency guard — credit a given post's logged-out score once.
+		const migratedKey = `user:${userId}:loggedOutMigrated:${postId}`
+		const alreadyMigrated = await redis.get(migratedKey)
+		if (alreadyMigrated === 'true') {
+			return c.json({ migrated: false })
+		}
+		await redis.set(migratedKey, 'true')
+		await redis.expire(migratedKey, 2592000) // 30-day TTL
+
+		const puzzle = await getCurrentPuzzle(postId, userId)
+		const rawGridSize = puzzle ? parseInt(puzzle.gridSize, 10) : 4
+		const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
+
+		const currentLevel = await getGridSkillLevel(userId, gridSize)
+		const streak = await updateStreak(userId)
+		const coinReward = await applyCoinReward({
+			userId,
+			timeTaken,
+			currentLevel,
+			streak,
+			mistakes,
+			gridSize,
+		})
+
+		const today = getTodayUTC()
+		await Promise.all([
+			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
+			redis.zAdd(`leaderboard:speed:${today}:${gridSize}`, { score: timeTaken, member: userId }),
+			redis.expire(`leaderboard:speed:${today}:${gridSize}`, 2592000),
+		])
+
+		// Season scoring (non-blocking)
+		let seasonRank: number | null = null
+		let seasonPoints = 0
+		try {
+			const season = getCurrentSeason()
+			if (season.isActive) {
+				const parTime = getParTimeForGrid(gridSize)
+				const score = calculateSeasonScore(timeTaken, parTime, mistakes)
+				await recordSeasonScore(season.seasonId, userId, score)
+				const leaderboardKey = `season:${season.seasonId}:leaderboard`
+				const playerScore = await redis.zScore(leaderboardKey, userId)
+				seasonPoints = playerScore ?? 0
+				if (playerScore !== undefined && playerScore !== null) {
+					const higherEntries = await redis.zRange(leaderboardKey, playerScore + 1, Number.MAX_SAFE_INTEGER, { by: 'score' })
+					seasonRank = higherEntries.length + 1
+				}
+			}
+		} catch (err) {
+			console.error('[Migrate] Season scoring failed (non-critical):', err)
+		}
+
+		return c.json({
+			migrated: true,
+			coinReward,
+			streak,
+			...(seasonRank !== null && { seasonRank }),
+			...(seasonPoints > 0 && { seasonPoints }),
+		})
+	} catch (error) {
+		console.error('Error migrating logged-out score:', error)
+		return c.json({ error: 'Failed to migrate score' }, 500)
+	}
+})
 
 gameRouter.post('/api/game/next-challenge', async (c) => {
 	const { postId, userId } = context
 
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
-	if (!userId) return c.json({ error: 'User ID is required' }, 400)
+
+	// ─── Logged-out path ─────────────────────────────────────────────────
+	// Serve a fresh puzzle at the floor difficulty without touching skill
+	// level / history (nothing to persist for an anonymous viewer).
+	if (!userId) {
+		const newPuzzle = generatePuzzleForGridLevel(DEFAULT_GRID_SIZE, MIN_SKILL_LEVEL)
+		const response: NextChallengeResponse = {
+			puzzle: newPuzzle,
+			skillLevel: MIN_SKILL_LEVEL,
+			gridSizePreference: DEFAULT_GRID_SIZE,
+		}
+		return c.json(response)
+	}
 
 	try {
 		let timeSpent = 0

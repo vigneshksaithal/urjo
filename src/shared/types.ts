@@ -44,6 +44,11 @@ export type GameState = {
 	tutorialCompleted: boolean
 	skillLevel: number
 	gridSizePreference: number
+	/** False when the viewer is a logged-out Reddit user. The client uses
+	 *  this to hide account-scoped UI (wallet, streak, leaderboards, social
+	 *  actions) and surface a login prompt instead. Defaults to true when
+	 *  absent so existing logged-in flows are unaffected. */
+	isLoggedIn?: boolean
 	postId?: string
 	isChallenge?: boolean
 	streak?: StreakData
@@ -109,6 +114,10 @@ export type CompleteResponse = {
 	performanceScore: number
 	newSkillLevel: number
 	previousSkillLevel: number
+	/** False when the puzzle was solved by a logged-out user. Meta-progression
+	 *  (streak, coins, season) is omitted in that case and the client shows a
+	 *  login CTA on the result screen instead. Defaults to true when absent. */
+	isLoggedIn?: boolean
 	streak?: StreakData
 	coinReward?: CoinReward
 	engagement?: EngagementCompletionData | undefined

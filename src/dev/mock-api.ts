@@ -52,6 +52,7 @@ const buildPuzzle = (gridSize: number): SerializedPuzzle => {
 const buildGameState = (gridSize: number): Record<string, unknown> => ({
     puzzle: buildPuzzle(gridSize),
     tutorialCompleted: true,
+    isLoggedIn: true,
     skillLevel: 1,
     gridSizePreference: gridSize,
     postId: 'dev_post',
@@ -71,6 +72,26 @@ const buildGameState = (gridSize: number): Record<string, unknown> => ({
         targetValue: 3,
         coinReward: 25,
     },
+})
+
+/**
+ * Logged-out game state — mirrors the server's buildLoggedOutGameState:
+ * a playable puzzle with isLoggedIn false and no account-scoped data. Used
+ * for the UI Review Workflow via the `?loggedOut=1` query flag.
+ */
+const buildLoggedOutGameState = (gridSize: number): Record<string, unknown> => ({
+    puzzle: buildPuzzle(gridSize),
+    tutorialCompleted: true,
+    isLoggedIn: false,
+    isFirstTimeUser: false,
+    skillLevel: 1,
+    gridSizePreference: gridSize,
+    postId: 'dev_post',
+    isChallenge: false,
+    isMod: false,
+    notifyOptIn: false,
+    hintsDismissed: { numberConstraint: false, adjacencyViolation: false },
+    puzzleNumber: 1,
 })
 
 const buildEconomy = (): Record<string, unknown> => ({
@@ -120,9 +141,35 @@ export const mockApiPlugin = (): Plugin => ({
 
             const path = url.split('?')[0] ?? url
 
+            // Logged-out review mode: the client page is loaded with
+            // `?loggedOut=1`. The flag rides along on the referer header (the
+            // client's own fetches don't carry it on the request URL). We also
+            // honor a `loggedOut` cookie so it survives client-issued fetches.
+            const referer = String(req.headers['referer'] ?? '')
+            const cookie = String(req.headers['cookie'] ?? '')
+            const loggedOut =
+                /[?&]loggedOut=1/.test(referer) ||
+                /[?&]loggedOut=1/.test(url) ||
+                /(?:^|;\s*)loggedOut=1/.test(cookie)
+
             if (path === '/api/game/state') {
-                sendJson(res, buildGameState(4))
+                sendJson(res, loggedOut ? buildLoggedOutGameState(4) : buildGameState(4))
                 return
+            }
+
+            if (loggedOut) {
+                // Account-scoped endpoints are gated server-side for logged-out
+                // users — mirror that here so the client hides the UI.
+                if (
+                    path === '/api/economy' ||
+                    path === '/api/subscribe/status' ||
+                    path === '/api/subscribe'
+                ) {
+                    res.statusCode = 400
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify({ error: 'User ID required' }))
+                    return
+                }
             }
 
             if (path === '/api/game/grid-size') {

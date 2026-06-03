@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { navigateTo } from "@devvit/web/client";
+	import { navigateTo, showLoginPrompt } from "@devvit/web/client";
 	import type {
 		CellColor,
 		Grid,
@@ -14,6 +14,7 @@
 	import { hintShownStore, markShown } from "../stores/hints";
 	import { fireOnce } from "../stores/first-action";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
+	import { getLoginGate, LOGIN_CTA } from "../lib/login-gate";
 	import { getResultTier } from "../../shared/result-tiers";
 	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
@@ -65,6 +66,9 @@
 		mistakes?: number;
 		username?: string;
 		hasSubscribed?: boolean;
+		/** False when the viewer is a logged-out Reddit user. Drives the
+		 *  login gate — account-scoped UI is hidden and a sign-in CTA shows. */
+		isLoggedIn?: boolean;
 		onSubscribe?: () => void;
 		isChallenge?: boolean;
 		onGridSizeChange?: (size: number) => void;
@@ -88,38 +92,46 @@
 		/** Streak forecast for tomorrow — drives the "come back" retention
 		 *  hook on the completion overlay. Optional because it only arrives
 		 *  after a successful /api/game/complete. */
-		streakForecast?: {
-			day: number;
-			coinBonus: number;
-			isMilestone: boolean;
-			label: string;
-		} | undefined;
+		streakForecast?:
+			| {
+					day: number;
+					coinBonus: number;
+					isMilestone: boolean;
+					label: string;
+			  }
+			| undefined;
 		/** Active Weekend Event payload — when active, shows a persistent
 		 *  banner with countdown + applies a coin multiplier to all solves. */
-		weekendEvent?: {
-			active: boolean;
-			multiplier: number;
-			name: string;
-			emoji: string;
-			endsAtMs: number | null;
-			hoursLeft: number | null;
-		} | undefined;
+		weekendEvent?:
+			| {
+					active: boolean;
+					multiplier: number;
+					name: string;
+					emoji: string;
+					endsAtMs: number | null;
+					hoursLeft: number | null;
+			  }
+			| undefined;
 		/** Coins added by the weekend event on the latest completion. */
 		weekendBonusCoins?: number;
 		/** Always-on progression strip data — player rank/score in the
 		 *  current season. Optional; the strip hides cleanly without it. */
-		seasonProgress?: {
-			rank: number | null;
-			score: number;
-		} | undefined;
+		seasonProgress?:
+			| {
+					rank: number | null;
+					score: number;
+			  }
+			| undefined;
 		/** First incomplete daily mission for the always-on strip preview. */
-		nextMission?: {
-			templateId: string;
-			description: string;
-			currentProgress: number;
-			targetValue: number;
-			coinReward: number;
-		} | undefined;
+		nextMission?:
+			| {
+					templateId: string;
+					description: string;
+					currentProgress: number;
+					targetValue: number;
+					coinReward: number;
+			  }
+			| undefined;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -146,6 +158,7 @@
 		mistakes = 0,
 		username,
 		hasSubscribed = false,
+		isLoggedIn = true,
 		onSubscribe,
 		isChallenge = false,
 		onGridSizeChange,
@@ -338,6 +351,15 @@
 		getSimplifiedCompletionCtas(completionContext),
 	);
 
+	// Login gate — single source of truth for which account-scoped UI shows.
+	// Logged-out users see the puzzle only; wallet/streak/season/leaderboard/
+	// social actions are hidden and a sign-in CTA appears instead.
+	const loginGate = $derived(getLoginGate(isLoggedIn));
+
+	function handleLoginPrompt(): void {
+		showLoginPrompt();
+	}
+
 	function confirmShare(): void {
 		showShareConfirm = false;
 		onShare();
@@ -483,7 +505,9 @@
 		<!-- Centre cluster — min-w-0 lets it shrink below its content width so
 		     the shrink-0 trailing controls are never pushed off-screen. -->
 		<div class="flex items-center gap-2 flex-1 min-w-0 justify-center">
-			<StreakBadge streak={streakData} />
+			{#if loginGate.showStreak}
+				<StreakBadge streak={streakData} />
+			{/if}
 			{#if sessionRun >= 2}
 				<!-- Session run chip — Subway Surfers' "5 in a row" momentum
 				     indicator. Hidden for first solve so it doesn't appear
@@ -503,16 +527,18 @@
 					{/if}
 				</div>
 			{/if}
-			{#if coins !== undefined && onOpenShop}
+			{#if loginGate.showWallet && coins !== undefined && onOpenShop}
 				<CoinDisplay {coins} onClick={onOpenShop} />
 			{/if}
-			<button
-				onclick={() => (showLeaderboard = true)}
-				class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
-				aria-label="View leaderboard"
-			>
-				<Trophy class="w-5 h-5 text-yellow-400" />
-			</button>
+			{#if loginGate.showLeaderboard}
+				<button
+					onclick={() => (showLeaderboard = true)}
+					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
+					aria-label="View leaderboard"
+				>
+					<Trophy class="w-5 h-5 text-yellow-400" />
+				</button>
+			{/if}
 			{#if isMod && onOpenAnalytics}
 				<button
 					onclick={onOpenAnalytics}
@@ -569,7 +595,7 @@
 	     mission so meta-progression is never hidden in modals. Only on the
 	     in-game view (hidden during completion overlay & challenge posts to
 	     avoid clutter). -->
-	{#if !isCompleted && !isChallenge}
+	{#if !isCompleted && !isChallenge && loginGate.showSeason}
 		<SeasonStrip
 			streak={streakData}
 			{currentSeason}
@@ -580,10 +606,31 @@
 		/>
 	{/if}
 
+	<!-- Logged-out sign-in banner — sits where the progression strip would be
+	     for signed-in users. Pairs the prompt with a clear value proposition
+	     (save progress + unlock) per Reddit's logged-out guidance. Triggered
+	     only by the user's tap, so it's a natural conversion moment. -->
+	{#if !isCompleted && loginGate.showLoginCta}
+		<div class="flex-none flex justify-center px-3">
+			<button
+				onclick={handleLoginPrompt}
+				class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-urjo-blue/10 border border-urjo-blue/40 hover:bg-urjo-blue/20 active:scale-95 transition-all"
+			>
+				<span class="text-sm">🔓</span>
+				<span class="text-xs font-semibold text-urjo-blue">
+					{LOGIN_CTA.button}
+				</span>
+			</button>
+		</div>
+	{/if}
+
 	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
 	{#if !isChallenge && onGridSizeChange}
 		<div class="flex-none flex justify-center">
-			<GridSizeSelector {gridSize} onGridSizeChange={handleGridSizeSelect} />
+			<GridSizeSelector
+				{gridSize}
+				onGridSizeChange={handleGridSizeSelect}
+			/>
 		</div>
 	{/if}
 
@@ -820,6 +867,7 @@
 								{seasonRank}
 								{seasonPoints}
 								hasCommented={hasCommentedResult}
+								showCommentAction={loginGate.showSocialActions}
 								onCommentResult={() =>
 									(hasCommentedResult = true)}
 							/>
@@ -843,44 +891,76 @@
 					<!-- Secondary CTA — ghost/outline styling. This is where
 					     "Challenge Friends" / "View Challenge"
 					     now live (demoted from primary). -->
-					{#each simplifiedCtas.secondary as cta (cta.id)}
-						<button
-							onclick={() => handleSecondaryCta(cta.id)}
-							class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all flex items-center justify-center gap-2"
+					{#if loginGate.showSocialActions}
+						{#each simplifiedCtas.secondary as cta (cta.id)}
+							<button
+								onclick={() => handleSecondaryCta(cta.id)}
+								class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all flex items-center justify-center gap-2"
+							>
+								{#if cta.id === "view-challenge"}
+									<ExternalLink class="w-4 h-4" />
+								{/if}
+								<span>{cta.label}</span>
+							</button>
+						{/each}
+					{/if}
+
+					<!-- Logged-out conversion CTA — shown at the natural
+					     breakpoint (result screen) per Reddit's logged-out
+					     guide. Pairs the prompt with a clear value proposition:
+					     signing in saves the run and unlocks coins/streak. -->
+					{#if loginGate.showLoginCta}
+						<div
+							class="w-full flex flex-col items-center gap-2 px-4 py-3 rounded-lg bg-urjo-blue/10 border border-urjo-blue/40"
 						>
-							{#if cta.id === "view-challenge"}
-								<ExternalLink class="w-4 h-4" />
-							{/if}
-							<span>{cta.label}</span>
-						</button>
-					{/each}
+							<p
+								class="text-sm font-bold text-theme-text-primary text-center"
+							>
+								{LOGIN_CTA.title}
+							</p>
+							<p
+								class="text-xs text-theme-text-secondary text-center"
+							>
+								{LOGIN_CTA.body}
+							</p>
+							<button
+								onclick={handleLoginPrompt}
+								class="w-full px-4 py-2 bg-urjo-blue text-white font-bold rounded-lg text-sm hover:opacity-90 active:scale-95 transition-all"
+							>
+								{LOGIN_CTA.button}
+							</button>
+						</div>
+					{/if}
 
 					<!-- Retention hook — promoted visibility. The forecast comes
 					     from the server (escalating curve in streak-rewards.ts)
-					     so milestone bumps get a glow + clearer label. -->
-					{#if streakForecast}
-						<div
-							class="text-sm text-center px-3 py-1 rounded-full {streakForecast.isMilestone
-								? 'bg-yellow-500/15 border border-yellow-500/40 text-yellow-300 font-semibold'
-								: 'bg-theme-hover text-theme-text-secondary'}"
-						>
-							{#if streakForecast.isMilestone}
-								🎉 Tomorrow → <span class="font-bold"
-									>{streakForecast.label}</span
-								>
-								· +{streakForecast.coinBonus} 🪙
-							{:else}
-								🔥 Return tomorrow → Day {streakForecast.day}
-								· +{streakForecast.coinBonus} 🪙
-							{/if}
-						</div>
-					{:else}
-						<div
-							class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
-						>
-							🔥 Return tomorrow for +{tomorrowStreakBonus} streak
-							bonus coins
-						</div>
+					     so milestone bumps get a glow + clearer label.
+					     Account-scoped: hidden for logged-out players. -->
+					{#if loginGate.showStreak}
+						{#if streakForecast}
+							<div
+								class="text-sm text-center px-3 py-1 rounded-full {streakForecast.isMilestone
+									? 'bg-yellow-500/15 border border-yellow-500/40 text-yellow-300 font-semibold'
+									: 'bg-theme-hover text-theme-text-secondary'}"
+							>
+								{#if streakForecast.isMilestone}
+									🎉 Tomorrow → <span class="font-bold"
+										>{streakForecast.label}</span
+									>
+									· +{streakForecast.coinBonus} 🪙
+								{:else}
+									🔥 Return tomorrow → Day {streakForecast.day}
+									· +{streakForecast.coinBonus} 🪙
+								{/if}
+							</div>
+						{:else}
+							<div
+								class="text-sm text-theme-text-secondary text-center px-3 py-1 rounded-full bg-theme-hover"
+							>
+								🔥 Return tomorrow for +{tomorrowStreakBonus} streak
+								bonus coins
+							</div>
+						{/if}
 					{/if}
 
 					<!-- Free-freeze grant celebration — fires when the server's
@@ -893,39 +973,43 @@
 						</div>
 					{/if}
 
-					<div class="grid grid-cols-2 gap-2 w-full">
-						<button
-							onclick={handleNotifyToggle}
-							disabled={notifySubmitting}
-							class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50"
-						>
-							{localNotifyOptIn ? "Notify on" : "Notify me"}
-						</button>
-						{#if onSubscribe && !hasSubscribed}
+					{#if loginGate.showSocialActions}
+						<div class="grid grid-cols-2 gap-2 w-full">
 							<button
-								onclick={() => (showSubscribeConfirm = true)}
-								class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
+								onclick={handleNotifyToggle}
+								disabled={notifySubmitting}
+								class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50"
 							>
-								Subscribe
+								{localNotifyOptIn ? "Notify on" : "Notify me"}
 							</button>
-						{:else}
-							<button
-								onclick={() => (showSeasonLeaderboard = true)}
-								class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
-							>
-								Season
-							</button>
-						{/if}
-					</div>
+							{#if onSubscribe && !hasSubscribed}
+								<button
+									onclick={() =>
+										(showSubscribeConfirm = true)}
+									class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
+								>
+									Subscribe
+								</button>
+							{:else}
+								<button
+									onclick={() =>
+										(showSeasonLeaderboard = true)}
+									class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
+								>
+									Season
+								</button>
+							{/if}
+						</div>
 
-					<!-- "More" button — toggles collapsible panel -->
-					<button
-						onclick={toggleMoreActions}
-						class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
-					>
-						<MoreHorizontal class="w-4 h-4" />
-						<span>More</span>
-					</button>
+						<!-- "More" button — toggles collapsible panel -->
+						<button
+							onclick={toggleMoreActions}
+							class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
+						>
+							<MoreHorizontal class="w-4 h-4" />
+							<span>More</span>
+						</button>
+					{/if}
 
 					<!-- Collapsible "More" panel: 2-col grid -->
 					{#if showMoreActionsPanel}

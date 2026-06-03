@@ -20,7 +20,9 @@
         "browser_resize",
         "browser_evaluate",
         "browser_run_code_unsafe",
-        "browser_press_key"
+        "browser_press_key",
+        "browser_network_requests",
+        "browser_tabs"
       ]
     },
     "devvit": {

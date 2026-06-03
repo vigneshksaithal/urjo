@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { showLoginPrompt } from "@devvit/web/client";
 	import type {
 		Grid,
 		CellColor,
@@ -28,12 +29,17 @@
 	} from "./stores/mistakes";
 	import { hydrateFromServer, resetHints } from "./stores/hints";
 	import { fireOnce, resetLatch } from "./stores/first-action";
+	import { incrementSessionRun, getSessionRun } from "./stores/session-run";
 	import {
-		incrementSessionRun,
-		getSessionRun,
-	} from "./stores/session-run";
-	import { startHeartbeat, type HeartbeatHandle } from "./lib/dwell-heartbeat";
+		startHeartbeat,
+		type HeartbeatHandle,
+	} from "./lib/dwell-heartbeat";
 	import { getSessionId, sessionHeaders } from "./lib/session-id";
+	import {
+		writeLoggedOutScore,
+		readLoggedOutScore,
+		clearLoggedOutScore,
+	} from "./lib/logged-out-score";
 
 	type EconomyResponse = {
 		coins: number;
@@ -77,6 +83,7 @@
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
+	let isLoggedIn = $state(true);
 	let hasSubscribed = $state(false);
 	// Run-again loop state — persisted via sessionStorage in session-run store.
 	let sessionRun = $state(getSessionRun());
@@ -84,23 +91,29 @@
 	let sessionRunBonusCoins = $state(0);
 	// Streak forecast — what tomorrow's streak day will look like. Hydrated
 	// from /api/game/complete so the result screen can preview the next bump.
-	let streakForecast = $state<{
-		day: number;
-		coinBonus: number;
-		isMilestone: boolean;
-		label: string;
-	} | undefined>(undefined);
+	let streakForecast = $state<
+		| {
+				day: number;
+				coinBonus: number;
+				isMilestone: boolean;
+				label: string;
+		  }
+		| undefined
+	>(undefined);
 	// Weekend Event payload — hydrated from /api/game/state on load and
 	// refreshed on /api/game/complete. Drives the in-game banner + result
 	// screen "weekend bonus" chip.
-	let weekendEvent = $state<{
-		active: boolean;
-		multiplier: number;
-		name: string;
-		emoji: string;
-		endsAtMs: number | null;
-		hoursLeft: number | null;
-	} | undefined>(undefined);
+	let weekendEvent = $state<
+		| {
+				active: boolean;
+				multiplier: number;
+				name: string;
+				emoji: string;
+				endsAtMs: number | null;
+				hoursLeft: number | null;
+		  }
+		| undefined
+	>(undefined);
 	let weekendBonusCoins = $state(0);
 	// Always-on progression strip data — hydrated from /api/game/state.
 	let seasonProgress = $state<
@@ -183,6 +196,7 @@
 
 			const data: GameState = await response.json();
 
+			isLoggedIn = data.isLoggedIn !== false;
 			puzzleColors = data.puzzle.colors;
 			puzzleNumbers = data.puzzle.numbers;
 			tutorialCompleted = data.tutorialCompleted;
@@ -251,10 +265,15 @@
 					? "first-screen"
 					: "game";
 
-			// Load economy data
-			loadEconomy();
-			// Check subscription status
-			checkSubscription();
+			// Load economy data (logged-in only — no wallet for anon users)
+			if (isLoggedIn) {
+				loadEconomy();
+				// Check subscription status
+				checkSubscription();
+				// Migrate any logged-out score stashed before the user signed
+				// in, so the freshly-authenticated account gets credit.
+				void migrateLoggedOutScore();
+			}
 		} catch (error) {
 			errorMessage =
 				error instanceof Error ? error.message : "Failed to load game";
@@ -286,7 +305,42 @@
 		}
 	}
 
+	/**
+	 * Replay a logged-out score (stashed in localStorage before the login
+	 * reload) so the newly signed-in account gets credit. Best-effort and
+	 * idempotent server-side; we clear the local copy once consumed.
+	 */
+	async function migrateLoggedOutScore() {
+		if (!postId) return;
+		const stashed = readLoggedOutScore(postId);
+		if (!stashed) return;
+		try {
+			const response = await fetch("/api/game/migrate-logged-out-score", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					timeTaken: stashed.timeTaken,
+					mistakes: stashed.mistakes,
+				}),
+			});
+			if (response.ok) {
+				const data = await response.json();
+				clearLoggedOutScore(postId);
+				if (data.streak) streakData = data.streak;
+				if (data.coinReward?.total) coins += data.coinReward.total;
+			}
+		} catch {
+			// Non-critical — score stays stashed for a later retry.
+		}
+	}
+
 	async function handleSubscribe() {
+		// Logged-out users: trigger Reddit's login flow instead of subscribing.
+		// Subscribing requires an account; this is a natural conversion moment.
+		if (!isLoggedIn) {
+			showLoginPrompt();
+			return;
+		}
 		if (hasSubscribed) return;
 		void fireOnce(postId ?? "", "subscribe");
 		try {
@@ -340,6 +394,19 @@
 	 * Report puzzle completion to server (non-critical).
 	 */
 	async function reportCompletion(time: number) {
+		// Logged-out players: stash the result so it survives the login reload
+		// and can be credited once they sign in. Skip the session-run/economy
+		// round-trip — there's no wallet to credit server-side.
+		if (!isLoggedIn) {
+			if (postId) {
+				writeLoggedOutScore({
+					postId,
+					timeTaken: time,
+					mistakes: $mistakeCount,
+				});
+			}
+		}
+
 		// Bump the session-run counter BEFORE the POST so the server applies
 		// the right multiplier for *this* solve (the freshly incremented
 		// value reflects how many puzzles have been solved this session,
@@ -689,6 +756,7 @@
 			timeTaken,
 			mistakes: $mistakeCount,
 			hasSubscribed,
+			isLoggedIn,
 			isChallenge,
 			postId,
 			onCellChange: handleCellChange,
