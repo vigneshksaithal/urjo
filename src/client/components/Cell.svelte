@@ -139,11 +139,11 @@
 	{#if number !== null}
 		<span
 			class="absolute inset-0 flex items-center justify-center
-				text-white font-bold {gridSize === 8
-				? 'text-sm'
+				text-white font-medium {gridSize === 8
+				? 'text-lg'
 				: gridSize === 6
-					? 'text-xl'
-					: 'text-3xl'} z-10 select-none pointer-events-none
+					? 'text-3xl'
+					: 'text-5xl'} z-10 select-none pointer-events-none
 				drop-shadow-md"
 		>
 			{number}
