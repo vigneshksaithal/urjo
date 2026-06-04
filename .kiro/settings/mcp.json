@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "playwright": {
-      "command": "/opt/homebrew/bin/bunx",
+      "command": "bunx",
       "args": [
         "@playwright/mcp@latest"
       ],
@@ -26,14 +26,11 @@
       ]
     },
     "devvit": {
-      "command": "/opt/homebrew/bin/npx",
+      "command": "bunx",
       "args": [
         "-y",
         "@devvit/mcp"
       ],
-      "env": {
-        "DEVVIT_DISABLE_METRICS": "true"
-      },
       "disabled": false,
       "autoApprove": [
         "devvit_search",
@@ -51,7 +48,7 @@
       ]
     },
     "sequential-thinking": {
-      "command": "/opt/homebrew/bin/bunx",
+      "command": "bunx",
       "args": [
         "@modelcontextprotocol/server-sequential-thinking"
       ],
