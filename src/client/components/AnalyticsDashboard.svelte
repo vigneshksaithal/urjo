@@ -1,5 +1,8 @@
 <script lang="ts">
-    import type { DashboardData } from "../../shared/growth-types";
+    import type {
+        DashboardData,
+        QualifiedSummary,
+    } from "../../shared/growth-types";
     import { focusTrap } from "../lib/focus-trap";
     import {
         generateMarkdownSnapshot,
@@ -23,22 +26,10 @@
     let { isOpen, onClose }: Props = $props();
 
     type Tab = "overview" | "daily";
-    type RewardsStatus = {
-        date: string;
-        currentTier: number;
-        tierEligibility: string;
-        redditQualifiedEngagers: number;
-        redditQualifiedEngagers7d: number;
-        internalDqp: number;
-        internalVsRedditDrift: number | null;
-        tier3Target: number;
-        gapToTier3: number;
-        multiplierToTier3: number | null;
-    };
 
     let activeTab = $state<Tab>("overview");
     let dashboards = $state<DashboardData[]>([]);
-    let rewards = $state<RewardsStatus | null>(null);
+    let qualified = $state<QualifiedSummary | null>(null);
     let loading = $state(false);
     let error = $state<string | null>(null);
 
@@ -74,25 +65,26 @@
         loading = true;
         error = null;
         try {
-            const [dashboardRes, rewardsRes] = await Promise.all([
+            const [dashboardRes, qualifiedRes] = await Promise.all([
                 fetch("/api/analytics/dashboard"),
-                fetch("/api/analytics/rewards"),
+                fetch("/api/analytics/qualified-summary"),
             ]);
             if (!dashboardRes.ok)
                 throw new Error(`HTTP ${dashboardRes.status}`);
-            if (!rewardsRes.ok) throw new Error(`HTTP ${rewardsRes.status}`);
+            if (!qualifiedRes.ok)
+                throw new Error(`HTTP ${qualifiedRes.status}`);
 
             const dashboardJson = await dashboardRes.json();
             if (dashboardJson.status === "error") {
                 throw new Error(dashboardJson.message);
             }
-            const rewardsJson = await rewardsRes.json();
-            if (rewardsJson.status === "error") {
-                throw new Error(rewardsJson.message);
+            const qualifiedJson = await qualifiedRes.json();
+            if (qualifiedJson.status === "error") {
+                throw new Error(qualifiedJson.message);
             }
 
             dashboards = dashboardJson.data as DashboardData[];
-            rewards = rewardsJson.data as RewardsStatus | null;
+            qualified = qualifiedJson.data as QualifiedSummary | null;
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load analytics";
         } finally {
@@ -102,9 +94,9 @@
 
     const pct = (n: number | null): string =>
         n === null ? "—" : `${(n * 100).toFixed(1)}%`;
-    const ratio = (n: number | null): string =>
-        n === null ? "—" : `${n.toFixed(2)}×`;
     const num = (n: number): string => n.toLocaleString();
+    const secs = (n: number | null): string =>
+        n === null ? "—" : `${n.toFixed(0)}s`;
 
     function alertBg(type: "kill" | "scale"): string {
         return type === "kill"
@@ -290,96 +282,132 @@
                             {/if}
                         </div>
 
-                        <!-- Reddit Rewards status -->
+                        <!-- Qualified Engagement (bounded, server-validated) -->
                         <div
                             class="rounded-lg border border-theme-border bg-theme-hover p-3"
                         >
                             <div class="flex items-center justify-between">
                                 <span
                                     class="text-xs text-theme-text-muted uppercase tracking-wide"
-                                    >Developer Rewards</span
+                                    >Qualified Engagement</span
                                 >
-                                {#if rewards}
+                                {#if qualified}
                                     <span class="text-xs text-theme-text-muted"
-                                        >{rewards.date}</span
+                                        >{qualified.dqpDate}</span
                                     >
                                 {/if}
                             </div>
-                            {#if rewards}
+                            {#if qualified}
+                                <p
+                                    class="mt-1 text-[10px] text-theme-text-muted"
+                                >
+                                    Estimated from a bounded daily filter and
+                                    capped cohort sample.
+                                </p>
                                 <div class="grid grid-cols-2 gap-2 mt-2">
                                     <div>
                                         <p
                                             class="text-xs text-theme-text-muted"
                                         >
-                                            Reddit QE 7d
+                                            DQP (est.)
                                         </p>
                                         <p
                                             class="text-xl font-bold text-theme-text-primary"
                                         >
-                                            {num(
-                                                Math.round(
-                                                    rewards.redditQualifiedEngagers7d,
-                                                ),
-                                            )}
+                                            {num(qualified.dqp)}
                                         </p>
                                     </div>
                                     <div>
                                         <p
                                             class="text-xs text-theme-text-muted"
                                         >
-                                            Tier
+                                            Avg Play Time
                                         </p>
                                         <p
-                                            class="text-xl font-bold {rewards.currentTier >=
-                                            3
-                                                ? 'text-emerald-400'
-                                                : 'text-yellow-400'}"
+                                            class="text-xl font-bold text-theme-text-primary"
                                         >
-                                            {rewards.tierEligibility}
+                                            {secs(qualified.averagePlaySeconds)}
                                         </p>
                                     </div>
                                     <div>
                                         <p
                                             class="text-xs text-theme-text-muted"
                                         >
-                                            Gap to Tier 3
+                                            D1 Retention (est.)
                                         </p>
                                         <p
-                                            class="font-semibold text-theme-text-primary"
+                                            class="text-lg font-semibold {qualified.d1Retention ===
+                                            null
+                                                ? 'text-theme-text-muted'
+                                                : 'text-theme-text-primary'}"
                                         >
-                                            {num(Math.ceil(rewards.gapToTier3))}
+                                            {pct(qualified.d1Retention)}
+                                            <span
+                                                class="text-[10px] text-theme-text-muted font-normal"
+                                                >· n={num(
+                                                    qualified.d1SampleSize,
+                                                )}</span
+                                            >
                                         </p>
                                     </div>
                                     <div>
                                         <p
                                             class="text-xs text-theme-text-muted"
                                         >
-                                            Needed Lift
+                                            D7 Retention (est.)
                                         </p>
                                         <p
-                                            class="font-semibold text-theme-text-primary"
+                                            class="text-lg font-semibold {qualified.d7Retention ===
+                                            null
+                                                ? 'text-theme-text-muted'
+                                                : 'text-theme-text-primary'}"
                                         >
-                                            {ratio(rewards.multiplierToTier3)}
+                                            {pct(qualified.d7Retention)}
+                                            <span
+                                                class="text-[10px] text-theme-text-muted font-normal"
+                                                >· n={num(
+                                                    qualified.d7SampleSize,
+                                                )}</span
+                                            >
                                         </p>
                                     </div>
                                 </div>
                                 <div
-                                    class="mt-2 flex justify-between text-xs text-theme-text-muted"
+                                    class="mt-2 pt-2 border-t border-theme-border"
                                 >
-                                    <span
-                                        >Internal DQP: {num(
-                                            rewards.internalDqp,
-                                        )}</span
+                                    <p
+                                        class="text-xs text-theme-text-muted mb-1"
                                     >
-                                    <span
-                                        >Drift: {pct(
-                                            rewards.internalVsRedditDrift,
-                                        )}</span
+                                        Session length ({num(
+                                            qualified.qualifiedSessions,
+                                        )} qualified)
+                                    </p>
+                                    <div
+                                        class="flex justify-between text-xs text-theme-text-primary"
                                     >
+                                        <span
+                                            >20–29s: {num(
+                                                qualified.playtimeBuckets
+                                                    .b20_29,
+                                            )}</span
+                                        >
+                                        <span
+                                            >30–44s: {num(
+                                                qualified.playtimeBuckets
+                                                    .b30_44,
+                                            )}</span
+                                        >
+                                        <span
+                                            >45–60s: {num(
+                                                qualified.playtimeBuckets
+                                                    .b45_60,
+                                            )}</span
+                                        >
+                                    </div>
                                 </div>
                             {:else}
                                 <p class="mt-2 text-sm text-theme-text-muted">
-                                    Reddit QE CSV has not been uploaded yet.
+                                    No qualified engagement recorded yet.
                                 </p>
                             {/if}
                         </div>

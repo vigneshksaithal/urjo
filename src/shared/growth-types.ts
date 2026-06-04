@@ -106,7 +106,6 @@ export type RollingMetrics = {
 }
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────
-
 /** Alert triggered by a kill or scale rule evaluation */
 export type Alert = {
     ruleId: string
@@ -136,6 +135,46 @@ export type DashboardData = {
     dqSuppressedRuleIds: string[]
     backfillPolicy: 'no-backfill'
 }
+
+// ─── Qualified Summary (bounded DQP / retention / play time) ─────────────────────
+
+/** Session-duration histogram for qualified play time. */
+export type QualifiedPlaytimeBuckets = {
+    b20_29: number
+    b30_44: number
+    b45_60: number
+}
+
+/**
+ * Bounded server-validated qualified-engagement metrics, surfaced in the
+ * in-app analytics dashboard. DQP and retention are estimates derived from
+ * a fixed-size daily membership filter and a capped cohort sample.
+ */
+export type QualifiedSummary = {
+    /** UTC date the DQP / play-time figures reflect (yesterday). */
+    dqpDate: string
+    /** Estimated unique qualified players on `dqpDate`. */
+    dqp: number
+    /** Cohort date for D1 retention (matured one day ago). */
+    d1Date: string
+    /** Estimated D1 retention in [0,1], or null when sample too small. */
+    d1Retention: number | null
+    /** Sample size backing the D1 estimate. */
+    d1SampleSize: number
+    /** Cohort date for D7 retention (matured eight days ago). */
+    d7Date: string
+    /** Estimated D7 retention in [0,1], or null when window open or sample too small. */
+    d7Retention: number | null
+    /** Sample size backing the D7 estimate. */
+    d7SampleSize: number
+    /** Qualified sessions counted on `dqpDate`. */
+    qualifiedSessions: number
+    /** Mean active-foreground seconds per qualified session, or null when none. */
+    averagePlaySeconds: number | null
+    /** Session-duration histogram for `dqpDate`. */
+    playtimeBuckets: QualifiedPlaytimeBuckets
+}
+
 
 // ─── Seasons ───────────────────────────────────────────────────────────────────
 

@@ -1,20 +1,7 @@
 /**
  * Social Viral Mechanics Types
- * Presence, completion CTAs, and post previews
+ * Completion CTAs, and post previews
  */
-
-// ─── Presence ──────────────────────────────────────────────────────────────────
-
-export type PresencePlayer = {
-    userId: string
-    username: string
-    avatarUrl?: string
-}
-
-export type PresenceData = {
-    activeCount: number
-    players: PresencePlayer[]
-}
 
 // ─── Completion Screen ─────────────────────────────────────────────────────────
 

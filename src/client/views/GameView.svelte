@@ -26,7 +26,6 @@
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 	import ResultCard from "../components/ResultCard.svelte";
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
-	import PresenceBar from "../components/PresenceBar.svelte";
 	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
 	import Trophy from "lucide-svelte/icons/trophy";
@@ -918,9 +917,6 @@
 			<p class="text-xs text-theme-text-muted text-center">
 				Solved in {timeTaken ?? 0}s
 			</p>
-		{/if}
-		{#if !isCompleted && postId}
-			<PresenceBar {postId} />
 		{/if}
 	</footer>
 </div>

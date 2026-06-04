@@ -165,7 +165,6 @@ import {
     validateRedditQEUpload,
     type RedditQEUpload,
 } from '../lib/drift'
-import { ingestRedditQECsv } from '../lib/rewards'
 
 adminRouter.post('/api/admin/qe/upload', async (c) => {
     try {
@@ -176,30 +175,6 @@ adminRouter.post('/api/admin/qe/upload', async (c) => {
         }
 
         const result = await storeRedditQEUpload(body as RedditQEUpload)
-        return c.json({ status: 'success', data: result })
-    } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error'
-        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
-    }
-})
-
-// ─── POST /api/admin/qe/csv-upload ───────────────────────────────────────────
-// Ingest Reddit's Developer Rewards analytics CSV. This stores Reddit QE as
-// canonical payout data, separate from internal DQP diagnostics.
-
-adminRouter.post('/api/admin/qe/csv-upload', async (c) => {
-    try {
-        const body = await c.req.json().catch(() => null)
-        if (body === null || typeof body !== 'object') {
-            return c.json({ status: 'error', message: 'Invalid request body' }, HTTP_STATUS_BAD_REQUEST)
-        }
-
-        const { csv } = body as Record<string, unknown>
-        if (typeof csv !== 'string' || csv.trim().length === 0 || csv.length > 1_000_000) {
-            return c.json({ status: 'error', message: 'csv must be a non-empty string' }, HTTP_STATUS_BAD_REQUEST)
-        }
-
-        const result = await ingestRedditQECsv(csv)
         return c.json({ status: 'success', data: result })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'

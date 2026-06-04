@@ -8,6 +8,12 @@ import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis, reddit as webReddit, runWithContext } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
 import { app } from '../index'
+import {
+    captureReferrer,
+    commitQualifiedUser,
+    markFirstTapAndCommit,
+    recordDwellTick,
+} from '../lib/qualified'
 
 // ─── Helper: run with Devvit context ──────────────────────────────────────────
 
@@ -124,45 +130,121 @@ testDashboard('GET /api/analytics/dashboard returns 14 days of dashboard data', 
     expect(entry).toHaveProperty('seasonParticipants')
 })
 
-// ─── GET /api/analytics/rewards — canonical Reddit rewards status ────────────
+// ─── GET /api/analytics/dqp — bounded estimate fields ────────────────────────
 
-const testRewardsStatus = createDevvitTest({
+const testDQP = createDevvitTest({
     userId: 't2_moduser',
     subredditName: 'testsub',
     subredditId: 't5_testsub',
 })
 
-testRewardsStatus('GET /api/analytics/rewards returns canonical Reddit rewards status', async () => {
+testDQP('GET /api/analytics/dqp reports estimated DQP and retention sample sizes', async () => {
+    const date = '2026-04-01'
     await withCtx(
         { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
         async () => {
             await seedModCache('t5_testsub', 't2_moduser')
-            await redis.hSet('rewards:qe:2026-06-01', {
-                date: '2026-06-01',
-                qualifiedInstalls: '0',
-                qualifiedEngagers: '2586',
-                qualifiedEngagersLoggedIn: '2586',
-                qualifiedEngagersLoggedOut: '0',
-                qualifiedEngagers7d: '1742.7',
-                qualifiedEngagers7dLoggedIn: '1741.6',
-                qualifiedEngagers7dLoggedOut: '1.3',
-                qualifiedEngagers14d: '1193.4',
-                qualifiedEngagers14dLoggedIn: '1192.4',
-                qualifiedEngagers14dLoggedOut: '1.1',
-                tierEligibility: 'Tier 2',
-            })
-            await redis.set('rewards:qe:latest', '2026-06-01')
+            await commitQualifiedUser(date, 't2_dqp_route', 't5_testsub')
         },
     )
 
     const res = await withCtx(
         { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
-        () => app.request('/api/analytics/rewards'),
+        () => app.request(`/api/analytics/dqp?date=${date}`),
     )
 
     expect(res.status).toBe(200)
-    const body = await res.json() as { status: string; data: { canonicalSource: string; gapToTier3: number } }
+    const body = await res.json() as {
+        status: string
+        data: {
+            dqp: number
+            dqpEstimated: boolean
+            retentionEstimated: boolean
+            d1Retention: number | null
+            d1SampleSize: number
+            d7Retention: number | null
+            d7SampleSize: number
+        }
+    }
     expect(body.status).toBe('success')
-    expect(body.data.canonicalSource).toBe('reddit')
-    expect(body.data.gapToTier3).toBeCloseTo(8257.3)
+    expect(body.data.dqp).toBe(1)
+    expect(body.data.dqpEstimated).toBe(true)
+    expect(body.data.retentionEstimated).toBe(true)
+    expect(body.data.d1Retention).toBe(null)
+    expect(body.data.d1SampleSize).toBe(1)
+    expect(body.data.d7Retention).toBe(null)
+    expect(body.data.d7SampleSize).toBe(1)
+})
+
+// ─── GET /api/analytics/qualified-summary — in-app dashboard summary ──────────
+
+const testQualifiedSummary = createDevvitTest({
+    userId: 't2_moduser',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testQualifiedSummary('GET /api/analytics/qualified-summary reports yesterday DQP and play time', async () => {
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]!
+
+    await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        async () => {
+            await seedModCache('t5_testsub', 't2_moduser')
+            await captureReferrer('sess-summary-route', 't2_summary_route', 't5_testsub', 'https://reddit.com/r/foo')
+            await markFirstTapAndCommit('sess-summary-route', yesterday, 't2_summary_route', 't5_testsub')
+            for (let i = 0; i < 6; i++) {
+                await recordDwellTick('sess-summary-route', 't2_summary_route', 5, yesterday)
+            }
+        },
+    )
+
+    const res = await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => app.request('/api/analytics/qualified-summary'),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+        status: string
+        data: {
+            dqpDate: string
+            dqp: number
+            d1Date: string
+            d7Date: string
+            qualifiedSessions: number
+            averagePlaySeconds: number | null
+            playtimeBuckets: { b20_29: number; b30_44: number; b45_60: number }
+        }
+    }
+    expect(body.status).toBe('success')
+    expect(body.data.dqpDate).toBe(yesterday)
+    expect(body.data.dqp).toBe(1)
+    expect(body.data.qualifiedSessions).toBe(1)
+    expect(body.data.averagePlaySeconds).toBe(30)
+    expect(body.data.playtimeBuckets).toEqual({ b20_29: 0, b30_44: 1, b45_60: 0 })
+})
+
+// ─── GET /api/analytics/qualified-summary — 403 for non-moderator ─────────────
+
+const testQualifiedSummaryForbidden = createDevvitTest({
+    userId: 't2_nonmod',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testQualifiedSummaryForbidden('GET /api/analytics/qualified-summary returns 403 for non-moderator', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'nonmod_user' } as never)
+    vi.spyOn(webReddit, 'getModerators').mockReturnValue({
+        all: () => Promise.resolve([]),
+    } as never)
+
+    const res = await withCtx(
+        { userId: 't2_nonmod', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => app.request('/api/analytics/qualified-summary'),
+    )
+
+    expect(res.status).toBe(403)
+
+    vi.restoreAllMocks()
 })

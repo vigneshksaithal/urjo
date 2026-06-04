@@ -5,7 +5,7 @@
  *
  * The client posts elapsed active-foreground seconds every 5s. The server
  * accumulates these into the session-flag hash, evaluates the DQP gate,
- * and commits the user to the per-day per-sub zsets when all three flags
+ * and commits bounded analytics when all three flags
  * (referrer + first-tap + dwell ≥ 20s) are satisfied.
  *
  * The route is intentionally trivial — all logic lives in lib/qualified.ts

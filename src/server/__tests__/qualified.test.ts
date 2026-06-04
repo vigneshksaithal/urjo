@@ -23,8 +23,13 @@ import {
     markFirstTapAndCommit,
     MIN_DWELL_SECONDS,
     MAX_DWELL_SECONDS,
+    computeGlobalD1RetentionEstimate,
+    DQP_RETENTION_SAMPLE_CAP,
+    DQP_RETENTION_TTL_SECONDS,
     readGlobalDQP,
     readPerSubDQP,
+    readQualifiedPlaytime,
+    buildQualifiedSummary,
     recordDwellTick,
     SESSION_HEADER,
 } from '../lib/qualified'
@@ -381,6 +386,139 @@ testCommit('commit without subredditId only writes to the global zset', async ()
 testCommit('dqpKeys export shape is stable for read paths', () => {
     expect(dqpKeys.global('2026-06-05')).toBe('qe:ours:2026-06-05')
     expect(dqpKeys.perSub('2026-06-05', 't5_x')).toBe('qe:ours:2026-06-05:t5_x')
+    expect(dqpKeys.filter('2026-06-05')).toBe('qe:filter:2026-06-05')
+    expect(dqpKeys.sample('2026-06-05')).toBe('qe:sample:2026-06-05')
+    expect(dqpKeys.playtime('2026-06-05')).toBe('qe:playtime:2026-06-05')
+})
+
+testCommit('commitQualifiedUser estimates unique DQP without increasing for repeat qualification', async () => {
+    const date = '2026-06-06'
+
+    await withCtx(() => commitQualifiedUser(date, 't2_repeat', 't5_testsub'))
+    await withCtx(() => commitQualifiedUser(date, 't2_repeat', 't5_testsub'))
+
+    expect(await withCtx(() => readGlobalDQP(date))).toBe(1)
+})
+
+testCommit('commitQualifiedUser sets a 35-day TTL on bounded retention keys', async () => {
+    const date = '2026-06-07'
+    await withCtx(() => commitQualifiedUser(date, 't2_ttl', 't5_testsub'))
+
+    const filterExpireAt = await withCtx(() => redis.expireTime(dqpKeys.filter(date)))
+    const sampleExpireAt = await withCtx(() => redis.expireTime(dqpKeys.sample(date)))
+    const minExpected = Math.floor(Date.now() / 1000) + DQP_RETENTION_TTL_SECONDS - 60
+
+    expect(filterExpireAt).toBeGreaterThanOrEqual(minExpected)
+    expect(sampleExpireAt).toBeGreaterThanOrEqual(minExpected)
+})
+
+testCommit(
+    'retention cohort sample is capped at the configured maximum',
+    async () => {
+        const date = '2026-06-08'
+
+        for (let i = 0; i < DQP_RETENTION_SAMPLE_CAP + 25; i++) {
+            await withCtx(() => commitQualifiedUser(date, `t2_cap_${i}`, 't5_testsub'))
+        }
+
+        expect(await withCtx(() => redis.zCard(dqpKeys.sample(date)))).toBe(DQP_RETENTION_SAMPLE_CAP)
+    },
+    15_000,
+)
+
+testCommit('qualified play time is stored as daily counters and histogram buckets', async () => {
+    const sessionId = 'sess-playtime'
+    const date = '2026-06-09'
+
+    await withCtx(() =>
+        captureReferrer(sessionId, 't2_qpuser', 't5_testsub', 'https://reddit.com/r/foo'),
+    )
+    await withCtx(() => markFirstTapAndCommit(sessionId, date, 't2_qpuser', 't5_testsub'))
+    for (let i = 0; i < 6; i++) {
+        await withCtx(() => recordDwellTick(sessionId, 't2_qpuser', 5, date))
+    }
+
+    const metrics = await withCtx(() => redis.hGetAll(dqpKeys.playtime(date)))
+    expect(metrics.totalSeconds).toBe('30')
+    expect(metrics.qualifiedSessions).toBe('1')
+    expect(metrics.b20_29).toBe('0')
+    expect(metrics.b30_44).toBe('1')
+})
+
+testCommit('readQualifiedPlaytime aggregates sessions, average, and buckets', async () => {
+    const date = '2026-06-11'
+
+    // Session A: 30s active (b30_44 bucket).
+    await withCtx(() =>
+        captureReferrer('sess-a', 't2_pt_a', 't5_testsub', 'https://reddit.com/r/foo'),
+    )
+    await withCtx(() => markFirstTapAndCommit('sess-a', date, 't2_pt_a', 't5_testsub'))
+    for (let i = 0; i < 6; i++) {
+        await withCtx(() => recordDwellTick('sess-a', 't2_pt_a', 5, date))
+    }
+
+    // Session B: 50s active (b45_60 bucket).
+    await withCtx(() =>
+        captureReferrer('sess-b', 't2_pt_b', 't5_testsub', 'https://reddit.com/r/foo'),
+    )
+    await withCtx(() => markFirstTapAndCommit('sess-b', date, 't2_pt_b', 't5_testsub'))
+    for (let i = 0; i < 5; i++) {
+        await withCtx(() => recordDwellTick('sess-b', 't2_pt_b', 10, date))
+    }
+
+    const playtime = await withCtx(() => readQualifiedPlaytime(date))
+    expect(playtime.qualifiedSessions).toBe(2)
+    expect(playtime.totalSeconds).toBe(80)
+    expect(playtime.averageSeconds).toBe(40)
+    expect(playtime.buckets).toEqual({ b20_29: 0, b30_44: 1, b45_60: 1 })
+})
+
+testCommit('readQualifiedPlaytime returns a null average for an empty date', async () => {
+    const playtime = await withCtx(() => readQualifiedPlaytime('1999-01-01'))
+    expect(playtime.qualifiedSessions).toBe(0)
+    expect(playtime.totalSeconds).toBe(0)
+    expect(playtime.averageSeconds).toBe(null)
+    expect(playtime.buckets).toEqual({ b20_29: 0, b30_44: 0, b45_60: 0 })
+})
+
+testCommit('buildQualifiedSummary reads DQP and play time from yesterday', async () => {
+    // Fix "now" so yesterday is a stable, isolated date.
+    const now = new Date('2026-07-15T12:00:00Z')
+    const dqpDate = '2026-07-14'
+
+    await withCtx(() =>
+        captureReferrer('sess-sum', 't2_sum_a', 't5_testsub', 'https://reddit.com/r/foo'),
+    )
+    await withCtx(() => markFirstTapAndCommit('sess-sum', dqpDate, 't2_sum_a', 't5_testsub'))
+    for (let i = 0; i < 6; i++) {
+        await withCtx(() => recordDwellTick('sess-sum', 't2_sum_a', 5, dqpDate))
+    }
+
+    const summary = await withCtx(() => buildQualifiedSummary(now))
+    expect(summary.dqpDate).toBe(dqpDate)
+    expect(summary.dqp).toBe(1)
+    expect(summary.d1Date).toBe('2026-07-13')
+    expect(summary.d7Date).toBe('2026-07-07')
+    expect(summary.qualifiedSessions).toBe(1)
+    expect(summary.averagePlaySeconds).toBe(30)
+    expect(summary.playtimeBuckets).toEqual({ b20_29: 0, b30_44: 1, b45_60: 0 })
+})
+
+testCommit('buildQualifiedSummary surfaces a matured D1 retention estimate', async () => {
+    // now → yesterday=07-19, D1 cohort=07-18 (its D+1 day 07-19 has closed).
+    const now = new Date('2026-07-20T12:00:00Z')
+    const d1Cohort = '2026-07-18'
+    const d1Return = '2026-07-19'
+
+    // Two qualify on the cohort day; one returns on D+1.
+    await withCtx(() => commitQualifiedUser(d1Cohort, 't2_sum_d1a', 't5_testsub'))
+    await withCtx(() => commitQualifiedUser(d1Cohort, 't2_sum_d1b', 't5_testsub'))
+    await withCtx(() => commitQualifiedUser(d1Return, 't2_sum_d1a', 't5_testsub'))
+
+    const summary = await withCtx(() => buildQualifiedSummary(now, 1))
+    expect(summary.d1Date).toBe(d1Cohort)
+    expect(summary.d1SampleSize).toBe(2)
+    expect(summary.d1Retention).toBe(0.5)
 })
 
 
@@ -469,7 +607,7 @@ testD7('computeGlobalD7Retention computes the correct fraction across D+1..D+7',
     await withCtx(() => commitQualifiedUser(cohortDate, 't2_c', 't5_x'))
     await withCtx(() => commitQualifiedUser(cohortDate, 't2_d', 't5_x'))
 
-    // Returns: t2_a on D+1, t2_c on D+5. (2 of 4 cohort users returned.)
+    // Returns: t2_a on D+1, t2_c on D+5. Exact-day D7 should ignore both.
     const dPlus = (n: number): string => {
         const d = new Date(cohortDateMs + n * 86400 * 1000)
         return d.toISOString().split('T')[0] ?? ''
@@ -479,10 +617,38 @@ testD7('computeGlobalD7Retention computes the correct fraction across D+1..D+7',
     // Some noise: a user who wasn't in the cohort returns. Should not affect rate.
     await withCtx(() => commitQualifiedUser(dPlus(3), 't2_z', 't5_x'))
 
-    expect(await withCtx(() => computeGlobalD7Retention(cohortDate))).toBe(0.5)
+    expect(await withCtx(() => computeGlobalD7Retention(cohortDate, new Date(), 1))).toBe(0)
 })
 
-testD7('computePerSubD7Retention only counts that sub\'s cohort but checks global return', async () => {
+testD7('computeGlobalD1RetentionEstimate uses exact D+1 return only', async () => {
+    const cohortDateMs = Date.now() - 60 * 86400 * 1000
+    const cohortDate = new Date(cohortDateMs).toISOString().split('T')[0] ?? ''
+    const dPlus = (n: number): string => {
+        const d = new Date(cohortDateMs + n * 86400 * 1000)
+        return d.toISOString().split('T')[0] ?? ''
+    }
+
+    await withCtx(() => commitQualifiedUser(cohortDate, 't2_d1_a', 't5_x'))
+    await withCtx(() => commitQualifiedUser(cohortDate, 't2_d1_b', 't5_x'))
+    await withCtx(() => commitQualifiedUser(dPlus(1), 't2_d1_a', 't5_y'))
+    await withCtx(() => commitQualifiedUser(dPlus(2), 't2_d1_b', 't5_y'))
+
+    const result = await withCtx(() => computeGlobalD1RetentionEstimate(cohortDate, new Date(), 1))
+    expect(result.sampleSize).toBe(2)
+    expect(result.rate).toBe(0.5)
+})
+
+testD7('retention estimate returns null below the minimum actionable sample size', async () => {
+    const cohortDateMs = Date.now() - 60 * 86400 * 1000
+    const cohortDate = new Date(cohortDateMs).toISOString().split('T')[0] ?? ''
+
+    await withCtx(() => commitQualifiedUser(cohortDate, 't2_small_sample', 't5_x'))
+
+    const result = await withCtx(() => computeGlobalD7Retention(cohortDate))
+    expect(result).toBe(null)
+})
+
+testD7('computePerSubD7Retention is suppressed for bounded-sample cohorts', async () => {
     const cohortDateMs = Date.now() - 60 * 86400 * 1000
     const cohortDate = new Date(cohortDateMs).toISOString().split('T')[0] ?? ''
 
@@ -491,13 +657,13 @@ testD7('computePerSubD7Retention only counts that sub\'s cohort but checks globa
     await withCtx(() => commitQualifiedUser(cohortDate, 't2_a2', 't5_alpha'))
     await withCtx(() => commitQualifiedUser(cohortDate, 't2_b1', 't5_beta'))
 
-    // t2_a1 returns to t5_beta on D+2 — counts as retention for t5_alpha cohort.
+    // Per-sub retention is de-emphasized once bounded global sampling is present.
     const dPlus = (n: number): string => {
         const d = new Date(cohortDateMs + n * 86400 * 1000)
         return d.toISOString().split('T')[0] ?? ''
     }
-    await withCtx(() => commitQualifiedUser(dPlus(2), 't2_a1', 't5_beta'))
+    await withCtx(() => commitQualifiedUser(dPlus(7), 't2_a1', 't5_beta'))
 
-    expect(await withCtx(() => computePerSubD7Retention(cohortDate, 't5_alpha'))).toBe(0.5)
-    expect(await withCtx(() => computePerSubD7Retention(cohortDate, 't5_beta'))).toBe(0)
+    expect(await withCtx(() => computePerSubD7Retention(cohortDate, 't5_alpha', new Date(), 1))).toBe(null)
+    expect(await withCtx(() => computePerSubD7Retention(cohortDate, 't5_beta', new Date(), 1))).toBe(null)
 })

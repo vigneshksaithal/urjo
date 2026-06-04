@@ -20,7 +20,6 @@ import { analyticsRouter } from './routes/analytics'
 import { adminRouter } from './routes/admin'
 import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
-import { presenceRouter } from './routes/presence'
 import { dwellRouter } from './routes/dwell'
 import {
   computeDailyMentionBatch,
@@ -33,9 +32,7 @@ import {
 import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
 import { selectDailyMissions } from './lib/missions'
 import { getTodayUTC, getISOWeek, getYesterdayUTC, fetchUsername, readUserStreak } from './lib/helpers'
-import { computeDashboard, formatDashboardMarkdown } from './lib/dashboard'
 import { runDriftCheck, formatDriftLogLine } from './lib/drift'
-import { buildScorecard, formatScorecardMarkdown } from './lib/scorecard'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
 import {
@@ -327,23 +324,6 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       await redis.set('roadmap:startDate', today)
     }
 
-    const yesterday = getYesterdayUTC()
-
-    // Compute and store previous day's dashboard (non-blocking, in-app diagnostic only)
-    let dashboardMarkdown = ''
-    try {
-      const dashboardData = await computeDashboard(yesterday)
-      // Keep computeDashboard wired so /api/analytics/dashboard keeps working
-      // for in-app moderator views, but the Reddit comment uses the new
-      // honest scorecard built from DQP / D7 / S2R / drift instead of the
-      // inflated post_open-derived numbers.
-      void formatDashboardMarkdown(dashboardData)
-      const scorecard = await buildScorecard(yesterday)
-      dashboardMarkdown = formatScorecardMarkdown(scorecard)
-    } catch (dashErr) {
-      console.error('[Scheduler] Scorecard computation failed (non-critical):', dashErr)
-    }
-
     // Read subreddit config for branding/frequency and gate the active slot.
     const subredditConfig = await getSubredditConfig(context.subredditId)
     const slot = getGrowthPostSlot(new Date())
@@ -387,14 +367,12 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
     }
 
     // Build a stats comment from yesterday's data
-    let stickyCommentId: string | undefined
     try {
       const statsComment = await buildStatsComment(puzzleNumber)
       if (statsComment) {
         const stickyComment = await reddit.submitComment({ id: post.id as `t3_${string}`, text: statsComment })
         // Store sticky comment ID so score shares can reply under it
         if (stickyComment?.id) {
-          stickyCommentId = stickyComment.id
           await redis.hSet(`game:${post.id}:meta`, {
             stickyCommentId: stickyComment.id,
           })
@@ -402,23 +380,6 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       }
     } catch (commentErr) {
       console.error('[Scheduler] Stats comment failed (non-critical):', commentErr)
-    }
-
-    // Append developer analytics as collapsed reply to sticky comment
-    if (stickyCommentId && dashboardMarkdown) {
-      try {
-        const analyticsReply = [
-          '<details>',
-          '<summary>📊 Developer Analytics</summary>',
-          '',
-          dashboardMarkdown,
-          '',
-          '</details>',
-        ].join('\n')
-        await reddit.submitComment({ id: stickyCommentId as `t1_${string}`, text: analyticsReply })
-      } catch (analyticsErr) {
-        console.error('[Scheduler] Analytics reply failed (non-critical):', analyticsErr)
-      }
     }
 
     // On Mondays: generate season recap and award season rewards
@@ -573,7 +534,6 @@ app.route('/', analyticsRouter)
 app.route('/', adminRouter)
 app.route('/', seasonRouter)
 app.route('/', notifyRouter)
-app.route('/', presenceRouter)
 app.route('/', dwellRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available

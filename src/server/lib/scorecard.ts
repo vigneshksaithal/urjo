@@ -2,8 +2,8 @@
  * Honest Daily Scorecard.
  *
  * Replaces the old "Urjo Analytics" report — which over-reported "opens"
- * 10–40× vs Reddit's Qualified Engagers — with a tight 3-metric scorecard
- * built from server-validated DQP, per-sub Qualified D7 retention, and
+ * 10–40× vs Reddit's Qualified Engagers — with a tight retention-loop scorecard
+ * built from bounded server-validated DQP, D1/D7 retention estimates, and
  * Second-Puzzle Rate, plus the most recent drift snapshot.
  *
  * Design doc reference: §A (North Star), §B (Scorecard), §I (Drift).
@@ -18,11 +18,11 @@
 import { redis } from '@devvit/web/server'
 
 import {
-    computeGlobalD7Retention,
+    computeGlobalD1RetentionEstimate,
+    computeGlobalD7RetentionEstimate,
     isD7WindowClosed,
     readGlobalDQP,
     readPerSubDQP,
-    computePerSubD7Retention,
 } from './qualified'
 import { readS2RAllBuckets, readS2RGlobal, type S2RBucketSnapshot } from './s2r'
 import {
@@ -65,8 +65,6 @@ const addDaysISO = (date: string, days: number): string => {
 export type SubScorecardRow = {
     subredditId: string
     dqp: number
-    /** D7 retention: null if window not closed yet, or cohort empty. */
-    d7Retention: number | null
     /** Drift severity if a record exists for this sub on this date. */
     driftSeverity: DriftRecord['severity'] | null
     driftPct: number | null
@@ -77,8 +75,18 @@ export type ScorecardData = {
     date: string
     /** Global DQP for that date. */
     dqpGlobal: number
+    /** DQP is estimated from a bounded daily membership filter. */
+    dqpEstimated: true
+    /** Retention is estimated from the bounded cohort sample. */
+    retentionEstimated: true
+    /** Global exact-day D1 retention for that date. Null when window is open or sample too small. */
+    d1Global: number | null
+    /** Sample size used for D1. */
+    d1SampleSize: number
     /** Global D7 retention for that date. Null when window is open. */
     d7Global: number | null
+    /** Sample size used for D7. */
+    d7SampleSize: number
     /** Whether the D7 window has closed for `date`. */
     d7WindowClosed: boolean
     /** Global S2R rate (across all buckets). */
@@ -135,7 +143,8 @@ const knownSubsForDate = async (date: string): Promise<string[]> => {
 export const buildScorecard = async (date: string): Promise<ScorecardData> => {
     const [
         dqpGlobal,
-        d7Global,
+        d1Estimate,
+        d7Estimate,
         s2rGlobal,
         s2rByBucket,
         redditQEGlobal,
@@ -143,7 +152,8 @@ export const buildScorecard = async (date: string): Promise<ScorecardData> => {
         knownSubs,
     ] = await Promise.all([
         readGlobalDQP(date),
-        computeGlobalD7Retention(date),
+        computeGlobalD1RetentionEstimate(date),
+        computeGlobalD7RetentionEstimate(date),
         readS2RGlobal(date),
         readS2RAllBuckets(date),
         readRedditQEGlobal(date),
@@ -156,12 +166,10 @@ export const buildScorecard = async (date: string): Promise<ScorecardData> => {
     const perSubRowsRaw = await Promise.all(
         knownSubs.map(async (subredditId): Promise<SubScorecardRow> => {
             const dqp = await readPerSubDQP(date, subredditId)
-            const d7 = await computePerSubD7Retention(date, subredditId)
             const drift = driftBySub.get(subredditId)
             return {
                 subredditId,
                 dqp,
-                d7Retention: d7,
                 driftSeverity: drift?.severity ?? null,
                 driftPct: drift?.drift ?? null,
             }
@@ -192,7 +200,12 @@ export const buildScorecard = async (date: string): Promise<ScorecardData> => {
     return {
         date,
         dqpGlobal,
-        d7Global,
+        dqpEstimated: true,
+        retentionEstimated: true,
+        d1Global: d1Estimate.rate,
+        d1SampleSize: d1Estimate.sampleSize,
+        d7Global: d7Estimate.rate,
+        d7SampleSize: d7Estimate.sampleSize,
         d7WindowClosed: isD7WindowClosed(date),
         s2rGlobalRate: s2rGlobal.rate,
         s2rGlobalEligible: s2rGlobal.eligible,
@@ -219,7 +232,7 @@ export const formatScorecardMarkdown = (data: ScorecardData): string => {
 
     lines.push(`# Urjo Daily Scorecard — ${dateLabel(data.date)}`)
     lines.push('')
-    lines.push('Three metrics. One alert. Each one ties to a decision.')
+    lines.push('Retention loop metrics. One alert. Each one ties to a decision.')
     lines.push('')
 
     // ── Headline ──────────────────────────────────────────────────────────────
@@ -227,11 +240,14 @@ export const formatScorecardMarkdown = (data: ScorecardData): string => {
     lines.push('')
     lines.push('| Metric | Value | Window |')
     lines.push('|---|---|---|')
-    lines.push(`| Daily Qualified Players (DQP) | ${formatCount(data.dqpGlobal)} | ${dateLabel(data.date)} |`)
+    lines.push(`| Daily Qualified Players (DQP, estimated) | ${formatCount(data.dqpGlobal)} | ${dateLabel(data.date)} |`)
     lines.push(
-        `| Qualified D7 Retention | ${formatPercent(data.d7Global)} | ${data.d7WindowClosed
-            ? `cohort ${dateLabel(data.date)} → ${dateLabel(addDaysISO(data.date, 7))}`
-            : `cohort ${dateLabel(data.date)} (window open until ${dateLabel(addDaysISO(data.date, 8))})`
+        `| Qualified D1 Retention (estimated) | ${formatPercent(data.d1Global)} | sample ${formatCount(data.d1SampleSize)} · cohort ${dateLabel(data.date)} → ${dateLabel(addDaysISO(data.date, 1))} |`,
+    )
+    lines.push(
+        `| Qualified D7 Retention (estimated) | ${formatPercent(data.d7Global)} | ${data.d7WindowClosed
+            ? `sample ${formatCount(data.d7SampleSize)} · cohort ${dateLabel(data.date)} → ${dateLabel(addDaysISO(data.date, 7))}`
+            : `sample ${formatCount(data.d7SampleSize)} · cohort ${dateLabel(data.date)} (window open until ${dateLabel(addDaysISO(data.date, 8))})`
         } |`,
     )
     lines.push(
@@ -265,15 +281,15 @@ export const formatScorecardMarkdown = (data: ScorecardData): string => {
     if (data.perSub.length === 0) {
         lines.push('_No per-sub data yet — DQP is being collected but no subreddit index has been populated._')
     } else {
-        lines.push('| Subreddit | DQP | D7 Retention |')
-        lines.push('|---|---|---|')
+        lines.push('| Subreddit | DQP |')
+        lines.push('|---|---|')
         for (const sub of data.perSub.slice(0, TOP_N_SUBS)) {
-            lines.push(`| ${sub.subredditId} | ${formatCount(sub.dqp)} | ${formatPercent(sub.d7Retention)} |`)
+            lines.push(`| ${sub.subredditId} | ${formatCount(sub.dqp)} |`)
         }
         const longTail = data.perSub.slice(TOP_N_SUBS)
         if (longTail.length > 0) {
             const longTailDQP = longTail.reduce((sum, s) => sum + s.dqp, 0)
-            lines.push(`| _longtail (${longTail.length} subs)_ | ${formatCount(longTailDQP)} | — |`)
+            lines.push(`| _longtail (${longTail.length} subs)_ | ${formatCount(longTailDQP)} |`)
         }
     }
     lines.push('')
@@ -294,8 +310,8 @@ export const formatScorecardMarkdown = (data: ScorecardData): string => {
     // ── Notes ─────────────────────────────────────────────────────────────────
     lines.push('## Notes')
     lines.push('')
-    lines.push('- **DQP** = unique users who in one UTC day had a Reddit referrer, tapped a cell, and stayed ≥20s active-foreground. Server-validated, deduped per user-day.')
-    lines.push('- **D7 Retention** = % of DQPs on the cohort day who returned as DQP within the next 7 days. "—" while the window is open.')
+    lines.push('- **DQP** = estimated unique users who in one UTC day had a Reddit referrer, tapped a cell, and stayed ≥20s active-foreground. It uses a bounded daily membership filter, not full user sets.')
+    lines.push('- **D1/D7 Retention** = estimated % of sampled DQPs on the cohort day who returned as DQP exactly 1 or 7 days later. "—" when the window is open or sample is too small.')
     lines.push('- **S2R** = of users who completed puzzle #1 in a session, % who started puzzle #2 within 60s. "—" when no completions.')
     lines.push('- _The previously published "opens" metric counted webview mounts before any human interaction. It is no longer reported._')
 

@@ -7,14 +7,9 @@
  *   3. dwell:       the session accumulated >= MIN_DWELL_SECONDS of active
  *                   foreground time, measured via /api/dwell/tick
  *
- * When all three flags are set on the session, we commit the user exactly
- * once per UTC day per subreddit into:
- *   - qe:ours:{date}              (global zset, cardinality = global DQP)
- *   - qe:ours:{date}:{subredditId}  (per-sub zset)
- *
- * Commit is idempotent: a SET NX dedup key (qe:committed:{date}:{userId})
- * guarantees a single user is counted once per UTC day even if they qualify
- * across multiple posts in different subs (first sub wins for attribution).
+ * When all three flags are set on the session, we commit a bounded analytics
+ * record for the UTC day. DQP is estimated from a fixed-size daily membership
+ * filter, and retention is estimated from a capped deterministic cohort sample.
  *
  * The session-flag hash has a 1h TTL — long enough for a single play
  * session to accumulate dwell, short enough that stale sessions roll off.
@@ -23,6 +18,8 @@
  */
 
 import { redis } from '@devvit/web/server'
+
+import type { QualifiedSummary } from '../../shared/growth-types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,11 +32,28 @@ export const MAX_DWELL_SECONDS = 60
 /** TTL on the session flag hash — covers a single play session. */
 const SESSION_FLAG_TTL_SECONDS = 3600
 
-/** TTL on the daily commit dedup key. 35 days covers the D7-window read horizon. */
-const COMMIT_DEDUP_TTL_SECONDS = 35 * 86400
+/** TTL on bounded DQP/retention analytics. 35 days covers the D7 read horizon. */
+export const DQP_RETENTION_TTL_SECONDS = 35 * 86400
 
-/** TTL on the per-day DQP zsets. Same horizon as the dedup key. */
-const DQP_ZSET_TTL_SECONDS = 35 * 86400
+/**
+ * Daily Bloom-style membership filter size. 2^24 bits = 2 MiB/day, or about
+ * 70 MiB for the 35-day retention horizon.
+ */
+const DQP_FILTER_BITS = 16_777_216
+
+/** Number of bit positions set/tested for each qualified user token. */
+const DQP_FILTER_HASHES = 3
+
+/** Maximum sampled cohort members retained per day. */
+export const DQP_RETENTION_SAMPLE_CAP = 5_000
+
+/** Suppress retention when the sampled cohort is too small to act on. */
+export const DQP_RETENTION_MIN_SAMPLE = 400
+
+const FNV64_OFFSET = 0xcbf29ce484222325n
+const FNV64_PRIME = 0x100000001b3n
+const UINT64_MASK = 0xffffffffffffffffn
+const SCORE_MASK_53 = (1n << 53n) - 1n
 
 /** Header used by the client to identify a single play session. */
 export const SESSION_HEADER = 'x-urjo-session'
@@ -141,13 +155,54 @@ export const clampTickSeconds = (raw: unknown, maxPerTick: number = 10): number 
     return Math.min(Math.floor(raw), maxPerTick)
 }
 
+const hash64 = (value: string): bigint => {
+    let hash = FNV64_OFFSET
+    for (let i = 0; i < value.length; i++) {
+        hash ^= BigInt(value.charCodeAt(i))
+        hash = (hash * FNV64_PRIME) & UINT64_MASK
+    }
+    return hash
+}
+
+const userToken = (userId: string): string =>
+    hash64(`urjo:dqp:token:${userId}`).toString(36)
+
+const sampleScore = (token: string): number =>
+    Number(hash64(`urjo:dqp:sample:${token}`) & SCORE_MASK_53)
+
+const filterPositions = (token: string): number[] =>
+    Array.from({ length: DQP_FILTER_HASHES }, (_, index) =>
+        Number(hash64(`urjo:dqp:filter:${index}:${token}`) % BigInt(DQP_FILTER_BITS)),
+    )
+
+const estimateCardinality = (bitsSet: number): number => {
+    if (bitsSet <= 0) return 0
+    const clampedBits = Math.min(bitsSet, DQP_FILTER_BITS - 1)
+    const emptyShare = 1 - clampedBits / DQP_FILTER_BITS
+    return Math.round(-(DQP_FILTER_BITS / DQP_FILTER_HASHES) * Math.log(emptyShare))
+}
+
+const clampRate = (value: number): number =>
+    Math.min(Math.max(value, 0), 1)
+
+const addDaysISO = (date: string, days: number): string => {
+    const d = new Date(`${date}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() + days)
+    const iso = d.toISOString().split('T')[0]
+    if (iso === undefined) throw new Error(`failed to add ${days}d to ${date}`)
+    return iso
+}
+
+const todayISO = (now: Date = new Date()): string => {
+    const iso = now.toISOString().split('T')[0]
+    if (iso === undefined) throw new Error('failed to format today')
+    return iso
+}
+
 // ─── Redis Key Builders ───────────────────────────────────────────────────────
 
 const sessionFlagsKey = (sessionId: string): string =>
     `qe:session:${sessionId}:flags`
-
-const commitDedupKey = (date: string, userId: string): string =>
-    `qe:committed:${date}:${userId}`
 
 const dqpGlobalKey = (date: string): string =>
     `qe:ours:${date}`
@@ -155,10 +210,31 @@ const dqpGlobalKey = (date: string): string =>
 const dqpPerSubKey = (date: string, subredditId: string): string =>
     `qe:ours:${date}:${subredditId}`
 
+const dqpFilterKey = (date: string): string =>
+    `qe:filter:${date}`
+
+const dqpFilterBitsSetKey = (date: string): string =>
+    `qe:filter:${date}:bits_set`
+
+const dqpSampleKey = (date: string): string =>
+    `qe:sample:${date}`
+
+const dqpCountKey = (date: string): string =>
+    `qe:count:${date}`
+
+const dqpPerSubCountKey = (date: string, subredditId: string): string =>
+    `qe:count:${date}:${subredditId}`
+
+const qualifiedPlaytimeKey = (date: string): string =>
+    `qe:playtime:${date}`
+
 /** Public for read paths (analytics router, drift cron, dashboard). */
 export const dqpKeys = {
     global: dqpGlobalKey,
     perSub: dqpPerSubKey,
+    filter: dqpFilterKey,
+    sample: dqpSampleKey,
+    playtime: qualifiedPlaytimeKey,
 } as const
 
 // ─── Session Helpers ──────────────────────────────────────────────────────────
@@ -221,7 +297,7 @@ export const captureReferrer = async (
 
 /**
  * Add `tickSeconds` to the session's accumulated dwell, then evaluate the
- * gate. If qualified, commit to the per-day, per-sub zsets.
+ * gate. If qualified, commit the bounded DQP/playtime analytics record.
  *
  * Returns the post-write evaluation so callers can short-circuit further
  * heartbeats once committed.
@@ -253,6 +329,7 @@ export const recordDwellTick = async (
     if (evaluation.qualified) {
         const subredditId = existing.subredditId
         await commitQualifiedUser(date, userId, subredditId)
+        await recordQualifiedPlaytime(date, key, existing, evaluation.dwellSeconds)
     }
 
     return evaluation
@@ -291,42 +368,131 @@ export const markFirstTapAndCommit = async (
     if (evaluation.qualified) {
         const attributedSub = existing.subredditId ?? subredditId
         await commitQualifiedUser(date, userId, attributedSub)
+        await recordQualifiedPlaytime(date, key, existing, evaluation.dwellSeconds)
     }
 
     return evaluation
 }
 
+type BitfieldRest = Parameters<typeof redis.bitfield> extends [string, ...infer Rest]
+    ? Rest
+    : never
+
+const runBitfield = async (key: string, commands: readonly (string | number)[]): Promise<number[]> =>
+    redis.bitfield(key, ...(commands as BitfieldRest))
+
+const setMembershipBits = async (date: string, token: string): Promise<number> => {
+    const key = dqpFilterKey(date)
+    const commands = filterPositions(token).flatMap((position) => ['set', 'u1', position, 1])
+    const previousValues = await runBitfield(key, commands)
+    const newlySetBits = previousValues.filter((value) => value === 0).length
+
+    await redis.expire(key, DQP_RETENTION_TTL_SECONDS)
+    if (newlySetBits > 0) {
+        await redis.incrBy(dqpFilterBitsSetKey(date), newlySetBits)
+        await redis.expire(dqpFilterBitsSetKey(date), DQP_RETENTION_TTL_SECONDS)
+    }
+
+    return newlySetBits
+}
+
+const addToRetentionSample = async (date: string, token: string): Promise<void> => {
+    const key = dqpSampleKey(date)
+    await redis.zAdd(key, { member: token, score: sampleScore(token) })
+    await redis.expire(key, DQP_RETENTION_TTL_SECONDS)
+
+    const count = await redis.zCard(key)
+    if (count > DQP_RETENTION_SAMPLE_CAP) {
+        await redis.zRemRangeByRank(key, DQP_RETENTION_SAMPLE_CAP, -1)
+    }
+}
+
+const readCounter = async (key: string): Promise<number> => {
+    const raw = await redis.get(key)
+    if (raw === undefined) return 0
+    const parsed = parseInt(raw, 10)
+    return Number.isNaN(parsed) ? 0 : parsed
+}
+
+type PlaytimeBucket = 'b20_29' | 'b30_44' | 'b45_60'
+
+const playtimeBucket = (seconds: number): PlaytimeBucket => {
+    if (seconds < 30) return 'b20_29'
+    if (seconds < 45) return 'b30_44'
+    return 'b45_60'
+}
+
+const parseRecordedPlaytime = (raw: string | undefined): number => {
+    if (raw === undefined) return 0
+    const parsed = parseInt(raw, 10)
+    if (Number.isNaN(parsed) || parsed < 0) return 0
+    return Math.min(parsed, MAX_DWELL_SECONDS)
+}
+
+const isPlaytimeBucket = (value: string | undefined): value is PlaytimeBucket =>
+    value === 'b20_29' || value === 'b30_44' || value === 'b45_60'
+
+const recordQualifiedPlaytime = async (
+    date: string,
+    sessionKey: string,
+    existingFlags: Readonly<Record<string, string | undefined>>,
+    dwellSeconds: number,
+): Promise<void> => {
+    const previousSeconds = parseRecordedPlaytime(existingFlags.playtimeRecordedSeconds)
+    const nextSeconds = Math.max(previousSeconds, dwellSeconds)
+    const deltaSeconds = nextSeconds - previousSeconds
+    if (deltaSeconds <= 0) return
+
+    const key = qualifiedPlaytimeKey(date)
+    const nextBucket = playtimeBucket(nextSeconds)
+    const previousBucket = isPlaytimeBucket(existingFlags.playtimeBucket)
+        ? existingFlags.playtimeBucket
+        : null
+
+    const writes: Promise<unknown>[] = [
+        redis.hIncrBy(key, 'totalSeconds', deltaSeconds),
+        redis.hSet(sessionKey, {
+            playtimeRecordedSeconds: nextSeconds.toString(),
+            playtimeBucket: nextBucket,
+        }),
+        redis.expire(key, DQP_RETENTION_TTL_SECONDS),
+    ]
+
+    if (previousSeconds === 0) {
+        writes.push(redis.hIncrBy(key, 'qualifiedSessions', 1))
+    }
+    if (previousBucket !== nextBucket) {
+        if (previousBucket !== null) writes.push(redis.hIncrBy(key, previousBucket, -1))
+        writes.push(redis.hIncrBy(key, nextBucket, 1))
+    }
+
+    await Promise.all(writes)
+}
+
 /**
- * Idempotently add `userId` to the day's qualified-player zsets.
- *
- * Uses a SET NX dedup key so a user that qualifies twice in the same UTC
- * day (e.g. across two posts in different subs) is counted exactly once
- * globally — first-touch wins for per-sub attribution.
- *
- * @returns true if newly committed, false if already counted today
+ * Commit a bounded DQP observation. Returns false when the daily membership
+ * filter already looked set for this user token; because this is a compact
+ * probabilistic filter, rare false duplicates are expected and acceptable.
  */
 export const commitQualifiedUser = async (
     date: string,
     userId: string,
     subredditId: string | undefined,
 ): Promise<boolean> => {
-    const dedupKey = commitDedupKey(date, userId)
+    const token = userToken(userId)
+    const newlySetBits = await setMembershipBits(date, token)
+    await addToRetentionSample(date, token)
 
-    const existing = await redis.get(dedupKey)
-    if (existing !== undefined) return false
+    if (newlySetBits === 0) return false
 
-    await redis.set(dedupKey, '1')
-    await redis.expire(dedupKey, COMMIT_DEDUP_TTL_SECONDS)
-
-    const score = Date.now()
     const writes: Promise<unknown>[] = [
-        redis.zAdd(dqpGlobalKey(date), { member: userId, score }),
-        redis.expire(dqpGlobalKey(date), DQP_ZSET_TTL_SECONDS),
+        redis.incrBy(dqpCountKey(date), 1),
+        redis.expire(dqpCountKey(date), DQP_RETENTION_TTL_SECONDS),
     ]
     if (subredditId !== undefined && subredditId.length > 0) {
         writes.push(
-            redis.zAdd(dqpPerSubKey(date, subredditId), { member: userId, score }),
-            redis.expire(dqpPerSubKey(date, subredditId), DQP_ZSET_TTL_SECONDS),
+            redis.incrBy(dqpPerSubCountKey(date, subredditId), 1),
+            redis.expire(dqpPerSubCountKey(date, subredditId), DQP_RETENTION_TTL_SECONDS),
         )
     }
     await Promise.all(writes)
@@ -336,13 +502,65 @@ export const commitQualifiedUser = async (
 
 // ─── Read Helpers ─────────────────────────────────────────────────────────────
 
-/** Cardinality of the global DQP zset for the given UTC date. */
-export const readGlobalDQP = async (date: string): Promise<number> =>
-    redis.zCard(dqpGlobalKey(date))
+/** Estimated global DQP for the given UTC date. Falls back to legacy zsets. */
+export const readGlobalDQP = async (date: string): Promise<number> => {
+    const bitsSet = await readCounter(dqpFilterBitsSetKey(date))
+    if (bitsSet > 0) return estimateCardinality(bitsSet)
 
-/** Cardinality of the per-sub DQP zset for the given (date, subredditId). */
-export const readPerSubDQP = async (date: string, subredditId: string): Promise<number> =>
-    redis.zCard(dqpPerSubKey(date, subredditId))
+    const boundedCount = await readCounter(dqpCountKey(date))
+    if (boundedCount > 0) return boundedCount
+
+    return redis.zCard(dqpGlobalKey(date))
+}
+
+/** Estimated per-sub DQP for the given (date, subredditId). Falls back to legacy zsets. */
+export const readPerSubDQP = async (date: string, subredditId: string): Promise<number> => {
+    const boundedCount = await readCounter(dqpPerSubCountKey(date, subredditId))
+    if (boundedCount > 0) return boundedCount
+    return redis.zCard(dqpPerSubKey(date, subredditId))
+}
+
+/** Aggregated active-foreground play time for qualified sessions on a UTC date. */
+export type QualifiedPlaytime = {
+    /** Number of qualified sessions that contributed play time. */
+    qualifiedSessions: number
+    /** Total active-foreground seconds across all qualified sessions. */
+    totalSeconds: number
+    /** Mean seconds per qualified session, or null when there are none. */
+    averageSeconds: number | null
+    /** Session counts bucketed by duration band. */
+    buckets: {
+        /** 20–29s sessions. */
+        b20_29: number
+        /** 30–44s sessions. */
+        b30_44: number
+        /** 45–60s sessions. */
+        b45_60: number
+    }
+}
+
+const parseCountField = (raw: string | undefined): number => {
+    if (raw === undefined) return 0
+    const parsed = parseInt(raw, 10)
+    return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed
+}
+
+/** Read the qualified-session play-time histogram for a UTC date. */
+export const readQualifiedPlaytime = async (date: string): Promise<QualifiedPlaytime> => {
+    const raw = await redis.hGetAll(qualifiedPlaytimeKey(date))
+    const qualifiedSessions = parseCountField(raw.qualifiedSessions)
+    const totalSeconds = parseCountField(raw.totalSeconds)
+    return {
+        qualifiedSessions,
+        totalSeconds,
+        averageSeconds: qualifiedSessions > 0 ? totalSeconds / qualifiedSessions : null,
+        buckets: {
+            b20_29: parseCountField(raw.b20_29),
+            b30_44: parseCountField(raw.b30_44),
+            b45_60: parseCountField(raw.b45_60),
+        },
+    }
+}
 
 /** Read all userIds in the global DQP zset for a date — used by D7 retention. */
 export const readGlobalDQPMembers = async (date: string): Promise<string[]> => {
@@ -360,10 +578,10 @@ export const readPerSubDQPMembers = async (date: string, subredditId: string): P
 // ─── D7 Qualified Retention ───────────────────────────────────────────────────
 
 /**
- * Pure: compute D7 retention from a cohort and a return-window union.
+ * Pure: compute retention from a cohort and a return-day member list.
  *
  * `cohortUsers`     = userIds who qualified on day D
- * `returnedUsers`   = userIds who qualified on at least one of D+1..D+7
+ * `returnedUsers`   = userIds who qualified on the return day
  *
  * Returns the fraction of the cohort that returned, or null if the cohort
  * is empty (we cannot divide by zero, and reporting "0% retention of 0
@@ -379,29 +597,118 @@ export const computeD7Pure = (
     return intersection / cohortUsers.length
 }
 
-const addDaysISO = (date: string, days: number): string => {
-    const d = new Date(`${date}T00:00:00Z`)
-    d.setUTCDate(d.getUTCDate() + days)
-    const iso = d.toISOString().split('T')[0]
-    if (iso === undefined) throw new Error(`failed to add ${days}d to ${date}`)
-    return iso
-}
-
-const todayISO = (now: Date = new Date()): string => {
-    const iso = now.toISOString().split('T')[0]
-    if (iso === undefined) throw new Error('failed to format today')
-    return iso
-}
-
 /**
  * Whether the D7 return window for `cohortDate` has fully closed.
  *
  * The window is "fully closed" when today (UTC) is strictly after
- * cohortDate + 7 — i.e. all seven follow-up days have ended and their
- * qualified-user zsets are final.
+ * cohortDate + 7 — i.e. the D+7 follow-up day has ended and its
+ * bounded analytics record is final.
  */
 export const isD7WindowClosed = (cohortDate: string, now: Date = new Date()): boolean =>
     todayISO(now) > addDaysISO(cohortDate, 7)
+
+const isReturnWindowClosed = (
+    cohortDate: string,
+    days: number,
+    now: Date = new Date(),
+): boolean =>
+    todayISO(now) > addDaysISO(cohortDate, days)
+
+export type RetentionEstimate = {
+    rate: number | null
+    sampleSize: number
+    matchedSample: number
+    rawRate: number | null
+    falsePositiveRate: number
+}
+
+const readSampleTokens = async (date: string): Promise<string[]> => {
+    const entries = await redis.zRange(dqpSampleKey(date), 0, -1, { by: 'rank' })
+    return entries.map((entry) => entry.member)
+}
+
+const tokenExistsInFilter = async (date: string, token: string): Promise<boolean> => {
+    const commands = filterPositions(token).flatMap((position) => ['get', 'u1', position])
+    const values = await runBitfield(dqpFilterKey(date), commands)
+    return values.length === DQP_FILTER_HASHES && values.every((value) => value === 1)
+}
+
+const readFilterFalsePositiveRate = async (date: string): Promise<number> => {
+    const bitsSet = await readCounter(dqpFilterBitsSetKey(date))
+    if (bitsSet <= 0) {
+        const legacyCount = await redis.zCard(dqpGlobalKey(date))
+        return legacyCount > 0 ? 0 : 0
+    }
+    const fillRate = bitsSet / DQP_FILTER_BITS
+    return Math.pow(fillRate, DQP_FILTER_HASHES)
+}
+
+const computeLegacyExactRetention = async (
+    cohortDate: string,
+    days: number,
+    subredditId?: string,
+): Promise<RetentionEstimate> => {
+    const cohort = subredditId === undefined
+        ? await readGlobalDQPMembers(cohortDate)
+        : await readPerSubDQPMembers(cohortDate, subredditId)
+    if (cohort.length === 0) {
+        return { rate: null, sampleSize: 0, matchedSample: 0, rawRate: null, falsePositiveRate: 0 }
+    }
+
+    const returnUsers = await readGlobalDQPMembers(addDaysISO(cohortDate, days))
+    const rate = computeD7Pure(cohort, returnUsers)
+    const matchedSample = rate === null ? 0 : Math.round(rate * cohort.length)
+    return {
+        rate,
+        sampleSize: cohort.length,
+        matchedSample,
+        rawRate: rate,
+        falsePositiveRate: 0,
+    }
+}
+
+const computeRetentionEstimate = async (
+    cohortDate: string,
+    days: number,
+    now: Date,
+    minSampleSize: number,
+): Promise<RetentionEstimate> => {
+    if (!isReturnWindowClosed(cohortDate, days, now)) {
+        return { rate: null, sampleSize: 0, matchedSample: 0, rawRate: null, falsePositiveRate: 0 }
+    }
+
+    const sampleExists = await redis.zCard(dqpSampleKey(cohortDate))
+    if (sampleExists === 0) {
+        return computeLegacyExactRetention(cohortDate, days)
+    }
+
+    const tokens = await readSampleTokens(cohortDate)
+    const returnDate = addDaysISO(cohortDate, days)
+    const matchedChecks = await Promise.all(
+        tokens.map((token) => tokenExistsInFilter(returnDate, token)),
+    )
+    const matchedSample = matchedChecks.filter(Boolean).length
+    const rawRate = matchedSample / tokens.length
+    const falsePositiveRate = await readFilterFalsePositiveRate(returnDate)
+    const adjustedRate = falsePositiveRate >= 1
+        ? rawRate
+        : clampRate((rawRate - falsePositiveRate) / (1 - falsePositiveRate))
+
+    return {
+        rate: tokens.length < minSampleSize ? null : adjustedRate,
+        sampleSize: tokens.length,
+        matchedSample,
+        rawRate,
+        falsePositiveRate,
+    }
+}
+
+export const computeGlobalD1RetentionEstimate = async (
+    cohortDate: string,
+    now: Date = new Date(),
+    minSampleSize: number = DQP_RETENTION_MIN_SAMPLE,
+): Promise<RetentionEstimate> =>
+    computeRetentionEstimate(cohortDate, 1, now, minSampleSize)
 
 /**
  * Compute D7 retention for the global cohort on `cohortDate`.
@@ -415,52 +722,82 @@ export const isD7WindowClosed = (cohortDate: string, now: Date = new Date()): bo
 export const computeGlobalD7Retention = async (
     cohortDate: string,
     now: Date = new Date(),
+    minSampleSize: number = DQP_RETENTION_MIN_SAMPLE,
 ): Promise<number | null> => {
-    if (!isD7WindowClosed(cohortDate, now)) return null
-
-    const cohort = await readGlobalDQPMembers(cohortDate)
-    if (cohort.length === 0) return null
-
-    // Union of qualified users across D+1 .. D+7.
-    const returnDates = [1, 2, 3, 4, 5, 6, 7].map((d) => addDaysISO(cohortDate, d))
-    const returnDayMembers = await Promise.all(
-        returnDates.map((d) => readGlobalDQPMembers(d)),
-    )
-    const returnedUnion = new Set<string>()
-    for (const members of returnDayMembers) {
-        for (const m of members) returnedUnion.add(m)
-    }
-
-    return computeD7Pure(cohort, [...returnedUnion])
+    const estimate = await computeGlobalD7RetentionEstimate(cohortDate, now, minSampleSize)
+    return estimate.rate
 }
+
+export const computeGlobalD7RetentionEstimate = async (
+    cohortDate: string,
+    now: Date = new Date(),
+    minSampleSize: number = DQP_RETENTION_MIN_SAMPLE,
+): Promise<RetentionEstimate> =>
+    computeRetentionEstimate(cohortDate, 7, now, minSampleSize)
 
 /**
  * Compute D7 retention for a specific subreddit cohort.
  *
- * Note: the "returned" check is against the *global* DQP set on D+1..D+7
- * (a user who returned to a different sub still counts as retained). This
- * matches the product intent — per-sub D7 measures whether *that sub
- * acquired a recurring player*, not whether the player came back to the
- * same sub.
+ * Legacy fallback for pre-rollout exact per-sub D7. New bounded cohorts
+ * return null because exact per-sub retention is no longer a core metric.
  */
 export const computePerSubD7Retention = async (
     cohortDate: string,
     subredditId: string,
     now: Date = new Date(),
+    minSampleSize: number = DQP_RETENTION_MIN_SAMPLE,
 ): Promise<number | null> => {
     if (!isD7WindowClosed(cohortDate, now)) return null
 
+    const hasBoundedSample = await redis.zCard(dqpSampleKey(cohortDate))
+    if (hasBoundedSample > 0) return null
+
     const cohort = await readPerSubDQPMembers(cohortDate, subredditId)
+    if (cohort.length < minSampleSize) return null
     if (cohort.length === 0) return null
 
-    const returnDates = [1, 2, 3, 4, 5, 6, 7].map((d) => addDaysISO(cohortDate, d))
-    const returnDayMembers = await Promise.all(
-        returnDates.map((d) => readGlobalDQPMembers(d)),
-    )
-    const returnedUnion = new Set<string>()
-    for (const members of returnDayMembers) {
-        for (const m of members) returnedUnion.add(m)
-    }
+    const returnUsers = await readGlobalDQPMembers(addDaysISO(cohortDate, 7))
+    return computeD7Pure(cohort, returnUsers)
+}
 
-    return computeD7Pure(cohort, [...returnedUnion])
+// ─── Dashboard Summary ──────────────────────────────────────────────────────────
+
+/**
+ * Assemble the bounded qualified-engagement summary for the in-app dashboard.
+ *
+ * Each metric is read from the most recent cohort whose window has matured,
+ * so the dashboard never shows a value that is still being collected:
+ *   - DQP / play time: yesterday (the last fully-elapsed UTC day)
+ *   - D1 retention:    the cohort two days back (its D+1 day has closed)
+ *   - D7 retention:    the cohort eight days back (its D+7 day has closed)
+ */
+export const buildQualifiedSummary = async (
+    now: Date = new Date(),
+    minSampleSize: number = DQP_RETENTION_MIN_SAMPLE,
+): Promise<QualifiedSummary> => {
+    const today = todayISO(now)
+    const dqpDate = addDaysISO(today, -1)
+    const d1Date = addDaysISO(today, -2)
+    const d7Date = addDaysISO(today, -8)
+
+    const [dqp, playtime, d1, d7] = await Promise.all([
+        readGlobalDQP(dqpDate),
+        readQualifiedPlaytime(dqpDate),
+        computeGlobalD1RetentionEstimate(d1Date, now, minSampleSize),
+        computeGlobalD7RetentionEstimate(d7Date, now, minSampleSize),
+    ])
+
+    return {
+        dqpDate,
+        dqp,
+        d1Date,
+        d1Retention: d1.rate,
+        d1SampleSize: d1.sampleSize,
+        d7Date,
+        d7Retention: d7.rate,
+        d7SampleSize: d7.sampleSize,
+        qualifiedSessions: playtime.qualifiedSessions,
+        averagePlaySeconds: playtime.averageSeconds,
+        playtimeBuckets: playtime.buckets,
+    }
 }

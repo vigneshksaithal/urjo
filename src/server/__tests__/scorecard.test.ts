@@ -70,6 +70,9 @@ const test = createDevvitTest(CTX)
 test('buildScorecard returns zero-state when nothing is recorded', async () => {
     const data = await withCtx(() => buildScorecard('1999-01-01'))
     expect(data.dqpGlobal).toBe(0)
+    expect(data.dqpEstimated).toBe(true)
+    expect(data.retentionEstimated).toBe(true)
+    expect(data.d1Global).toBe(null)
     expect(data.d7Global).toBe(null)
     expect(data.d7WindowClosed).toBe(true) // 1999 is well past closed
     expect(data.s2rGlobalRate).toBe(null)
@@ -110,6 +113,8 @@ test('buildScorecard reflects DQP, S2R and drift when seeded', async () => {
 
     const data = await withCtx(() => buildScorecard(date))
     expect(data.dqpGlobal).toBe(150)
+    expect(data.dqpEstimated).toBe(true)
+    expect(data.retentionEstimated).toBe(true)
     expect(data.s2rGlobalEligible).toBe(10)
     expect(data.s2rGlobalConverted).toBe(4)
     expect(data.s2rGlobalRate).toBeCloseTo(0.4)
@@ -118,7 +123,8 @@ test('buildScorecard reflects DQP, S2R and drift when seeded', async () => {
 
     // Markdown render must not crash and must contain the headline numbers.
     const md = formatScorecardMarkdown(data)
-    expect(md).toContain('Daily Qualified Players (DQP)')
+    expect(md).toContain('Daily Qualified Players (DQP, estimated)')
+    expect(md).toContain('estimated')
     expect(md).toContain('150')
     expect(md).toContain('Reddit QE')
 })

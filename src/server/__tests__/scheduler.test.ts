@@ -62,7 +62,7 @@ test('POST /internal/scheduler/daily-puzzle creates a post with puzzle number in
     )
 })
 
-test('scheduler computes dashboard and posts analytics reply to sticky', async () => {
+test('scheduler posts only the sticky comment, never a developer analytics reply', async () => {
     // Mock Date to be a Tuesday (UTC day 2) at 12:00 UTC (avoids Monday season recap and 16:00 mention flow)
     const tuesday = new Date('2025-01-07T12:00:00Z')
     vi.useFakeTimers()
@@ -72,16 +72,15 @@ test('scheduler computes dashboard and posts analytics reply to sticky', async (
 
     await withCtx(() => schedulerRequest())
 
-    // submitComment should be called exactly twice: sticky + analytics reply
-    expect(reddit.submitComment).toHaveBeenCalledTimes(2)
+    // submitComment should be called exactly once: the sticky comment only.
+    // Analytics now live in the in-app dashboard, never in a Reddit comment.
+    expect(reddit.submitComment).toHaveBeenCalledTimes(1)
 
-    // The second call should be the analytics reply to the sticky comment
     const calls = vi.mocked(reddit.submitComment).mock.calls
-    const analyticsCall = calls[1]
-    expect(analyticsCall).toBeDefined()
-    const analyticsArg = analyticsCall![0] as { id: string; text: string }
-    expect(analyticsArg.text).toContain('Developer Analytics')
-    expect(analyticsArg.text).toContain('| Metric | Value |')
+    for (const call of calls) {
+        const arg = call[0] as { text: string }
+        expect(arg.text).not.toContain('Developer Analytics')
+    }
 
     vi.useRealTimers()
 })
@@ -178,25 +177,18 @@ test('scheduler does not overwrite existing roadmap:startDate', async () => {
     expect(after).toBe(existingDate)
 })
 
-test('scheduler analytics reply contains markdown table with DQE and rates', async () => {
+test('scheduler no longer emits a developer analytics markdown reply', async () => {
     mockRedditApis('t3_analytics1')
 
     await withCtx(() => schedulerRequest())
 
     const calls = vi.mocked(reddit.submitComment).mock.calls
-    // Find the analytics reply (contains 'Developer Analytics')
     const analyticsCall = calls.find((call) => {
         const arg = call[0] as { text: string }
         return arg.text.includes('Developer Analytics')
     })
 
-    expect(analyticsCall).toBeDefined()
-    const text = (analyticsCall![0] as { text: string }).text
-
-    // Should contain markdown table headers and key metrics from the new scorecard
-    expect(text).toContain('| Metric | Value | Window |')
-    expect(text).toContain('DQP')
-    expect(text).toContain('S2R')
+    expect(analyticsCall).toBeUndefined()
 })
 
 test('scheduler sticky comment does not ask for upvotes', async () => {
@@ -247,7 +239,7 @@ test('scheduler posts season recap comment on Mondays', async () => {
 
     await withCtx(() => schedulerRequest())
 
-    // Should have at least 3 comments: sticky, analytics reply, season recap
+    // Should have at least 2 comments: sticky, season recap
     const calls = vi.mocked(reddit.submitComment).mock.calls
     const recapCall = calls.find((call) => {
         const arg = call[0] as { text: string }
@@ -285,7 +277,7 @@ test('mention step only runs at 16:00 UTC — skipped at other hours', async () 
     const callsBefore = vi.mocked(reddit.submitComment).mock.calls.length
     await withCtx(() => schedulerRequest())
 
-    // Only sticky + analytics reply — no mention comment
+    // Only the sticky comment — no mention comment
     const mentionCalls = vi.mocked(reddit.submitComment).mock.calls
         .slice(callsBefore)
         .filter((call) => {

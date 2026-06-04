@@ -8,7 +8,6 @@ import { Hono } from 'hono'
 import { getDailyMetrics } from '../lib/analytics'
 import { computeDashboard } from '../lib/dashboard'
 import { requireModerator } from '../lib/moderator'
-import { readLatestRewardsStatus } from '../lib/rewards'
 
 const HTTP_STATUS_INTERNAL_ERROR = 500
 const HTTP_STATUS_BAD_REQUEST = 400
@@ -63,12 +62,17 @@ analyticsRouter.get('/api/analytics/dashboard', async (c) => {
     }
 })
 
-// ─── GET /api/analytics/rewards ───────────────────────────────────────────────
+// ─── GET /api/analytics/qualified-summary ──────────────────────────────────────
 
-analyticsRouter.get('/api/analytics/rewards', async (c) => {
+/**
+ * Bounded server-validated qualified-engagement summary for the in-app
+ * dashboard: estimated DQP, D1/D7 retention, and qualified play time, each
+ * read from the most recent matured cohort. All figures are estimates.
+ */
+analyticsRouter.get('/api/analytics/qualified-summary', async (c) => {
     try {
-        const status = await readLatestRewardsStatus()
-        return c.json({ status: 'success', data: status })
+        const data = await buildQualifiedSummary()
+        return c.json({ status: 'success', data })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
@@ -80,7 +84,9 @@ analyticsRouter.get('/api/analytics/rewards', async (c) => {
 
 import { buildScorecard, formatScorecardMarkdown } from '../lib/scorecard'
 import {
-    computeGlobalD7Retention,
+    buildQualifiedSummary,
+    computeGlobalD1RetentionEstimate,
+    computeGlobalD7RetentionEstimate,
     computePerSubD7Retention,
     readGlobalDQP,
     readPerSubDQP,
@@ -118,9 +124,8 @@ analyticsRouter.get('/api/analytics/scorecard', async (c) => {
 /**
  * GET /api/analytics/dqp?date=YYYY-MM-DD&sub=t5_xxx
  *
- * Returns the DQP cardinality for a (date, sub) — or just the global if
- * `sub` is omitted. Includes the closed-window D7 retention when
- * available; renders null otherwise.
+ * Returns bounded-estimate DQP for a date. Global responses include
+ * estimated exact-day D1/D7 retention and sample sizes.
  */
 analyticsRouter.get('/api/analytics/dqp', async (c) => {
     const date = c.req.query('date')
@@ -138,13 +143,37 @@ analyticsRouter.get('/api/analytics/dqp', async (c) => {
                 readPerSubDQP(date, sub),
                 computePerSubD7Retention(date, sub),
             ])
-            return c.json({ status: 'success', data: { date, sub, dqp, d7Retention: d7 } })
+            return c.json({
+                status: 'success',
+                data: {
+                    date,
+                    sub,
+                    dqp,
+                    dqpEstimated: true,
+                    retentionEstimated: true,
+                    d7Retention: d7,
+                },
+            })
         }
-        const [dqp, d7] = await Promise.all([
+        const [dqp, d1, d7] = await Promise.all([
             readGlobalDQP(date),
-            computeGlobalD7Retention(date),
+            computeGlobalD1RetentionEstimate(date),
+            computeGlobalD7RetentionEstimate(date),
         ])
-        return c.json({ status: 'success', data: { date, sub: '_global', dqp, d7Retention: d7 } })
+        return c.json({
+            status: 'success',
+            data: {
+                date,
+                sub: '_global',
+                dqp,
+                dqpEstimated: true,
+                retentionEstimated: true,
+                d1Retention: d1.rate,
+                d1SampleSize: d1.sampleSize,
+                d7Retention: d7.rate,
+                d7SampleSize: d7.sampleSize,
+            },
+        })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
