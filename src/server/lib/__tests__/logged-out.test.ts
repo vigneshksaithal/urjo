@@ -101,7 +101,7 @@ describe('buildLoggedOutCompleteResponse', () => {
         expect(res.coinReward).toBeUndefined()
         expect(res.streak).toBeUndefined()
         expect(res.seasonRank).toBeUndefined()
-        expect(res.autoChallengeUrl).toBeUndefined()
+        expect(res.challengePromptEligible).toBeUndefined()
     })
 
     it('computes a bounded performance score from time and mistakes', () => {

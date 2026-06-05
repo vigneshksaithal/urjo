@@ -43,10 +43,8 @@
 		onNextChallenge: () => void;
 		onRestart: () => void;
 		streakData: StreakData;
-		hasShared: boolean;
 		hasChallenged: boolean;
 		challengeUrl: string | null;
-		onShare: () => void;
 		onChallenge: () => void;
 		coins?: number;
 		onOpenShop?: () => void;
@@ -72,7 +70,9 @@
 		currentSeason?: SeasonInfo | undefined;
 		notifyOptIn?: boolean;
 		postId?: string | undefined;
-		autoChallengeUrl?: string | null;
+		/** True on a perfect solve — surfaces an explicit "Challenge friends"
+		 *  prompt. The challenge post is only created on an explicit tap. */
+		challengePromptEligible?: boolean;
 		/** Run-again loop: number of solves this session (incl. the latest). */
 		sessionRun?: number;
 		/** Coin multiplier already applied for this session run. */
@@ -122,7 +122,6 @@
 		streakData,
 		hasChallenged,
 		challengeUrl,
-		onShare,
 		onChallenge,
 		coins,
 		onOpenShop,
@@ -145,7 +144,7 @@
 		currentSeason,
 		notifyOptIn = false,
 		postId,
-		autoChallengeUrl = null,
+		challengePromptEligible = false,
 		sessionRun = 0,
 		sessionRunMultiplier = 1,
 		weekendEvent = undefined,
@@ -160,7 +159,6 @@
 
 	let showLeaderboard = $state(false);
 	let showHowToPlay = $state(false);
-	let showShareConfirm = $state(false);
 	let showChallengeConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
 	let showMissions = $state(false);
@@ -172,8 +170,15 @@
 	let hasCommentedResult = $state(false);
 	let openMoreActionsKey = $state<string | null>(null);
 	let showOptInTutorial = $state(false);
-	let autoChallengeToastVisible = $state(true);
-	let autoChallengeDismissed = $state(false);
+	let challengePromptDismissed = $state(false);
+
+	// Reset the challenge prompt each time a new perfect solve is signalled —
+	// prevents a previous dismiss from suppressing the nudge on future solves.
+	$effect(() => {
+		if (challengePromptEligible) {
+			challengePromptDismissed = false;
+		}
+	});
 
 	// Notify toggle — initialised from prop, updated optimistically on tap (Reqs 13.1–13.5)
 	// Using a function initialiser avoids the Svelte "captures initial value" warning
@@ -319,11 +324,6 @@
 		showLoginPrompt();
 	}
 
-	function confirmShare(): void {
-		showShareConfirm = false;
-		onShare();
-	}
-
 	function confirmChallenge(): void {
 		showChallengeConfirm = false;
 		onChallenge();
@@ -432,18 +432,13 @@
 		showOptInTutorial = false;
 	}
 
-	async function handleAutoChallengeOptOut(): Promise<void> {
-		autoChallengeDismissed = true;
-		autoChallengeToastVisible = false;
-		try {
-			await fetch("/api/game/auto-challenge/opt-out", { method: "POST" });
-		} catch {
-			// Non-blocking — opt-out preference is best-effort
-		}
+	function startPerfectChallenge(): void {
+		void fireOnce(postId ?? "", "challenge");
+		showChallengeConfirm = true;
 	}
 
-	function dismissAutoChallengeToast(): void {
-		autoChallengeToastVisible = false;
+	function dismissChallengePrompt(): void {
+		challengePromptDismissed = true;
 	}
 </script>
 
@@ -642,8 +637,11 @@
 						</div>
 					{/if}
 
-					<!-- Auto-challenge toast (VIRAL: shows when challenge was auto-posted) -->
-					{#if autoChallengeUrl && autoChallengeToastVisible && !autoChallengeDismissed}
+					<!-- Perfect-solve challenge prompt (VIRAL: explicit, opt-in share) -->
+					<!-- Reddit policy: posting as the user must be a clear, manual
+					     action. This nudge only opens the confirm dialog — the post
+					     is created as the user only after they confirm. -->
+					{#if challengePromptEligible && loginGate.showSocialActions && !challengePromptDismissed && !hasChallenged}
 						<div
 							class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-between gap-2 animate-bounce-in"
 						>
@@ -651,27 +649,20 @@
 								<span class="text-lg shrink-0">🎯</span>
 								<span
 									class="text-sm text-green-400 font-medium truncate"
-									>Your perfect solve is live!</span
+									>Perfect solve! Challenge others to beat it?</span
 								>
 							</div>
 							<div class="flex items-center gap-1 shrink-0">
-								<a
-									href={autoChallengeUrl}
-									target="_blank"
-									rel="noopener"
+								<button
+									onclick={startPerfectChallenge}
 									class="px-2 py-1 text-xs font-semibold text-green-400 hover:text-green-300 transition-colors"
 								>
-									View
-								</a>
-								<button
-									onclick={handleAutoChallengeOptOut}
-									class="px-2 py-1 text-xs text-theme-text-muted hover:text-red-400 transition-colors"
-									title="Stop auto-sharing perfect solves"
-								>
-									Don't auto-share
+									Post as {username
+										? `u/${username}`
+										: "yourself"}
 								</button>
 								<button
-									onclick={dismissAutoChallengeToast}
+									onclick={dismissChallengePrompt}
 									class="px-1 py-1 text-xs text-theme-text-muted hover:text-theme-text-secondary transition-colors"
 									aria-label="Dismiss"
 								>
@@ -679,6 +670,18 @@
 								</button>
 							</div>
 						</div>
+					{/if}
+
+					<!-- View link after the player has posted their challenge -->
+					{#if hasChallenged && challengeUrl}
+						<a
+							href={challengeUrl}
+							target="_blank"
+							rel="noopener"
+							class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold text-green-400 hover:text-green-300 transition-colors animate-bounce-in"
+						>
+							🎯 Your challenge is live — view it
+						</a>
 					{/if}
 
 					<!-- ── Zone 2: Result card (visual hero) ── -->
@@ -700,6 +703,7 @@
 								{seasonPoints}
 								hasCommented={hasCommentedResult}
 								showCommentAction={loginGate.showSocialActions}
+								{username}
 								onCommentResult={() =>
 									(hasCommentedResult = true)}
 							/>
@@ -924,40 +928,6 @@
 <!-- Confetti effect -->
 {#if showConfetti}
 	<ConfettiEffect />
-{/if}
-
-<!-- Share confirmation dialog -->
-{#if showShareConfirm}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-	>
-		<div
-			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
-		>
-			<h2 class="text-base font-bold text-theme-text-primary">
-				Post your score?
-			</h2>
-			<p class="text-sm text-theme-text-secondary">
-				This will post a comment with your score{username
-					? ` as u/${username}`
-					: ""}. Others can see it.
-			</p>
-			<div class="flex gap-3">
-				<button
-					onclick={() => (showShareConfirm = false)}
-					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={confirmShare}
-					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
-				>
-					Post Score
-				</button>
-			</div>
-		</div>
-	</div>
 {/if}
 
 <!-- Challenge confirmation dialog -->

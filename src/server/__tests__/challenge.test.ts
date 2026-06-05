@@ -299,6 +299,59 @@ test('attempts: does not increment on non-challenge posts', async () => {
     expect(stats['attempts']).toBeUndefined()
 })
 
+// ─── Perfect-solve challenge prompt (compliance: explicit opt-in, never auto-posts) ─
+
+const seedPlainPuzzle = async (postId: string) => {
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+}
+
+test('complete: perfect solve on a normal post never posts as the user and flags the challenge prompt', async () => {
+    const postId = 't3_perfectprompt'
+    await seedPlainPuzzle(postId)
+    await seedStartTime('t2_winner', postId, 30)
+
+    // Reddit user actions must be explicit — completion must NOT submit a post.
+    const submitPostSpy = vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_should_not_post' } as never)
+
+    const res = await withContext(postId, 't2_winner', () => completeRequest({ mistakes: 0 }))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { challengePromptEligible?: boolean }
+    expect(body.challengePromptEligible).toBe(true)
+    expect(submitPostSpy).not.toHaveBeenCalled()
+})
+
+test('complete: imperfect solve is not challenge-prompt eligible', async () => {
+    const postId = 't3_imperfectprompt'
+    await seedPlainPuzzle(postId)
+    await seedStartTime('t2_winner', postId, 30)
+
+    const res = await withContext(postId, 't2_winner', () => completeRequest({ mistakes: 2 }))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { challengePromptEligible?: boolean }
+    expect(body.challengePromptEligible).toBeUndefined()
+})
+
+test('complete: perfect solve on a challenge post is not challenge-prompt eligible', async () => {
+    const postId = 't3_challengeperfect'
+    await seedChallengePuzzle(postId, 't2_challenger', 60)
+    await seedStartTime('t2_winner', postId, 30)
+
+    vi.spyOn(reddit, 'getCommentById').mockResolvedValue({ edit: vi.fn() } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'WinnerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_x' } as never)
+
+    const res = await withContext(postId, 't2_winner', () => completeRequest({ mistakes: 0 }))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { challengePromptEligible?: boolean }
+    expect(body.challengePromptEligible).toBeUndefined()
+})
+
 // ─── /api/game/challenge — meta initialization ────────────────────────────────
 
 challengeTest('challenge route: stores postType and leaderboardCommentId in a single meta hash', async () => {

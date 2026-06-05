@@ -2,8 +2,6 @@ import { createDevvitTest } from '@devvit/test/server/vitest'
 import { describe, expect, it } from 'vitest'
 
 import {
-    AUTO_CHALLENGE_DAILY_CAP,
-    claimAutoChallengeSlot,
     claimGrowthPostSlot,
     getGrowthPostSlot,
     isGrowthPostSlotEnabled,
@@ -39,26 +37,4 @@ testGrowthSlot('claimGrowthPostSlot allows one post per subreddit/date/slot', as
     expect(first).toBe(true)
     expect(second).toBe(false)
     expect(otherSlot).toBe(true)
-})
-
-const testAutoChallengeCap = createDevvitTest({
-    userId: 't2_growth',
-    subredditId: 't5_urjo',
-    subredditName: 'urjo',
-})
-
-testAutoChallengeCap('claimAutoChallengeSlot enforces user and subreddit daily caps', async () => {
-    for (let i = 0; i < AUTO_CHALLENGE_DAILY_CAP.perUser; i++) {
-        expect(await claimAutoChallengeSlot({
-            date: '2026-06-02',
-            subredditId: 't5_urjo',
-            userId: 't2_player',
-        })).toBe(true)
-    }
-
-    expect(await claimAutoChallengeSlot({
-        date: '2026-06-02',
-        subredditId: 't5_urjo',
-        userId: 't2_player',
-    })).toBe(false)
 })

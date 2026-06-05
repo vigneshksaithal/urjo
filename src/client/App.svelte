@@ -7,7 +7,6 @@
 		GameState,
 		NextChallengeResponse,
 		StreakData,
-		ShareResponse,
 		CoinReward,
 		GridSizeResponse,
 	} from "../shared/types";
@@ -74,10 +73,9 @@
 	let skillLevel = $state(1);
 	let showLevelUp = $state(false);
 	let levelUpNewLevel = $state(1);
-	let hasShared = $state(false);
 	let hasChallenged = $state(false);
 	let challengeUrl = $state<string | null>(null);
-	let autoChallengeUrl = $state<string | null>(null);
+	let challengePromptEligible = $state(false);
 	let showShop = $state(false);
 	let showAnalytics = $state(false);
 	let coins = $state(0);
@@ -250,7 +248,6 @@
 				data.puzzle.gridSize,
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
-			hasShared = false;
 			hasChallenged = false;
 			challengeUrl = null;
 			startTime = Date.now();
@@ -470,10 +467,8 @@
 				if (data.seasonPoints !== undefined) {
 					seasonPoints = data.seasonPoints;
 				}
-				// Auto-challenge URL from perfect solve
-				if (data.autoChallengeUrl) {
-					autoChallengeUrl = data.autoChallengeUrl;
-				}
+				// Perfect-solve challenge prompt eligibility (explicit opt-in share)
+				challengePromptEligible = data.challengePromptEligible === true;
 				// Run-again loop: hydrate the session-streak chip + roll the
 				// bonus coins into the wallet so the CountUp lands on the
 				// fully-paid total.
@@ -512,37 +507,6 @@
 	}
 
 	/**
-	 * Handle share to comments.
-	 */
-	async function handleShare() {
-		if (hasShared) return;
-
-		try {
-			const response = await fetch("/api/game/share", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					timeTaken,
-					streak: streakData.currentStreak,
-					puzzleColors,
-					gridSize,
-					skillLevel,
-					mistakes: $mistakeCount,
-				}),
-			});
-
-			if (response.ok) {
-				const data: ShareResponse = await response.json();
-				if (data.shared) {
-					hasShared = true;
-				}
-			}
-		} catch {
-			// Non-critical error
-		}
-	}
-
-	/**
 	 * Handle challenge post creation.
 	 */
 	async function handleChallenge() {
@@ -576,7 +540,7 @@
 	async function handleNextChallenge() {
 		hasChallenged = false;
 		challengeUrl = null;
-		autoChallengeUrl = null;
+		challengePromptEligible = false;
 		resetLatch();
 		void fireOnce(postId ?? "", "next-puzzle");
 		resetHints();
@@ -616,7 +580,7 @@
 	function handleRestart() {
 		hasChallenged = false;
 		challengeUrl = null;
-		autoChallengeUrl = null;
+		challengePromptEligible = false;
 		resetLatch();
 		resetHints();
 		grid = deserializeGrid(
@@ -666,9 +630,9 @@
 				data.puzzle.gridSize,
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
-			hasShared = false;
 			hasChallenged = false;
 			challengeUrl = null;
+			challengePromptEligible = false;
 			startTime = Date.now();
 			coinReward = undefined;
 			resetMistakes();
@@ -749,7 +713,6 @@
 			gridSize,
 			isCompleted,
 			streakData,
-			hasShared,
 			hasChallenged,
 			challengeUrl,
 			coins,
@@ -762,7 +725,6 @@
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
-			onShare: handleShare,
 			onChallenge: handleChallenge,
 			onOpenShop: () => (showShop = true),
 			onOpenAnalytics: () => (showAnalytics = true),
@@ -777,7 +739,7 @@
 			currentSeason,
 			notifyOptIn,
 			hintsDismissed,
-			autoChallengeUrl,
+			challengePromptEligible,
 			sessionRun,
 			sessionRunMultiplier,
 			sessionRunBonusCoins,

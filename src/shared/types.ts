@@ -123,8 +123,9 @@ export type CompleteResponse = {
 	engagement?: EngagementCompletionData | undefined
 	seasonRank?: number
 	seasonPoints?: number
-	/** URL of auto-generated challenge post (only on perfect solves, opt-out model) */
-	autoChallengeUrl?: string
+	/** True on a perfect solve eligible for the "Challenge friends" prompt.
+	 *  The challenge post itself is only ever created via an explicit user tap. */
+	challengePromptEligible?: boolean
 	/** Run-again loop info — echoed back so client can display the multiplier
 	 *  alongside the coin reward. Bonus coins are already added to the wallet. */
 	sessionRun?: number

@@ -202,21 +202,3 @@ const testGated = createDevvitTest({
     subredditId: 't5_testsub',
     postId: 't3_logged_out_post',
 })
-
-testGated('POST /api/game/share stays gated for logged-out users', async () => {
-    const res = await withCtx(LOGGED_OUT_CTX, () =>
-        app.request('/api/game/share', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                timeTaken: 20,
-                streak: 0,
-                puzzleColors: 'rrbbrrbbrrbbrrbb',
-                gridSize: 4,
-                skillLevel: 1,
-                mistakes: 0,
-            }),
-        }),
-    )
-    expect(res.status).toBe(400)
-})

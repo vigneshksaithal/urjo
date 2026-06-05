@@ -411,52 +411,6 @@ testHelpTap('POST /api/game/help-tap sets dedup key with 24h TTL', async () => {
     expect(ttl).toBeLessThanOrEqual(nowSeconds + 86400 + 5) // +5s buffer for test execution time
 })
 
-// ─── POST /api/game/share — legacy share route metrics ───────────────────────
-
-const testShare = createDevvitTest({
-    userId: 't2_player1',
-    subredditName: 'testsub',
-    subredditId: 't5_testsub',
-    postId: 't3_testpost',
-})
-
-testShare('POST /api/game/share tracks result copy and share count on success', async () => {
-    vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_share' } as never)
-    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'test_player' } as never)
-
-    await withCtx(CTX, () => seedStickyComment('t3_testpost'))
-
-    const res = await withCtx(CTX, () =>
-        app.request('/api/game/share', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                timeTaken: 23,
-                streak: 5,
-                puzzleColors: 'rbrbbrbrrbbbbrbr',
-                gridSize: 4,
-                skillLevel: 3,
-                mistakes: 0,
-            }),
-        }),
-    )
-    expect(res.status).toBe(200)
-
-    const today = new Date().toISOString().split('T')[0] ?? ''
-    const resultCopies = await withCtx(CTX, () => redis.get(`analytics:${today}:result_copies`))
-    const resultComments = await withCtx(CTX, () => redis.get(`analytics:${today}:result_comments`))
-    const social = await withCtx(CTX, () => redis.hGetAll('user:t2_player1:social'))
-
-    // /api/game/share should increment ONLY the result_copies counter,
-    // matching its result_copy viral channel. Previously it also
-    // incremented result_comments, inflating that counter on every share.
-    expect(resultCopies).toBe('1')
-    expect(resultComments).toBeUndefined()
-    expect(social['sharesCount']).toBe('1')
-
-    vi.restoreAllMocks()
-})
-
 // ─── GET /api/game/state — notifyOptIn and hintsDismissed fields ──────────────
 // Requirements: 7.1, 7.2, 7.3, 12.3, 14.6
 

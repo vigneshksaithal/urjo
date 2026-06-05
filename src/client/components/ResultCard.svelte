@@ -21,6 +21,9 @@
         /** When false, the "Comment Result" social action is hidden (used for
          *  logged-out viewers who can't post). Defaults to true. */
         showCommentAction?: boolean;
+        /** Current Reddit username — shown in the confirmation so the player
+         *  understands the comment is posted publicly as themselves. */
+        username?: string | undefined;
     };
 
     let {
@@ -37,9 +40,11 @@
         onCommentResult,
         hasCommented = false,
         showCommentAction = true,
+        username = undefined,
     }: Props = $props();
 
     let commenting = $state(false);
+    let confirmingComment = $state(false);
     let commentError = $state<string | null>(null);
 
     const colorGrid = $derived(buildColorGrid(puzzleColors, gridSize));
@@ -87,6 +92,7 @@
                 throw new Error(data.error || "Failed to post result");
             }
 
+            confirmingComment = false;
             onCommentResult?.();
             showToast("Result posted!");
         } catch (e) {
@@ -120,21 +126,60 @@
         {/if}
     </div>
 
-    <!-- Comment result button -->
+    <!-- Comment result — explicit, clearly-labeled user action.
+         Reddit policy: the player must understand the comment is posted
+         publicly as themselves before confirming. -->
     {#if showCommentAction}
-        <button
-            onclick={handleComment}
-            disabled={commenting || hasCommented}
-            class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-            {#if commenting}
-                <Loader2 class="w-4 h-4 animate-spin" /><span>Posting...</span>
-            {:else if hasCommented}
-                <span>✅ Posted!</span>
-            {:else}
-                <MessageSquare class="w-4 h-4" /><span>Comment Result</span>
-            {/if}
-        </button>
+        {#if hasCommented}
+            <button
+                disabled
+                class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm opacity-50 cursor-not-allowed flex items-center justify-center gap-2"
+            >
+                <span>✅ Posted to this thread</span>
+            </button>
+        {:else if confirmingComment}
+            <div
+                class="flex flex-col gap-2 bg-theme-bg-secondary rounded-lg p-3 border border-theme-border"
+            >
+                <p class="text-xs text-theme-text-secondary text-center">
+                    Posts your score publicly{username
+                        ? ` as u/${username}`
+                        : ""} as a reply to the pinned comment on this post. Others
+                    will see it.
+                </p>
+                <div class="flex gap-2">
+                    <button
+                        onclick={() => (confirmingComment = false)}
+                        disabled={commenting}
+                        class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all disabled:opacity-50"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onclick={handleComment}
+                        disabled={commenting}
+                        class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {#if commenting}
+                            <Loader2 class="w-4 h-4 animate-spin" /><span
+                                >Posting...</span
+                            >
+                        {:else}
+                            <span>Post comment</span>
+                        {/if}
+                    </button>
+                </div>
+            </div>
+        {:else}
+            <button
+                onclick={() => (confirmingComment = true)}
+                class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+                <MessageSquare class="w-4 h-4" /><span
+                    >Comment score{username ? ` as u/${username}` : ""}</span
+                >
+            </button>
+        {/if}
 
         {#if commentError}
             <p class="text-xs text-red-400 text-center">{commentError}</p>
