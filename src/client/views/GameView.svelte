@@ -27,6 +27,7 @@
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
 	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
+	import ModPreviewPanel from "../components/ModPreviewPanel.svelte";
 	import { fly, fade } from "svelte/transition";
 	import { cubicOut } from "svelte/easing";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
@@ -159,6 +160,7 @@
 	let showLeaderboard = $state(false);
 	let showHowToPlay = $state(false);
 	let showSettings = $state(false);
+	let showModPreview = $state(false);
 	let showChallengeConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
 	let showMissions = $state(false);
@@ -1026,17 +1028,39 @@
 					<span>Analytics Dashboard</span>
 				</button>
 			{/if}
+			{#if isMod}
+				<button
+					onclick={() => {
+						showSettings = false;
+						showModPreview = true;
+					}}
+					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
+				>
+					<Settings class="w-5 h-5 text-theme-text-muted shrink-0" />
+					<span>Component Preview</span>
+				</button>
+			{/if}
 		</div>
 	</div>
 {/if}
 
 <!-- Engagement modals -->
-<MissionsPanel isOpen={showMissions} onClose={() => (showMissions = false)} />
-<AchievementsPanel
+<MissionsPanel
+	isOpen={showMissions}
+	onClose={() => (showMissions = false)}
+/><AchievementsPanel
 	isOpen={showAchievements}
 	onClose={() => (showAchievements = false)}
 />
 <ProfilePanel isOpen={showProfile} onClose={() => (showProfile = false)} />
+
+<!-- Mod component preview panel -->
+{#if isMod}
+	<ModPreviewPanel
+		isOpen={showModPreview}
+		onClose={() => (showModPreview = false)}
+	/>
+{/if}
 
 <!-- Mystery box animation -->
 {#if showMysteryBoxOverlay && engagement?.variableReward.mysteryBox}
