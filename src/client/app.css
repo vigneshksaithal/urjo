@@ -117,3 +117,14 @@
 .animate-cta-pulse {
 	animation: cta-pulse 2.4s ease-in-out infinite;
 }
+
+/* Bottom sheet slide-up animation */
+@keyframes slideUp {
+	from {
+		transform: translateY(100%);
+	}
+
+	to {
+		transform: translateY(0);
+	}
+}

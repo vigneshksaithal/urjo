@@ -14,7 +14,6 @@
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
 	import InlineHint from "../components/InlineHint.svelte";
-	import StreakBadge from "../components/StreakBadge.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
 	import HowToPlayModal from "../components/HowToPlayModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
@@ -28,10 +27,10 @@
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
 	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
-	import Trophy from "lucide-svelte/icons/trophy";
+	import { fly, fade } from "svelte/transition";
+	import { cubicOut } from "svelte/easing";
 	import CircleHelp from "lucide-svelte/icons/circle-help";
-	import Shuffle from "lucide-svelte/icons/shuffle";
-	import BarChart2 from "lucide-svelte/icons/bar-chart-2";
+	import Settings from "lucide-svelte/icons/settings";
 	import ExternalLink from "lucide-svelte/icons/external-link";
 	import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
 
@@ -159,6 +158,7 @@
 
 	let showLeaderboard = $state(false);
 	let showHowToPlay = $state(false);
+	let showSettings = $state(false);
 	let showChallengeConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
 	let showMissions = $state(false);
@@ -193,10 +193,6 @@
 	let showNumberHint = $state(false);
 	let showAdjacencyHint = $state(false);
 
-	// Tracks whether the help-tap POST has already fired this session (Req 11.1).
-	let helpTapFired = $state(false);
-
-	// ─── Inline hint trigger logic ───────────────────────────────────────────
 	// Wraps the parent's onCellChange to intercept taps and surface inline hints.
 	// The number-constraint hint fires when the tapped cell has a non-null number
 	// (Req 8.1). The adjacency-violation hint fires when validateGrid detects a
@@ -256,8 +252,6 @@
 	function handleHelpTap(): void {
 		void fireOnce(postId ?? "", "help");
 		showHowToPlay = true;
-		if (helpTapFired) return;
-		helpTapFired = true;
 		fetch("/api/game/help-tap", { method: "POST" }).catch(() => {
 			// Non-blocking: tracking failure does not affect gameplay
 		});
@@ -366,11 +360,6 @@
 		onSubscribe?.();
 	}
 
-	function handleHeaderNextPuzzle(): void {
-		void fireOnce(postId ?? "", "next-puzzle");
-		onNextChallenge();
-	}
-
 	function handleGridSizeSelect(size: number): void {
 		void fireOnce(postId ?? "", "grid-size");
 		onGridSizeChange?.(size);
@@ -443,25 +432,13 @@
 </script>
 
 <div class="h-full w-full flex flex-col p-3 gap-2 overflow-hidden">
-	<!-- Header: help | streak · coins · trophy | shuffle -->
-	<!-- flex-wrap lets trailing controls drop to a second line instead of
-	     clipping when the row can't fit; the side clusters stay shrink-0 so
-	     icon tap targets are preserved and only the centre cluster compresses. -->
+	<!-- Header: coins · session run -->
 	<header class="flex-none flex flex-wrap items-center justify-between gap-2">
-		<button
-			onclick={handleHelpTap}
-			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
-			aria-label="How to Play"
-		>
-			<CircleHelp class="w-5 h-5 text-urjo-blue" />
-		</button>
+		<!-- Left spacer to balance layout -->
+		<div class="w-9 shrink-0"></div>
 
-		<!-- Centre cluster — min-w-0 lets it shrink below its content width so
-		     the shrink-0 trailing controls are never pushed off-screen. -->
+		<!-- Centre cluster -->
 		<div class="flex items-center gap-2 flex-1 min-w-0 justify-center">
-			{#if loginGate.showStreak}
-				<StreakBadge streak={streakData} />
-			{/if}
 			{#if sessionRun >= 2}
 				<!-- Session run chip — Subway Surfers' "5 in a row" momentum
 				     indicator. Hidden for first solve so it doesn't appear
@@ -484,39 +461,9 @@
 			{#if loginGate.showWallet && coins !== undefined && onOpenShop}
 				<CoinDisplay {coins} onClick={onOpenShop} />
 			{/if}
-			{#if loginGate.showLeaderboard}
-				<button
-					onclick={() => (showLeaderboard = true)}
-					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
-					aria-label="View leaderboard"
-				>
-					<Trophy class="w-5 h-5 text-yellow-400" />
-				</button>
-			{/if}
-			{#if isMod && onOpenAnalytics}
-				<button
-					onclick={onOpenAnalytics}
-					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
-					aria-label="Analytics dashboard"
-				>
-					<BarChart2 class="w-5 h-5 text-blue-400" />
-				</button>
-			{/if}
 		</div>
 
-		{#if !isCompleted}
-			<div class="flex items-center gap-1 shrink-0">
-				<button
-					onclick={handleHeaderNextPuzzle}
-					class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors"
-					aria-label="New Puzzle"
-				>
-					<Shuffle class="w-5 h-5 text-urjo-blue" />
-				</button>
-			</div>
-		{:else}
-			<div class="w-9 shrink-0"></div>
-		{/if}
+		<div class="w-9 shrink-0"></div>
 	</header>
 
 	<!-- Weekend Event banner — persistent across the in-game and completion
@@ -718,9 +665,6 @@
 						onclick={handlePrimaryCta}
 						class="w-full px-4 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2 animate-cta-pulse"
 					>
-						{#if simplifiedCtas.primary.id === "next-puzzle"}
-							<Shuffle class="w-4 h-4" />
-						{/if}
 						<span>{simplifiedCtas.primary.label}</span>
 					</button>
 
@@ -916,12 +860,22 @@
 	{/if}
 
 	<!-- Footer -->
-	<footer class="flex-none flex flex-col items-center justify-center gap-0.5">
-		{#if isCompleted}
-			<p class="text-xs text-theme-text-muted text-center">
-				Solved in {timeTaken ?? 0}s
-			</p>
-		{/if}
+	<footer class="flex-none flex items-center justify-between gap-2 px-1">
+		<div class="w-9"></div>
+		<div class="flex-1 flex justify-center">
+			{#if isCompleted}
+				<p class="text-xs text-theme-text-muted text-center">
+					Solved in {timeTaken ?? 0}s
+				</p>
+			{/if}
+		</div>
+		<button
+			onclick={() => (showSettings = true)}
+			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
+			aria-label="Settings"
+		>
+			<Settings class="w-5 h-5 text-theme-text-muted" />
+		</button>
 	</footer>
 </div>
 
@@ -1014,6 +968,67 @@
 	{gridSize}
 	onOpenTutorial={handleOpenOptInTutorial}
 />
+
+<!-- Settings bottom sheet -->
+{#if showSettings}
+	<!-- Backdrop — fades in/out -->
+	<div
+		transition:fade={{ duration: 250 }}
+		class="fixed inset-0 z-50 bg-black/60"
+		role="button"
+		tabindex="-1"
+		aria-label="Close settings"
+		onclick={() => (showSettings = false)}
+		onkeydown={(e) => e.key === "Escape" && (showSettings = false)}
+	></div>
+	<!-- Sheet — springs up from bottom, slides back down on close -->
+	<div
+		transition:fly={{ y: 400, duration: 380, easing: cubicOut }}
+		class="fixed bottom-0 left-0 right-0 z-50 flex flex-col bg-theme-bg-primary border-t border-theme-border rounded-t-2xl shadow-2xl"
+		style="max-height: 60vh;"
+	>
+		<!-- Drag handle -->
+		<div class="flex justify-center pt-3 pb-1 shrink-0">
+			<div class="w-10 h-1 rounded-full bg-theme-border"></div>
+		</div>
+		<!-- Header -->
+		<div class="flex items-center justify-between px-5 py-3 shrink-0">
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Settings
+			</h2>
+			<button
+				onclick={() => (showSettings = false)}
+				class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-theme-hover transition-colors text-theme-text-muted"
+				aria-label="Close settings">✕</button
+			>
+		</div>
+		<!-- Options -->
+		<div class="flex flex-col gap-2 px-4 pb-8 overflow-y-auto">
+			<button
+				onclick={() => {
+					showSettings = false;
+					showHowToPlay = true;
+				}}
+				class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
+			>
+				<CircleHelp class="w-5 h-5 text-urjo-blue shrink-0" />
+				<span>How to Play / Tutorial</span>
+			</button>
+			{#if isMod && onOpenAnalytics}
+				<button
+					onclick={() => {
+						showSettings = false;
+						onOpenAnalytics?.();
+					}}
+					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
+				>
+					<Settings class="w-5 h-5 text-blue-400 shrink-0" />
+					<span>Analytics Dashboard</span>
+				</button>
+			{/if}
+		</div>
+	</div>
+{/if}
 
 <!-- Engagement modals -->
 <MissionsPanel isOpen={showMissions} onClose={() => (showMissions = false)} />

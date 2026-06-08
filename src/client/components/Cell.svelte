@@ -140,10 +140,10 @@
 		<span
 			class="absolute inset-0 flex items-center justify-center
 				text-white font-medium {gridSize === 8
-				? 'text-lg'
+				? 'text-xl'
 				: gridSize === 6
-					? 'text-3xl'
-					: 'text-5xl'} z-10 select-none pointer-events-none
+					? 'text-4xl'
+					: 'text-6xl'} z-10 select-none pointer-events-none
 				drop-shadow-md"
 		>
 			{number}
