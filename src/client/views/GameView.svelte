@@ -600,40 +600,34 @@
 	</footer>
 </div>
 
-<!-- Success bottom sheet -->
+<!-- Success full-screen -->
 {#if isCompleted}
-	<!-- Backdrop -->
 	<div
-		transition:fade={{ duration: 250 }}
-		class="fixed inset-0 z-20 bg-black/50"
-	></div>
-	<!-- Sheet -->
-	<div
-		transition:fly={{ y: 500, duration: 420, easing: cubicOut }}
-		class="fixed bottom-0 left-0 right-0 z-20 flex flex-col bg-theme-bg-primary border-t border-theme-border rounded-t-2xl shadow-2xl"
+		transition:fade={{ duration: 200 }}
+		class="fixed inset-0 z-20 flex flex-col items-center justify-between bg-theme-bg-primary px-6 py-10"
 	>
-		<!-- Drag handle -->
-		<div class="flex justify-center pt-3 pb-1 shrink-0">
-			<div class="w-10 h-1 rounded-full bg-theme-border"></div>
-		</div>
+		<!-- Top spacer -->
+		<div class="flex-1"></div>
 
-		<!-- Hero section -->
-		<div class="flex flex-col items-center gap-1 px-5 pt-4 pb-5">
-			<Trophy class="w-10 h-10 text-yellow-400" />
-			<p class="text-2xl font-bold text-theme-text-primary mt-1">
+		<!-- Hero -->
+		<div class="flex flex-col items-center gap-5">
+			<div class="text-8xl leading-none select-none" aria-hidden="true">
+				🏆
+			</div>
+			<p class="text-3xl font-bold text-yellow-400 text-center">
 				Solved in {timeTaken ?? 0}s!
 			</p>
 		</div>
 
 		<!-- Stats row: time | coins | streak -->
-		<div class="grid grid-cols-3 gap-3 px-5 pb-5">
+		<div class="grid grid-cols-3 gap-3 w-full mt-10">
 			<!-- Time -->
 			<div
-				class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-theme-border bg-theme-hover"
+				class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
 			>
-				<Clock class="w-5 h-5 text-urjo-blue" />
+				<Clock class="w-6 h-6 text-urjo-blue" />
 				<span
-					class="text-lg font-bold text-theme-text-primary leading-none"
+					class="text-xl font-bold text-theme-text-primary leading-none"
 					>{timeTaken ?? 0}s</span
 				>
 				<span
@@ -644,10 +638,10 @@
 			<!-- Coins -->
 			{#if loginGate.showWallet && coins !== undefined}
 				<div
-					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-yellow-500/40 bg-yellow-500/10"
+					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-yellow-500/40 bg-yellow-500/10"
 				>
-					<Coins class="w-5 h-5 text-yellow-400" />
-					<span class="text-lg font-bold text-yellow-300 leading-none"
+					<Coins class="w-6 h-6 text-yellow-400" />
+					<span class="text-xl font-bold text-yellow-300 leading-none"
 						>{coins}</span
 					>
 					<span
@@ -657,11 +651,11 @@
 				</div>
 			{:else}
 				<div
-					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-theme-border bg-theme-hover"
+					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
 				>
-					<Coins class="w-5 h-5 text-theme-text-muted" />
+					<Coins class="w-6 h-6 text-theme-text-muted" />
 					<span
-						class="text-lg font-bold text-theme-text-muted leading-none"
+						class="text-xl font-bold text-theme-text-muted leading-none"
 						>—</span
 					>
 					<span
@@ -673,10 +667,10 @@
 			<!-- Streak -->
 			{#if loginGate.showStreak}
 				<div
-					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-orange-500/40 bg-orange-500/10"
+					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-orange-500/40 bg-orange-500/10"
 				>
-					<Flame class="w-5 h-5 text-orange-400" />
-					<span class="text-lg font-bold text-orange-300 leading-none"
+					<Flame class="w-6 h-6 text-orange-400" />
+					<span class="text-xl font-bold text-orange-300 leading-none"
 						>{streakData.currentStreak}</span
 					>
 					<span
@@ -686,11 +680,11 @@
 				</div>
 			{:else}
 				<div
-					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-theme-border bg-theme-hover"
+					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
 				>
-					<Flame class="w-5 h-5 text-theme-text-muted" />
+					<Flame class="w-6 h-6 text-theme-text-muted" />
 					<span
-						class="text-lg font-bold text-theme-text-muted leading-none"
+						class="text-xl font-bold text-theme-text-muted leading-none"
 						>—</span
 					>
 					<span
@@ -701,20 +695,21 @@
 			{/if}
 		</div>
 
+		<!-- Bottom spacer -->
+		<div class="flex-1"></div>
+
 		<!-- Action buttons -->
-		<div class="flex flex-col gap-3 px-5 pb-8">
-			<!-- Continue -->
+		<div class="flex flex-col gap-3 w-full">
 			<button
 				onclick={handlePrimaryCta}
-				class="w-full px-4 py-3.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-base hover:opacity-90 active:scale-95 transition-all"
+				class="w-full px-4 py-4 bg-urjo-blue text-white font-bold rounded-2xl text-base hover:opacity-90 active:scale-95 transition-all uppercase tracking-wide"
 			>
 				Continue
 			</button>
-			<!-- Join subreddit — only shown if not yet subscribed and onSubscribe available -->
 			{#if onSubscribe && !hasSubscribed && loginGate.showSocialActions}
 				<button
 					onclick={() => (showSubscribeConfirm = true)}
-					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
+					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-2xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
 				>
 					Join r/urjo
 				</button>
