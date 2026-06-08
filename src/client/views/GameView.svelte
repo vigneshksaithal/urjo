@@ -34,6 +34,10 @@
 	import Settings from "lucide-svelte/icons/settings";
 	import ExternalLink from "lucide-svelte/icons/external-link";
 	import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
+	import Trophy from "lucide-svelte/icons/trophy";
+	import Clock from "lucide-svelte/icons/clock";
+	import Coins from "lucide-svelte/icons/coins";
+	import Flame from "lucide-svelte/icons/flame";
 
 	type Props = {
 		grid: Grid;
@@ -562,286 +566,7 @@
 			</div>
 		</div>
 
-		<!-- Completion overlay -->
-		{#if isCompleted}
-			<div
-				class="fixed inset-0 flex flex-col items-center z-20 p-3 bg-theme-overlay backdrop-blur-sm overflow-y-auto"
-			>
-				<div
-					class="flex flex-col items-center gap-3 max-w-sm w-full my-auto"
-				>
-					<!-- New achievement unlocks -->
-					{#if engagement?.newAchievements && engagement.newAchievements.length > 0}
-						<div class="flex flex-col items-center gap-1">
-							{#each engagement.newAchievements as achievement (achievement.id)}
-								<div
-									class="flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-xs"
-								>
-									<span>{achievement.emoji}</span>
-									<span class="text-yellow-400 font-semibold"
-										>{achievement.label} unlocked!</span
-									>
-								</div>
-							{/each}
-						</div>
-					{/if}
-
-					<!-- Perfect-solve challenge prompt (VIRAL: explicit, opt-in share) -->
-					<!-- Reddit policy: posting as the user must be a clear, manual
-					     action. This nudge only opens the confirm dialog — the post
-					     is created as the user only after they confirm. -->
-					{#if challengePromptEligible && loginGate.showSocialActions && !challengePromptDismissed && !hasChallenged}
-						<div
-							class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-between gap-2 animate-bounce-in"
-						>
-							<div class="flex items-center gap-2 min-w-0">
-								<span class="text-lg shrink-0">🎯</span>
-								<span
-									class="text-sm text-green-400 font-medium truncate"
-									>Perfect solve! Challenge others to beat it?</span
-								>
-							</div>
-							<div class="flex items-center gap-1 shrink-0">
-								<button
-									onclick={startPerfectChallenge}
-									class="px-2 py-1 text-xs font-semibold text-green-400 hover:text-green-300 transition-colors"
-								>
-									Post as {username
-										? `u/${username}`
-										: "yourself"}
-								</button>
-								<button
-									onclick={dismissChallengePrompt}
-									class="px-1 py-1 text-xs text-theme-text-muted hover:text-theme-text-secondary transition-colors"
-									aria-label="Dismiss"
-								>
-									✕
-								</button>
-							</div>
-						</div>
-					{/if}
-
-					<!-- View link after the player has posted their challenge -->
-					{#if hasChallenged && challengeUrl}
-						<a
-							href={challengeUrl}
-							target="_blank"
-							rel="noopener"
-							class="w-full px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold text-green-400 hover:text-green-300 transition-colors animate-bounce-in"
-						>
-							🎯 Your challenge is live — view it
-						</a>
-					{/if}
-
-					<!-- ── Zone 2: Result card (visual hero) ── -->
-					<!-- Season rank is now inside the card; no standalone row needed -->
-					{#if puzzleColors}
-						<div class="w-full">
-							<ResultCard
-								{puzzleColors}
-								{gridSize}
-								{skillLevel}
-								{puzzleNumber}
-								streak={streakData.currentStreak}
-								timeTaken={timeTaken ?? 0}
-								{mistakes}
-								seasonNumber={currentSeason?.isActive
-									? currentSeason.seasonNumber
-									: null}
-								{seasonRank}
-								{seasonPoints}
-								hasCommented={hasCommentedResult}
-								showCommentAction={loginGate.showSocialActions}
-								{username}
-								onCommentResult={() =>
-									(hasCommentedResult = true)}
-							/>
-						</div>
-					{/if}
-
-					<!-- ── Zone 3: Actions ── -->
-					<!-- Primary CTA — always "Next Puzzle" so the in-flow player
-					     can keep playing with one tap. Pulses gently to draw
-					     the eye, the way Subway Surfers' Run-Again button does. -->
-					<button
-						onclick={handlePrimaryCta}
-						class="w-full px-4 py-3 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-base hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2 animate-cta-pulse"
-					>
-						<span>{simplifiedCtas.primary.label}</span>
-					</button>
-
-					<!-- Secondary CTA — ghost/outline styling. This is where
-					     "Challenge Friends" / "View Challenge"
-					     now live (demoted from primary). -->
-					{#if loginGate.showSocialActions}
-						{#each simplifiedCtas.secondary as cta (cta.id)}
-							<button
-								onclick={() => handleSecondaryCta(cta.id)}
-								class="w-full px-4 py-2 border border-theme-border text-theme-text-secondary font-semibold rounded-lg text-sm hover:bg-theme-hover active:scale-95 transition-all flex items-center justify-center gap-2"
-							>
-								{#if cta.id === "view-challenge"}
-									<ExternalLink class="w-4 h-4" />
-								{/if}
-								<span>{cta.label}</span>
-							</button>
-						{/each}
-					{/if}
-
-					<!-- Logged-out conversion CTA — shown at the natural
-					     breakpoint (result screen) per Reddit's logged-out
-					     guide. Pairs the prompt with a clear value proposition:
-					     signing in saves the run and unlocks coins/streak. -->
-					{#if loginGate.showLoginCta}
-						<div
-							class="w-full flex flex-col items-center gap-2 px-4 py-3 rounded-lg bg-urjo-blue/10 border border-urjo-blue/40"
-						>
-							<p
-								class="text-sm font-bold text-theme-text-primary text-center"
-							>
-								{LOGIN_CTA.title}
-							</p>
-							<p
-								class="text-xs text-theme-text-secondary text-center"
-							>
-								{LOGIN_CTA.body}
-							</p>
-							<button
-								onclick={handleLoginPrompt}
-								class="w-full px-4 py-2 bg-urjo-blue text-white font-bold rounded-lg text-sm hover:opacity-90 active:scale-95 transition-all"
-							>
-								{LOGIN_CTA.button}
-							</button>
-						</div>
-					{/if}
-
-					<!-- Free-freeze grant celebration — fires when the server's
-					     7-day cadence handed the player a Streak Freeze. -->
-					{#if streakData.freeFreezeGranted}
-						<div
-							class="text-xs text-center px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/40 text-blue-300 font-semibold"
-						>
-							🧊 Free Streak Freeze granted! Stored in your shop.
-						</div>
-					{/if}
-
-					{#if loginGate.showSocialActions}
-						<div class="grid grid-cols-2 gap-2 w-full">
-							<button
-								onclick={handleNotifyToggle}
-								disabled={notifySubmitting}
-								class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all disabled:opacity-50"
-							>
-								{localNotifyOptIn ? "Notify on" : "Notify me"}
-							</button>
-							{#if onSubscribe && !hasSubscribed}
-								<button
-									onclick={() =>
-										(showSubscribeConfirm = true)}
-									class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
-								>
-									Subscribe
-								</button>
-							{:else}
-								<button
-									onclick={() =>
-										(showSeasonLeaderboard = true)}
-									class="px-3 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-xs font-semibold hover:bg-theme-hover active:scale-95 transition-all"
-								>
-									Season
-								</button>
-							{/if}
-						</div>
-
-						<!-- "More" button — toggles collapsible panel -->
-						<button
-							onclick={toggleMoreActions}
-							class="w-full px-3 py-1.5 text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all flex items-center justify-center gap-1"
-						>
-							<MoreHorizontal class="w-4 h-4" />
-							<span>More</span>
-						</button>
-					{/if}
-
-					<!-- Collapsible "More" panel: 2-col grid -->
-					{#if showMoreActionsPanel}
-						<div class="grid grid-cols-2 gap-2 w-full">
-							<!-- Notify toggle -->
-							<button
-								onclick={() => {
-									openMoreActionsKey = null;
-									handleNotifyToggle();
-								}}
-								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-							>
-								{localNotifyOptIn
-									? "🔕 Notify off"
-									: "🔔 Notify me"}
-							</button>
-							<!-- Subscribe -->
-							{#if onSubscribe && !hasSubscribed}
-								<button
-									onclick={() => {
-										openMoreActionsKey = null;
-										showSubscribeConfirm = true;
-									}}
-									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-								>
-									🔔 Subscribe
-								</button>
-							{/if}
-							<!-- Missions -->
-							<button
-								onclick={() => {
-									openMoreActionsKey = null;
-									showMissions = true;
-								}}
-								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-							>
-								Missions
-							</button>
-							<!-- Achievements -->
-							<button
-								onclick={() => {
-									openMoreActionsKey = null;
-									showAchievements = true;
-								}}
-								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-							>
-								Achievements
-							</button>
-							<!-- Profile -->
-							<button
-								onclick={() => {
-									openMoreActionsKey = null;
-									showProfile = true;
-								}}
-								class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-							>
-								Profile
-							</button>
-							<!-- Season -->
-							{#if currentSeason?.isActive}
-								<button
-									onclick={() => {
-										openMoreActionsKey = null;
-										showSeasonLeaderboard = true;
-									}}
-									class="px-3 py-1.5 border border-theme-border text-theme-text-muted rounded-lg text-xs hover:bg-theme-hover transition-all"
-								>
-									Season
-								</button>
-							{/if}
-						</div>
-					{/if}
-
-					{#if notifyError}
-						<p class="text-xs text-red-400 text-center">
-							{notifyError}
-						</p>
-					{/if}
-				</div>
-			</div>
-		{/if}
+		<!-- Completion overlay — now a bottom sheet rendered outside <main> -->
 	</main>
 
 	<!-- Inline hints — rendered outside the board so they float above everything -->
@@ -864,13 +589,7 @@
 	<!-- Footer -->
 	<footer class="flex-none flex items-center justify-between gap-2 px-1">
 		<div class="w-9"></div>
-		<div class="flex-1 flex justify-center">
-			{#if isCompleted}
-				<p class="text-xs text-theme-text-muted text-center">
-					Solved in {timeTaken ?? 0}s
-				</p>
-			{/if}
-		</div>
+		<div class="flex-1 flex justify-center"></div>
 		<button
 			onclick={() => (showSettings = true)}
 			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
@@ -881,8 +600,130 @@
 	</footer>
 </div>
 
-<!-- Confetti effect -->
-{#if showConfetti}
+<!-- Success bottom sheet -->
+{#if isCompleted}
+	<!-- Backdrop -->
+	<div
+		transition:fade={{ duration: 250 }}
+		class="fixed inset-0 z-20 bg-black/50"
+	></div>
+	<!-- Sheet -->
+	<div
+		transition:fly={{ y: 500, duration: 420, easing: cubicOut }}
+		class="fixed bottom-0 left-0 right-0 z-20 flex flex-col bg-theme-bg-primary border-t border-theme-border rounded-t-2xl shadow-2xl"
+	>
+		<!-- Drag handle -->
+		<div class="flex justify-center pt-3 pb-1 shrink-0">
+			<div class="w-10 h-1 rounded-full bg-theme-border"></div>
+		</div>
+
+		<!-- Hero section -->
+		<div class="flex flex-col items-center gap-1 px-5 pt-4 pb-5">
+			<Trophy class="w-10 h-10 text-yellow-400" />
+			<p class="text-2xl font-bold text-theme-text-primary mt-1">
+				Solved in {timeTaken ?? 0}s!
+			</p>
+		</div>
+
+		<!-- Stats row: time | coins | streak -->
+		<div class="grid grid-cols-3 gap-3 px-5 pb-5">
+			<!-- Time -->
+			<div
+				class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-theme-border bg-theme-hover"
+			>
+				<Clock class="w-5 h-5 text-urjo-blue" />
+				<span
+					class="text-lg font-bold text-theme-text-primary leading-none"
+					>{timeTaken ?? 0}s</span
+				>
+				<span
+					class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
+					>Time</span
+				>
+			</div>
+			<!-- Coins -->
+			{#if loginGate.showWallet && coins !== undefined}
+				<div
+					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-yellow-500/40 bg-yellow-500/10"
+				>
+					<Coins class="w-5 h-5 text-yellow-400" />
+					<span class="text-lg font-bold text-yellow-300 leading-none"
+						>{coins}</span
+					>
+					<span
+						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
+						>Coins</span
+					>
+				</div>
+			{:else}
+				<div
+					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-theme-border bg-theme-hover"
+				>
+					<Coins class="w-5 h-5 text-theme-text-muted" />
+					<span
+						class="text-lg font-bold text-theme-text-muted leading-none"
+						>—</span
+					>
+					<span
+						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
+						>Coins</span
+					>
+				</div>
+			{/if}
+			<!-- Streak -->
+			{#if loginGate.showStreak}
+				<div
+					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-orange-500/40 bg-orange-500/10"
+				>
+					<Flame class="w-5 h-5 text-orange-400" />
+					<span class="text-lg font-bold text-orange-300 leading-none"
+						>{streakData.currentStreak}</span
+					>
+					<span
+						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
+						>Streak</span
+					>
+				</div>
+			{:else}
+				<div
+					class="flex flex-col items-center gap-1 px-3 py-3 rounded-xl border border-theme-border bg-theme-hover"
+				>
+					<Flame class="w-5 h-5 text-theme-text-muted" />
+					<span
+						class="text-lg font-bold text-theme-text-muted leading-none"
+						>—</span
+					>
+					<span
+						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
+						>Streak</span
+					>
+				</div>
+			{/if}
+		</div>
+
+		<!-- Action buttons -->
+		<div class="flex flex-col gap-3 px-5 pb-8">
+			<!-- Continue -->
+			<button
+				onclick={handlePrimaryCta}
+				class="w-full px-4 py-3.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-base hover:opacity-90 active:scale-95 transition-all"
+			>
+				Continue
+			</button>
+			<!-- Join subreddit — only shown if not yet subscribed and onSubscribe available -->
+			{#if onSubscribe && !hasSubscribed && loginGate.showSocialActions}
+				<button
+					onclick={() => (showSubscribeConfirm = true)}
+					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
+				>
+					Join r/urjo
+				</button>
+			{/if}
+		</div>
+	</div>
+{/if}
+
+<!-- Confetti effect -->{#if showConfetti}
 	<ConfettiEffect />
 {/if}
 
