@@ -258,9 +258,7 @@
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
 			currentView =
-				isFirstTimeUser && !tutorialCompleted && firstScreen
-					? "first-screen"
-					: "game";
+				isFirstTimeUser && !tutorialCompleted ? "tutorial" : "game";
 
 			// Load economy data (logged-in only — no wallet for anon users)
 			if (isLoggedIn) {

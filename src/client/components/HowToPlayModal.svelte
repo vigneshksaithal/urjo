@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { focusTrap } from "../lib/focus-trap";
+	import { fly, fade } from "svelte/transition";
+	import { cubicOut } from "svelte/easing";
 
 	type Props = {
 		isOpen: boolean;
@@ -8,9 +9,7 @@
 		onOpenTutorial?: () => void;
 	};
 
-	let { isOpen, onClose, gridSize, onOpenTutorial }: Props = $props();
-
-	const colorCount = $derived(Math.floor((gridSize ?? 4) / 2));
+	let { isOpen, onClose, onOpenTutorial }: Props = $props();
 
 	function handleOpenTutorial(): void {
 		onClose();
@@ -19,71 +18,84 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-		<!-- Backdrop -->
-		<button
-			type="button"
-			class="absolute inset-0 bg-theme-overlay"
-			onclick={onClose}
-			aria-label="Close modal"
-		></button>
+	<!-- Backdrop -->
+	<div
+		transition:fade={{ duration: 250 }}
+		class="fixed inset-0 z-50 bg-black/60"
+		role="button"
+		tabindex="-1"
+		aria-label="Close"
+		onclick={onClose}
+		onkeydown={(e) => e.key === "Escape" && onClose()}
+	></div>
 
-		<!-- Modal -->
-		<div
-			class="relative bg-theme-bg-modal rounded-lg p-6 max-w-md shadow-xl border border-theme-border"
-			role="dialog"
-			aria-modal="true"
-			tabindex="-1"
-			use:focusTrap={{ onClose }}
-		>
-			<h2 class="text-2xl font-bold mb-4 text-theme-text-primary">
-				How to Play
-			</h2>
+	<!-- Bottom sheet -->
+	<div
+		transition:fly={{ y: 400, duration: 380, easing: cubicOut }}
+		class="fixed bottom-0 left-0 right-0 z-50 flex flex-col bg-theme-bg-primary border-t border-theme-border rounded-t-2xl shadow-2xl"
+	>
+		<!-- Drag handle -->
+		<div class="flex justify-center pt-3 pb-1 shrink-0">
+			<div class="w-10 h-1 rounded-full bg-theme-border"></div>
+		</div>
 
-			<ul class="space-y-3 text-sm text-theme-text-secondary">
-				<li class="flex items-start gap-2">
-					<span class="text-lg">🎯</span>
-					<span
-						>Fill each row and column with exactly {colorCount} red and
-						{colorCount} blue circles</span
+		<div class="px-5 py-4 pb-8 flex flex-col gap-4">
+			<div class="flex items-center justify-between">
+				<h2 class="text-base font-bold text-theme-text-primary">
+					How to Play
+				</h2>
+				<button
+					onclick={onClose}
+					class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-theme-hover transition-colors text-theme-text-muted"
+					aria-label="Close">✕</button
+				>
+			</div>
+
+			<!-- Quick rules — visual pill cards -->
+			<div class="flex flex-col gap-2">
+				<div
+					class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-theme-bg-secondary border border-theme-border"
+				>
+					<span class="text-xl shrink-0">🔴🔵</span>
+					<span class="text-sm text-theme-text-secondary"
+						>Each row and column needs <strong
+							class="text-theme-text-primary"
+							>equal red and blue</strong
+						></span
 					>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">🔢</span>
-					<span
-						>Numbers show how many surrounding spots (including
-						diagonals) share the same color</span
+				</div>
+				<div
+					class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-theme-bg-secondary border border-theme-border"
+				>
+					<span class="text-xl shrink-0">👆</span>
+					<span class="text-sm text-theme-text-secondary"
+						>Tap to cycle: empty → red → blue → empty</span
 					>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">🔄</span>
-					<span>Adjacent rows and columns must be different</span>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">👆</span>
-					<span>Tap to cycle colors: empty → red → blue → empty</span>
-				</li>
-				<li class="flex items-start gap-2">
-					<span class="text-lg">⬆️</span>
-					<span>Swipe up for blue, swipe down for red</span>
-				</li>
-			</ul>
+				</div>
+				<div
+					class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-theme-bg-secondary border border-theme-border"
+				>
+					<span class="text-xl shrink-0">🔢</span>
+					<span class="text-sm text-theme-text-secondary"
+						>Numbers show how many same-color neighbors (diagonals
+						count)</span
+					>
+				</div>
+			</div>
+
+			<button
+				onclick={handleOpenTutorial}
+				class="w-full px-4 py-3.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-sm hover:opacity-90 active:scale-95 transition-all"
+			>
+				Open Interactive Tutorial
+			</button>
 
 			<button
 				onclick={onClose}
-				class="mt-6 w-full bg-theme-text-primary text-theme-bg-primary py-2 rounded-lg hover:opacity-90 active:scale-95 transition-all"
+				class="w-full px-4 py-2.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
 			>
-				Got it!
+				Got it, let me play
 			</button>
-
-			{#if onOpenTutorial}
-				<button
-					onclick={handleOpenTutorial}
-					class="mt-2 w-full border border-theme-border text-theme-text-secondary py-2 rounded-lg hover:bg-theme-hover active:scale-95 transition-all text-sm"
-				>
-					📖 Open Tutorial
-				</button>
-			{/if}
 		</div>
 	</div>
 {/if}

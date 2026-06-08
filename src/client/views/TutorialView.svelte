@@ -7,7 +7,6 @@
 	} from "../lib/tutorial-data";
 	import type { TutorialStep } from "../lib/tutorial-data";
 	import GameBoard from "../components/GameBoard.svelte";
-	import ArrowDownLeft from "lucide-svelte/icons/arrow-down-left";
 
 	type Props = {
 		onComplete: () => void;
@@ -61,9 +60,6 @@
 			: null,
 	);
 
-	/**
-	 * Check if a cell is a target for the current step (allows cycling even if already colored).
-	 */
 	function isTargetCell(row: number, col: number): boolean {
 		if (!currentStep) return false;
 		return currentStep.targetCells.some(
@@ -71,15 +67,10 @@
 		);
 	}
 
-	/**
-	 * Handle cell tap in tutorial -- normal cycling (blue → red → empty),
-	 * step advances only when ALL target cells have their correct color.
-	 */
 	function handleCellChange(row: number, col: number, color: CellColor) {
 		if (tutorialDone) return;
 		if (!isTargetCell(row, col)) return;
 
-		// Apply the cycled color from Cell (normal tap behavior)
 		grid = grid.map((r, ri) =>
 			ri === row
 				? r.map((c, ci) =>
@@ -90,7 +81,6 @@
 				: r,
 		);
 
-		// Check if ALL target cells now have their expected color
 		const allCorrect = currentStep!.targetCells.every((t) => {
 			const r = grid[t.row];
 			if (!r) return false;
@@ -105,13 +95,12 @@
 				} else {
 					tutorialDone = true;
 				}
-			}, 400);
+			}, 350);
 		}
 	}
 
 	function getHighlightStyle(step: TutorialStep): string {
 		const cellPercent = 25;
-
 		if (step.highlightType === "row") {
 			const top = step.highlightIndex * cellPercent;
 			return `top: ${top}%; left: -2%; width: 104%; height: ${cellPercent}%;`;
@@ -121,11 +110,11 @@
 		}
 	}
 
-	function getArrowStyle(step: TutorialStep): string {
+	function getHandStyle(step: TutorialStep): string {
 		const cellPercent = 25;
-		// Position arrow outside and above the target cell, pointing towards it
-		const top = step.handRow * cellPercent - 8; // 8% above the cell
-		const left = step.handCol * cellPercent + cellPercent * 1.1; // Slightly to the right
+		// Position the hand emoji just below-right of the target cell
+		const top = step.handRow * cellPercent + cellPercent * 0.55;
+		const left = step.handCol * cellPercent + cellPercent * 0.55;
 		return `top: ${top}%; left: ${left}%;`;
 	}
 
@@ -135,131 +124,132 @@
 		tutorialDone = false;
 	}
 
-	/** Label for the primary completion CTA based on mode and context. */
 	const completionLabel = $derived(
-		mode === "opt-in"
-			? "Back to Game"
-			: isReplay
-				? "Back to Game"
-				: "Next Challenge",
+		mode === "opt-in" || isReplay ? "Back to Game" : "Start Playing",
 	);
+
+	const totalSteps = TUTORIAL_STEPS.length;
 </script>
 
-<div class="h-full w-full flex flex-col p-4 overflow-hidden">
-	<!-- Header: dismiss button in opt-in mode -->
-	{#if mode === "opt-in"}
-		<div class="flex-none flex justify-end mb-1">
+<div class="h-full w-full flex flex-col bg-theme-bg-primary overflow-hidden">
+	<!-- Top bar -->
+	<div class="flex-none flex items-center justify-between px-4 pt-4 pb-2">
+		<span
+			class="text-xs font-semibold text-theme-text-muted uppercase tracking-widest"
+		>
+			How to Play
+		</span>
+		{#if mode === "opt-in" || isReplay}
 			<button
-				onclick={onDismiss}
-				class="px-3 py-1 text-xs text-theme-text-muted border border-theme-border rounded-lg hover:bg-theme-hover active:scale-95 transition-all"
-				aria-label="Close tutorial"
+				onclick={onDismiss ?? onComplete}
+				class="text-xs text-theme-text-muted px-2 py-1 rounded-lg hover:bg-theme-hover transition-colors"
 			>
-				✕ Close
+				Skip
 			</button>
-		</div>
-	{/if}
+		{/if}
+	</div>
 
-	<!-- Instruction text at top with white border box -->
-	<div
-		class="flex-none min-h-[60px] flex items-center justify-center px-2 mb-2"
-	>
+	<!-- Step instruction card -->
+	<div class="flex-none px-4 pb-3">
 		{#if tutorialDone}
 			<div
-				class="border-2 border-theme-border rounded-lg px-4 py-3 bg-theme-bg-secondary backdrop-blur-sm"
+				class="rounded-2xl bg-green-500/10 border border-green-500/30 px-4 py-4 text-center"
 			>
-				<p
-					class="text-theme-text-primary font-mono text-sm text-center leading-relaxed"
-				>
-					Tutorial complete. Continue below.
+				<p class="text-xl font-bold text-green-400">You got it! 🎉</p>
+				<p class="text-sm text-theme-text-secondary mt-1">
+					Now try the real puzzle.
 				</p>
 			</div>
 		{:else if currentStep}
 			<div
-				class="border-2 border-theme-border rounded-lg px-4 py-3 bg-theme-bg-secondary backdrop-blur-sm"
+				class="rounded-2xl bg-theme-bg-secondary border border-theme-border px-4 py-4"
 			>
 				<p
-					class="text-theme-text-primary font-mono text-sm text-center leading-relaxed"
+					class="text-lg font-bold text-theme-text-primary leading-snug"
 				>
-					{currentStep.instruction}
+					{currentStep.headline}
+				</p>
+				<p
+					class="text-sm text-theme-text-secondary mt-1 leading-relaxed"
+				>
+					{currentStep.detail}
 				</p>
 			</div>
 		{/if}
 	</div>
 
-	<!-- Game board with overlays -->
-	<main class="flex-1 min-h-0 flex flex-col items-center justify-center">
-		<div class="relative w-full max-w-[340px] mx-auto">
-			<!-- The game board -->
+	<!-- Board area -->
+	<main class="flex-1 min-h-0 flex flex-col items-center justify-center px-6">
+		<div class="relative w-full max-w-[300px] mx-auto">
 			<GameBoard
 				{grid}
 				gridSize={GRID_SIZE}
 				onCellChange={handleCellChange}
 			/>
 
-			<!-- Highlight overlay -->
+			<!-- Row / column highlight ring -->
 			{#if currentStep && !tutorialDone}
 				<div
-					class="absolute pointer-events-none border-2 border-theme-text-primary/70 rounded-xl z-10"
+					class="absolute pointer-events-none border-2 border-white/60 rounded-xl z-10"
 					style={getHighlightStyle(currentStep)}
 				></div>
 			{/if}
 
-			<!-- Arrow pointer: positioned outside, pointing towards cell to tap -->
+			<!-- Animated hand pointer -->
 			{#if currentStep && !tutorialDone}
 				<div
-					class="absolute pointer-events-none z-20"
-					style={getArrowStyle(currentStep)}
+					class="absolute pointer-events-none z-20 text-2xl animate-bounce"
+					style={getHandStyle(currentStep)}
 				>
-					<ArrowDownLeft
-						size={40}
-						color="var(--theme-text-primary)"
-						strokeWidth={3}
-						class="drop-shadow-lg animate-bounce"
-					/>
+					👆
 				</div>
 			{/if}
 
-			<!-- Completion overlay -->
+			<!-- Done overlay — just dim board, buttons are below -->
 			{#if tutorialDone}
 				<div
-					class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-theme-overlay backdrop-blur-sm"
-				>
-					<div class="flex flex-col items-center gap-3">
-						<button
-							onclick={onComplete}
-							class="px-8 py-2.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg
-								text-base hover:opacity-90 active:scale-95 transition-all shadow-lg"
-						>
-							{completionLabel}
-						</button>
-						<button
-							onclick={handleRestart}
-							class="px-6 py-1.5 border border-theme-border text-theme-text-secondary rounded-lg
-								text-sm hover:bg-theme-hover active:scale-95 transition-all"
-						>
-							Restart Tutorial
-						</button>
-					</div>
-				</div>
+					class="absolute inset-0 rounded-xl bg-black/20 pointer-events-none z-10"
+				></div>
 			{/if}
 		</div>
 	</main>
 
-	<!-- Step indicator -->
-	<footer class="flex-none h-10 flex items-center justify-center">
+	<!-- Footer: dots + buttons -->
+	<footer class="flex-none px-4 pb-8 pt-4 flex flex-col gap-3">
+		<!-- Progress dots -->
 		{#if !tutorialDone}
-			<div class="flex gap-1.5">
+			<div class="flex gap-1.5 justify-center mb-1">
 				{#each TUTORIAL_STEPS as _, i (i)}
 					<div
-						class="w-2 h-2 rounded-full transition-colors
+						class="h-1.5 rounded-full transition-all duration-300
 							{i === currentStepIndex
-							? 'bg-theme-text-primary'
+							? 'w-6 bg-theme-text-primary'
 							: i < currentStepIndex
-								? 'bg-theme-text-primary/50'
-								: 'bg-theme-text-primary/20'}"
+								? 'w-1.5 bg-theme-text-primary/50'
+								: 'w-1.5 bg-theme-text-primary/20'}"
 					></div>
 				{/each}
 			</div>
+		{/if}
+
+		{#if tutorialDone}
+			<button
+				onclick={onComplete}
+				class="w-full px-4 py-3.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-base hover:opacity-90 active:scale-95 transition-all"
+			>
+				{completionLabel}
+			</button>
+			<button
+				onclick={handleRestart}
+				class="w-full px-4 py-2.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
+			>
+				Replay Tutorial
+			</button>
+		{:else}
+			<!-- Step counter -->
+			<p class="text-center text-xs text-theme-text-muted">
+				Step {currentStepIndex + 1} of {totalSteps} — follow the arrow
+			</p>
 		{/if}
 	</footer>
 </div>
