@@ -10,6 +10,8 @@
 		isLoading: boolean;
 		hasError?: boolean;
 		gridSize?: number;
+		isHint?: boolean;
+		hintColor?: "blue" | "red";
 		onChange: (color: CellColor) => void;
 	};
 
@@ -22,6 +24,8 @@
 		isLoading = false,
 		hasError = false,
 		gridSize,
+		isHint = false,
+		hintColor,
 		onChange,
 	}: Props = $props();
 
@@ -103,6 +107,16 @@
 		></div>
 	{/if}
 
+	<!-- Idle hint: bright pulsating hint color overlay on one correct empty cell -->
+	{#if !isLoading && color === null && isHint && hintColor}
+		<div
+			class="absolute inset-0 rounded-full pointer-events-none animate-hint-pulse
+				{hintColor === 'blue'
+				? 'bg-urjo-blue ring-4 ring-urjo-blue/60'
+				: 'bg-urjo-coral ring-4 ring-urjo-coral/60'}"
+		></div>
+	{/if}
+
 	<!-- Loading state: animated red cell -->
 	{#if isLoading && (color === "red" || color === null)}
 		<div
@@ -178,5 +192,21 @@
 
 	.animate-loading-blue {
 		animation: loadingBlueRed 600ms ease-in-out infinite;
+	}
+
+	@keyframes hintPulse {
+		0%,
+		100% {
+			opacity: 0.5;
+			transform: scale(0.88);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1.05);
+		}
+	}
+
+	.animate-hint-pulse {
+		animation: hintPulse 1s ease-in-out infinite;
 	}
 </style>

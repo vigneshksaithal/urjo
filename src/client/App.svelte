@@ -129,6 +129,7 @@
 	>(undefined);
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
+	let puzzleSolution = $state("");
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
 	let puzzleNumber = $state(0);
 	let firstScreen = $state<GameState["firstScreen"] | undefined>(undefined);
@@ -196,6 +197,7 @@
 
 			isLoggedIn = data.isLoggedIn !== false;
 			puzzleColors = data.puzzle.colors;
+			puzzleSolution = data.puzzle.solution;
 			puzzleNumbers = data.puzzle.numbers;
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
@@ -533,6 +535,16 @@
 	}
 
 	/**
+	 * Handle "Challenge & Continue" button — creates the challenge post then
+	 * immediately moves to the next puzzle without waiting for the post result.
+	 */
+	async function handleChallengeAndContinue() {
+		// Fire challenge in the background — don't block the next puzzle load
+		void handleChallenge();
+		await handleNextChallenge();
+	}
+
+	/**
 	 * Handle "Next Challenge" button.
 	 */
 	async function handleNextChallenge() {
@@ -554,6 +566,7 @@
 			const data: NextChallengeResponse = await response.json();
 
 			puzzleColors = data.puzzle.colors;
+			puzzleSolution = data.puzzle.solution;
 			puzzleNumbers = data.puzzle.numbers;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
@@ -617,6 +630,7 @@
 			const data: GridSizeResponse = await response.json();
 
 			puzzleColors = data.puzzle.colors;
+			puzzleSolution = data.puzzle.solution;
 			puzzleNumbers = data.puzzle.numbers;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
@@ -724,6 +738,10 @@
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
 			onChallenge: handleChallenge,
+			onChallengeAndContinue: isLoggedIn
+				? handleChallengeAndContinue
+				: undefined,
+			solution: puzzleSolution,
 			onOpenShop: () => (showShop = true),
 			onOpenAnalytics: () => (showAnalytics = true),
 			isMod,

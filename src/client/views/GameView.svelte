@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import { navigateTo, showLoginPrompt } from "@devvit/web/client";
 	import type { CellColor, Grid, StreakData } from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
@@ -6,14 +7,11 @@
 	import type { CompletionContext } from "../../shared/social-types";
 	import { validateGrid } from "../lib/validation";
 	import { computeBoardSize } from "../lib/board-layout";
-	import { hintShownStore, markShown } from "../stores/hints";
 	import { fireOnce } from "../stores/first-action";
 	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
 	import { getLoginGate, LOGIN_CTA } from "../lib/login-gate";
-	import { get } from "svelte/store";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
-	import InlineHint from "../components/InlineHint.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
 	import HowToPlayModal from "../components/HowToPlayModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
@@ -50,6 +48,7 @@
 		hasChallenged: boolean;
 		challengeUrl: string | null;
 		onChallenge: () => void;
+		onChallengeAndContinue?: () => void;
 		coins?: number;
 		onOpenShop?: () => void;
 		onOpenAnalytics?: () => void;
@@ -115,6 +114,8 @@
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
 		};
+		/** Solution string (e.g. "rbbrrbbr...") used to compute the idle hint. */
+		solution?: string;
 	};
 
 	let {
@@ -127,6 +128,7 @@
 		hasChallenged,
 		challengeUrl,
 		onChallenge,
+		onChallengeAndContinue,
 		coins,
 		onOpenShop,
 		onOpenAnalytics,
@@ -159,6 +161,7 @@
 			numberConstraint: false,
 			adjacencyViolation: false,
 		},
+		solution = "",
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -166,6 +169,7 @@
 	let showSettings = $state(false);
 	let showModPreview = $state(false);
 	let showChallengeConfirm = $state(false);
+	let showChallengeAndContinueConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
 	let showMissions = $state(false);
 	let showAchievements = $state(false);
@@ -177,6 +181,75 @@
 	let openMoreActionsKey = $state<string | null>(null);
 	let showOptInTutorial = $state(false);
 	let challengePromptDismissed = $state(false);
+
+	// ─── Idle hint ────────────────────────────────────────────────────────────
+	// After 3s of no cell interaction, reveal one correct cell as a dull
+	// pulsating hint. Resets whenever the user taps a cell.
+	const HINT_DELAY_MS = 3000;
+	let hintCell = $state<{
+		row: number;
+		col: number;
+		color: "blue" | "red";
+	} | null>(null);
+	// Plain let — not $state — so writes never trigger reactive re-runs.
+	let hintTimerId: ReturnType<typeof setTimeout> | null = null;
+
+	function scheduleHint(): void {
+		if (hintTimerId !== null) clearTimeout(hintTimerId);
+		hintTimerId = setTimeout(() => {
+			hintCell = computeHintCell(grid, solution, gridSize);
+		}, HINT_DELAY_MS);
+	}
+
+	function cancelHint(): void {
+		if (hintTimerId !== null) {
+			clearTimeout(hintTimerId);
+			hintTimerId = null;
+		}
+		hintCell = null;
+	}
+
+	function computeHintCell(
+		currentGrid: Grid,
+		sol: string,
+		size: number,
+	): { row: number; col: number; color: "blue" | "red" } | null {
+		if (!sol) return null;
+		const candidates: {
+			row: number;
+			col: number;
+			color: "blue" | "red";
+		}[] = [];
+		for (let r = 0; r < size; r++) {
+			for (let c = 0; c < size; c++) {
+				const cell = currentGrid[r]?.[c];
+				if (!cell || cell.locked || cell.color !== null) continue;
+				const idx = r * size + c;
+				const solChar = sol[idx];
+				if (solChar === "b")
+					candidates.push({ row: r, col: c, color: "blue" });
+				else if (solChar === "r")
+					candidates.push({ row: r, col: c, color: "red" });
+			}
+		}
+		if (candidates.length === 0) return null;
+		return (
+			candidates[Math.floor(Math.random() * candidates.length)] ?? null
+		);
+	}
+
+	// Kick off the initial hint timer on mount; clean up on unmount.
+	onMount(() => {
+		if (!isCompleted) scheduleHint();
+		return () => {
+			if (hintTimerId !== null) clearTimeout(hintTimerId);
+		};
+	});
+
+	// Cancel hint when puzzle is completed.
+	$effect(() => {
+		if (isCompleted) cancelHint();
+	});
 
 	// Reset the challenge prompt each time a new perfect solve is signalled —
 	// prevents a previous dismiss from suppressing the nudge on future solves.
@@ -193,64 +266,6 @@
 	let notifySubmitting = $state(false);
 	let notifyError = $state<string | null>(null);
 
-	// ─── Inline hint visibility flags ────────────────────────────────────────
-	// These control whether the InlineHint bubble is currently mounted.
-	// The hintShownStore flags prevent re-display within the same session.
-	let showNumberHint = $state(false);
-	let showAdjacencyHint = $state(false);
-
-	// Wraps the parent's onCellChange to intercept taps and surface inline hints.
-	// The number-constraint hint fires when the tapped cell has a non-null number
-	// (Req 8.1). The adjacency-violation hint fires when validateGrid detects a
-	// violated row or column after the mutation (Req 9.1). Both are shown at most
-	// once per session via the hintShownStore flags (Reqs 8.4, 9.4).
-
-	function handleCellChange(
-		row: number,
-		col: number,
-		color: CellColor,
-	): void {
-		// Capture the tapped cell's number BEFORE the parent mutates the grid,
-		// so we can decide whether to show the number-constraint hint.
-		const tappedCell = grid[row]?.[col];
-		const tappedCellHasNumber =
-			tappedCell !== undefined && tappedCell.number !== null;
-
-		// Delegate to parent — this triggers a grid prop update on the next tick.
-		onCellChange(row, col, color);
-
-		// Number-constraint hint: show once per session when a numbered cell is tapped.
-		const hints = get(hintShownStore);
-		if (tappedCellHasNumber && !hints.numberConstraintShown) {
-			markShown("numberConstraint");
-			showNumberHint = true;
-		}
-
-		// Adjacency-violation hint: show once per session when validateGrid detects
-		// a violated row or column. We re-run validateGrid on the updated grid
-		// synchronously — the parent's grid prop update may not have propagated yet,
-		// so we compute it ourselves using the new color value.
-		const updatedGrid: Grid = grid.map((r, ri) =>
-			ri === row
-				? r.map((c, ci) =>
-						ci === col
-							? { color, number: c.number, locked: c.locked }
-							: c,
-					)
-				: r,
-		);
-		const updatedValidation = validateGrid(updatedGrid, gridSize);
-		const hasViolation =
-			updatedValidation.violatedRows.size > 0 ||
-			updatedValidation.violatedCols.size > 0;
-
-		const hintsAfter = get(hintShownStore);
-		if (hasViolation && !hintsAfter.adjacencyViolationShown) {
-			markShown("adjacencyViolation");
-			showAdjacencyHint = true;
-		}
-	}
-
 	// ─── Help-tap tracking ────────────────────────────────────────────────────
 	// POST to /api/game/help-tap on the first Help icon tap per session (Req 11.1).
 	// Fire-and-forget — failures are silently ignored so gameplay is never blocked.
@@ -261,6 +276,17 @@
 		fetch("/api/game/help-tap", { method: "POST" }).catch(() => {
 			// Non-blocking: tracking failure does not affect gameplay
 		});
+	}
+
+	function handleCellChangeWithHint(
+		row: number,
+		col: number,
+		color: import("../../shared/types").CellColor,
+	): void {
+		// Reset idle hint whenever the user interacts with a cell
+		cancelHint();
+		scheduleHint();
+		onCellChange(row, col, color);
 	}
 
 	const validation = $derived(validateGrid(grid, gridSize));
@@ -341,6 +367,11 @@
 	function confirmChallenge(): void {
 		showChallengeConfirm = false;
 		onChallenge();
+	}
+
+	function confirmChallengeAndContinue(): void {
+		showChallengeAndContinueConfirm = false;
+		onChallengeAndContinue?.();
 	}
 
 	function handlePrimaryCta(): void {
@@ -577,32 +608,16 @@
 				<GameBoard
 					{grid}
 					{gridSize}
-					onCellChange={handleCellChange}
+					onCellChange={handleCellChangeWithHint}
 					violatedRows={validation.violatedRows}
 					violatedCols={validation.violatedCols}
+					{hintCell}
 				/>
 			</div>
 		</div>
 
 		<!-- Completion overlay — now a bottom sheet rendered outside <main> -->
 	</main>
-
-	<!-- Inline hints — rendered outside the board so they float above everything -->
-	{#if showNumberHint}
-		<InlineHint
-			text="The number shows how many same-color neighbors this cell has, counting all 8 surrounding cells including diagonals."
-			kind="numberConstraint"
-			onDismiss={() => (showNumberHint = false)}
-		/>
-	{/if}
-
-	{#if showAdjacencyHint}
-		<InlineHint
-			text="No row or column may contain three of the same color in a row."
-			kind="adjacencyViolation"
-			onDismiss={() => (showAdjacencyHint = false)}
-		/>
-	{/if}
 
 	<!-- Footer -->
 	<footer class="flex-none flex items-center justify-between gap-2 px-1">
@@ -724,6 +739,14 @@
 			>
 				Continue
 			</button>
+			{#if onChallengeAndContinue && loginGate.showSocialActions}
+				<button
+					onclick={() => (showChallengeAndContinueConfirm = true)}
+					class="w-full px-4 py-3.5 border border-yellow-500/60 text-yellow-400 font-semibold rounded-2xl text-sm hover:bg-yellow-500/10 active:scale-95 transition-all"
+				>
+					Challenge &amp; Continue
+				</button>
+			{/if}
 			{#if onSubscribe && !hasSubscribed && loginGate.showSocialActions}
 				<button
 					onclick={() => (showSubscribeConfirm = true)}
@@ -768,6 +791,40 @@
 					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
 				>
 					Create
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Challenge & Continue confirmation dialog -->
+{#if showChallengeAndContinueConfirm}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+	>
+		<div
+			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+		>
+			<h2 class="text-base font-bold text-theme-text-primary">
+				Challenge &amp; Continue?
+			</h2>
+			<p class="text-sm text-theme-text-secondary">
+				Creates a public post in r/urjo with your time{username
+					? ` as u/${username}`
+					: ""} for others to beat, then loads your next puzzle.
+			</p>
+			<div class="flex gap-3">
+				<button
+					onclick={() => (showChallengeAndContinueConfirm = false)}
+					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
+				>
+					Cancel
+				</button>
+				<button
+					onclick={confirmChallengeAndContinue}
+					class="flex-1 px-4 py-2 bg-yellow-500 text-black font-bold rounded-lg text-sm hover:opacity-90 transition-all"
+				>
+					Challenge &amp; Play
 				</button>
 			</div>
 		</div>

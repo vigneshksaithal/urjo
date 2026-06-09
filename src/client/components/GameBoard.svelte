@@ -8,6 +8,7 @@
 		onCellChange: (row: number, col: number, color: CellColor) => void;
 		violatedRows?: Set<number>;
 		violatedCols?: Set<number>;
+		hintCell?: { row: number; col: number; color: "blue" | "red" } | null;
 	};
 
 	let {
@@ -16,6 +17,7 @@
 		onCellChange,
 		violatedRows = new Set(),
 		violatedCols = new Set(),
+		hintCell = null,
 	}: Props = $props();
 
 	const gridStyle = $derived(
@@ -36,6 +38,14 @@
 				hasError={violatedRows.has(rowIndex) ||
 					violatedCols.has(colIndex)}
 				{gridSize}
+				isHint={hintCell !== null &&
+					hintCell.row === rowIndex &&
+					hintCell.col === colIndex}
+				hintColor={hintCell !== null &&
+				hintCell.row === rowIndex &&
+				hintCell.col === colIndex
+					? hintCell.color
+					: undefined}
 				onChange={(color) => onCellChange(rowIndex, colIndex, color)}
 			/>
 		{/each}
