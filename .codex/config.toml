@@ -1,11 +1,3 @@
-experimental_use_rmcp_client = true
-
-[mcp_servers.svelte]
-url = "https://mcp.svelte.dev/mcp"
-
 [mcp_servers.devvit]
 command = "npx"
 args = ["-y", "@devvit/mcp"]
-
-[mcp_servers.devvit.tools.devvit_search]
-approval_mode = "approve"
