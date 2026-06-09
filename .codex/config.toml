@@ -1,3 +1,6 @@
 [mcp_servers.devvit]
 command = "npx"
 args = ["-y", "@devvit/mcp"]
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
