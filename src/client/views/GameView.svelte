@@ -320,6 +320,20 @@
 	// social actions are hidden and a sign-in CTA appears instead.
 	const loginGate = $derived(getLoginGate(isLoggedIn));
 
+	// Puzzle completion progress: fraction of cells that have been filled (color !== null).
+	// Used to drive the progress bar beside the coins button.
+	const puzzleProgress = $derived((): number => {
+		const total = gridSize * gridSize;
+		if (total === 0) return 0;
+		let filled = 0;
+		for (const row of grid) {
+			for (const cell of row) {
+				if (cell.color !== null) filled++;
+			}
+		}
+		return filled / total;
+	});
+
 	function handleLoginPrompt(): void {
 		showLoginPrompt();
 	}
@@ -465,7 +479,11 @@
 				</div>
 			{/if}
 			{#if loginGate.showWallet && coins !== undefined && onOpenShop}
-				<CoinDisplay {coins} onClick={onOpenShop} />
+				<CoinDisplay
+					{coins}
+					onClick={onOpenShop}
+					progress={puzzleProgress()}
+				/>
 			{/if}
 		</div>
 

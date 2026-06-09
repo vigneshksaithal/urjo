@@ -118,6 +118,31 @@
 	animation: cta-pulse 2.4s ease-in-out infinite;
 }
 
+/* Bouncy CTA pulse — preview screen Play button */
+@keyframes bounce-btn {
+
+	0%,
+	100% {
+		transform: scale(1);
+	}
+
+	40% {
+		transform: scale(1.06);
+	}
+
+	60% {
+		transform: scale(0.97);
+	}
+
+	80% {
+		transform: scale(1.03);
+	}
+}
+
+.animate-bounce-btn {
+	animation: bounce-btn 1.8s ease-in-out infinite;
+}
+
 /* Bottom sheet slide-up animation */
 @keyframes slideUp {
 	from {

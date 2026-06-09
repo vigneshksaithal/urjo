@@ -1,12 +1,10 @@
 <script lang="ts">
-	import type { CellColor, Grid, Cell } from "../../shared/types";
-	import {
-		TUTORIAL_COLORS,
-		TUTORIAL_NUMBERS,
-		TUTORIAL_STEPS,
-	} from "../lib/tutorial-data";
-	import type { TutorialStep } from "../lib/tutorial-data";
-	import GameBoard from "../components/GameBoard.svelte";
+	import { fly, fade, scale } from "svelte/transition";
+	import { elasticOut } from "svelte/easing";
+	import type { CellColor } from "../../shared/types";
+	import { TUTORIAL_LESSONS, TOTAL_LESSONS } from "../lib/tutorial-data";
+	import type { LessonCell } from "../lib/tutorial-data";
+	import Cell from "../components/Cell.svelte";
 
 	type Props = {
 		onComplete: () => void;
@@ -22,234 +20,383 @@
 		mode = "mandatory",
 	}: Props = $props();
 
-	const GRID_SIZE = 4;
+	// ── State ────────────────────────────────────────────────────────────────────
 
-	let currentStepIndex = $state(0);
-	let tutorialDone = $state(false);
+	let lessonIndex = $state(0);
+	let phase = $state<"playing" | "celebrating">("playing");
+	let cells = $state<LessonCell[]>([]);
+	let feedbackMsg = $state<string | null>(null);
+	let feedbackType = $state<"error" | "hint">("hint");
+	let shakeIndex = $state<number | null>(null);
+	let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+	let hintTimer: ReturnType<typeof setTimeout> | null = null;
 
-	function buildInitialGrid(): Grid {
-		const grid: Grid = [];
-		let index = 0;
-		for (let row = 0; row < GRID_SIZE; row++) {
-			const rowCells: Cell[] = [];
-			for (let col = 0; col < GRID_SIZE; col++) {
-				const colorChar = TUTORIAL_COLORS[index] ?? ".";
-				const numberChar = TUTORIAL_NUMBERS[index] ?? "-";
-				const color: CellColor =
-					colorChar === "r"
-						? "red"
-						: colorChar === "b"
-							? "blue"
-							: null;
-				const number =
-					numberChar !== "-" ? parseInt(numberChar, 10) : null;
-				const locked = colorChar !== ".";
-				rowCells.push({ color, number, locked });
-				index++;
+	// ── Derived ──────────────────────────────────────────────────────────────────
+
+	const lesson = $derived(TUTORIAL_LESSONS[lessonIndex]!);
+	const progressPct = $derived(
+		((lessonIndex + (phase === "celebrating" ? 1 : 0)) / TOTAL_LESSONS) *
+			100,
+	);
+	const isLastLesson = $derived(lessonIndex === TOTAL_LESSONS - 1);
+
+	// ── Lesson init ──────────────────────────────────────────────────────────────
+
+	function initLesson(index: number): void {
+		const l = TUTORIAL_LESSONS[index];
+		if (!l) return;
+		cells = l.cells.map((c) => ({ ...c }));
+		feedbackMsg = l.subtitle; // subtitle as initial soft hint
+		feedbackType = "hint";
+		shakeIndex = null;
+		clearTimers();
+		// After 4s, show the contextual hint if user is idle
+		hintTimer = setTimeout(() => {
+			if (feedbackType !== "error") {
+				feedbackMsg = l.hint || l.subtitle;
+				feedbackType = "hint";
 			}
-			grid.push(rowCells);
+		}, 4000);
+	}
+
+	$effect(() => {
+		initLesson(lessonIndex);
+	});
+
+	function clearTimers(): void {
+		if (feedbackTimer) {
+			clearTimeout(feedbackTimer);
+			feedbackTimer = null;
 		}
-		return grid;
-	}
-
-	let grid = $state<Grid>(buildInitialGrid());
-
-	let currentStep = $derived<TutorialStep | null>(
-		currentStepIndex < TUTORIAL_STEPS.length
-			? (TUTORIAL_STEPS[currentStepIndex] ?? null)
-			: null,
-	);
-
-	function isTargetCell(row: number, col: number): boolean {
-		if (!currentStep) return false;
-		return currentStep.targetCells.some(
-			(t) => t.row === row && t.col === col,
-		);
-	}
-
-	function handleCellChange(row: number, col: number, color: CellColor) {
-		if (tutorialDone) return;
-		if (!isTargetCell(row, col)) return;
-
-		grid = grid.map((r, ri) =>
-			ri === row
-				? r.map((c, ci) =>
-						ci === col
-							? { color, number: c.number, locked: c.locked }
-							: c,
-					)
-				: r,
-		);
-
-		const allCorrect = currentStep!.targetCells.every((t) => {
-			const r = grid[t.row];
-			if (!r) return false;
-			const c = r[t.col];
-			return c ? c.color === t.expectedColor : false;
-		});
-
-		if (allCorrect) {
-			setTimeout(() => {
-				if (currentStepIndex < TUTORIAL_STEPS.length - 1) {
-					currentStepIndex++;
-				} else {
-					tutorialDone = true;
-				}
-			}, 350);
+		if (hintTimer) {
+			clearTimeout(hintTimer);
+			hintTimer = null;
 		}
 	}
 
-	function getHighlightStyle(step: TutorialStep): string {
-		const cellPercent = 25;
-		if (step.highlightType === "row") {
-			const top = step.highlightIndex * cellPercent;
-			return `top: ${top}%; left: -2%; width: 104%; height: ${cellPercent}%;`;
+	// ── Cell interaction ─────────────────────────────────────────────────────────
+
+	function handleCellChange(flatIndex: number, newColor: CellColor): void {
+		if (phase !== "playing") return;
+		const cell = cells[flatIndex];
+		if (!cell || cell.locked) return;
+
+		// On first interaction, clear the subtitle hint
+		if (feedbackType === "hint") {
+			feedbackMsg = null;
+			clearTimers();
+		}
+
+		cells = cells.map((c, i) =>
+			i === flatIndex ? { ...c, color: newColor } : c,
+		);
+
+		if (lesson.successCriteria === "exact-targets" && newColor !== null) {
+			const expected = cells[flatIndex]?.expectedColor;
+			if (expected && newColor !== expected) {
+				triggerError(flatIndex, lesson.errorMessage);
+				return;
+			}
+		}
+
+		if (checkSuccess()) {
+			feedbackMsg = null;
+			clearTimers();
+			setTimeout(() => advanceLesson(), 300);
+		}
+	}
+
+	function triggerError(index: number, message: string): void {
+		clearTimers();
+		feedbackMsg = message;
+		feedbackType = "error";
+		shakeIndex = index;
+		feedbackTimer = setTimeout(() => {
+			feedbackMsg = lesson.hint || null;
+			feedbackType = "hint";
+			shakeIndex = null;
+		}, 1600);
+	}
+
+	// ── Success logic ────────────────────────────────────────────────────────────
+
+	function checkSuccess(): boolean {
+		if (lesson.successCriteria === "any-color") {
+			return cells.some((c) => !c.locked && c.color !== null);
+		}
+		if (lesson.id === "balance-row") {
+			const reds = cells.filter((c) => c.color === "red").length;
+			const blues = cells.filter((c) => c.color === "blue").length;
+			return reds === 2 && blues === 2;
+		}
+		return cells.every(
+			(c) =>
+				c.locked ||
+				c.expectedColor === null ||
+				c.color === c.expectedColor,
+		);
+	}
+
+	// ── Progression ──────────────────────────────────────────────────────────────
+
+	function advanceLesson(): void {
+		clearTimers();
+		phase = "celebrating";
+	}
+
+	function afterCelebration(): void {
+		if (isLastLesson) {
+			onComplete();
 		} else {
-			const left = step.highlightIndex * cellPercent;
-			return `top: -2%; left: ${left}%; width: ${cellPercent}%; height: 104%;`;
+			lessonIndex += 1;
+			phase = "playing";
 		}
 	}
-
-	function getHandStyle(step: TutorialStep): string {
-		const cellPercent = 25;
-		// Position the hand emoji just below-right of the target cell
-		const top = step.handRow * cellPercent + cellPercent * 0.55;
-		const left = step.handCol * cellPercent + cellPercent * 0.55;
-		return `top: ${top}%; left: ${left}%;`;
-	}
-
-	function handleRestart() {
-		grid = buildInitialGrid();
-		currentStepIndex = 0;
-		tutorialDone = false;
-	}
-
-	const completionLabel = $derived(
-		mode === "opt-in" || isReplay ? "Back to Game" : "Start Playing",
-	);
-
-	const totalSteps = TUTORIAL_STEPS.length;
 </script>
 
-<div class="h-full w-full flex flex-col bg-theme-bg-primary overflow-hidden">
-	<!-- Top bar -->
-	<div class="flex-none flex items-center justify-between px-4 pt-4 pb-2">
-		<span
-			class="text-xs font-semibold text-theme-text-muted uppercase tracking-widest"
-		>
-			How to Play
-		</span>
+<div
+	class="h-full w-full flex flex-col bg-theme-bg-primary overflow-hidden relative"
+>
+	<!-- ── Slim progress bar ─────────────────────────────────────────────────── -->
+	<div class="flex-none relative h-1 bg-theme-bg-secondary w-full">
+		<div
+			class="absolute inset-y-0 left-0 bg-urjo-blue transition-all duration-500 ease-out"
+			style="width: {progressPct}%"
+		></div>
 		{#if mode === "opt-in" || isReplay}
 			<button
 				onclick={onDismiss ?? onComplete}
-				class="text-xs text-theme-text-muted px-2 py-1 rounded-lg hover:bg-theme-hover transition-colors"
+				class="absolute right-3 top-3 text-xs text-theme-text-muted px-2 py-1 rounded-lg hover:bg-theme-hover transition-colors z-10"
 			>
 				Skip
 			</button>
 		{/if}
 	</div>
 
-	<!-- Step instruction card -->
-	<div class="flex-none px-4 pb-3">
-		{#if tutorialDone}
-			<div
-				class="rounded-2xl bg-green-500/10 border border-green-500/30 px-4 py-4 text-center"
-			>
-				<p class="text-xl font-bold text-green-400">You got it! 🎉</p>
-				<p class="text-sm text-theme-text-secondary mt-1">
-					Now try the real puzzle.
-				</p>
-			</div>
-		{:else if currentStep}
-			<div
-				class="rounded-2xl bg-theme-bg-secondary border border-theme-border px-4 py-4"
-			>
-				<p
-					class="text-lg font-bold text-theme-text-primary leading-snug"
-				>
-					{currentStep.headline}
-				</p>
-				<p
-					class="text-sm text-theme-text-secondary mt-1 leading-relaxed"
-				>
-					{currentStep.detail}
-				</p>
-			</div>
-		{/if}
-	</div>
-
-	<!-- Board area -->
-	<main class="flex-1 min-h-0 flex flex-col items-center justify-center px-6">
-		<div class="relative w-full max-w-[300px] mx-auto">
-			<GameBoard
-				{grid}
-				gridSize={GRID_SIZE}
-				onCellChange={handleCellChange}
-			/>
-
-			<!-- Row / column highlight ring -->
-			{#if currentStep && !tutorialDone}
+	<!-- ── Playing phase ─────────────────────────────────────────────────────── -->
+	{#if phase === "playing"}
+		<div
+			class="flex-1 min-h-0 flex flex-col items-center justify-center px-6 gap-3"
+		>
+			{#if lesson.isInfoOnly}
+				<!-- ── Number-clue info card ──────────────────────────────── -->
 				<div
-					class="absolute pointer-events-none border-2 border-white/60 rounded-xl z-10"
-					style={getHighlightStyle(currentStep)}
-				></div>
-			{/if}
-
-			<!-- Animated hand pointer -->
-			{#if currentStep && !tutorialDone}
-				<div
-					class="absolute pointer-events-none z-20 text-2xl animate-bounce"
-					style={getHandStyle(currentStep)}
+					in:scale={{
+						duration: 300,
+						easing: elasticOut,
+						start: 0.88,
+					}}
+					class="w-full max-w-xs flex flex-col items-center gap-5"
 				>
-					👆
+					<!-- Diagram -->
+					<div
+						class="grid gap-2"
+						style="grid-template-columns: repeat(3, 3.5rem);"
+					>
+						<div
+							class="w-14 h-14 rounded-full bg-urjo-coral ring-2 ring-white/50"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-urjo-coral ring-2 ring-white/50"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-theme-empty-cell"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-urjo-coral ring-2 ring-white/50"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-urjo-coral relative flex items-center justify-center"
+						>
+							<span
+								class="text-white font-bold text-2xl drop-shadow"
+								>3</span
+							>
+						</div>
+						<div
+							class="w-14 h-14 rounded-full bg-theme-empty-cell"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-theme-empty-cell"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-theme-empty-cell"
+						></div>
+						<div
+							class="w-14 h-14 rounded-full bg-theme-empty-cell"
+						></div>
+					</div>
+
+					<!-- Label — the only text on this screen -->
+					<p
+						class="text-base font-bold text-theme-text-primary text-center leading-snug"
+					>
+						<span class="text-urjo-coral">3</span> red neighbors =
+						shows <span class="text-urjo-coral">3</span>
+					</p>
+					<p class="text-sm text-theme-text-muted text-center">
+						Diagonals count too ↗↘
+					</p>
+
+					<button
+						onclick={() => advanceLesson()}
+						class="mt-2 w-full px-4 py-4 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-base hover:opacity-90 active:scale-95 transition-all"
+					>
+						Got it →
+					</button>
+				</div>
+			{:else}
+				<!-- ── Interactive grid ───────────────────────────────────── -->
+				{@const gridStyle = `grid-template-columns: repeat(${lesson.gridCols}, 1fr)`}
+				{@const maxWidth =
+					lesson.gridCols === 1 ? "max-w-[7rem]" : "max-w-[272px]"}
+
+				<!-- Instruction bubble — directly above grid, nowhere else -->
+				<div class="w-full {maxWidth} mx-auto">
+					{#key feedbackMsg}
+						<div
+							in:fly={{ y: -6, duration: 200 }}
+							class="mb-3 px-3 py-2 rounded-xl text-center
+								{feedbackType === 'error'
+								? 'bg-red-500/12 border border-red-400/30'
+								: 'bg-theme-bg-secondary border border-theme-border'}"
+						>
+							{#if feedbackType === "error"}
+								<p class="text-sm font-semibold text-red-400">
+									{feedbackMsg}
+								</p>
+							{:else if feedbackMsg}
+								<p
+									class="text-sm font-bold text-theme-text-primary"
+								>
+									{feedbackMsg}
+								</p>
+							{:else}
+								<!-- empty spacer so layout doesn't jump -->
+								<p class="text-sm invisible">_</p>
+							{/if}
+						</div>
+					{/key}
+
+					<!-- Grid -->
+					<div class="grid gap-2" style={gridStyle}>
+						{#each cells as cell, i (i)}
+							{@const row = Math.floor(i / lesson.gridCols)}
+							{@const col = i % lesson.gridCols}
+							<div
+								class="aspect-square {shakeIndex === i
+									? 'animate-shake'
+									: ''}"
+							>
+								<Cell
+									color={cell.color}
+									number={cell.number}
+									locked={cell.locked}
+									rowIndex={row}
+									colIndex={col}
+									isLoading={false}
+									hasError={shakeIndex === i}
+									gridSize={4}
+									onChange={(newColor) =>
+										handleCellChange(i, newColor)}
+								/>
+							</div>
+						{/each}
+					</div>
 				</div>
 			{/if}
 
-			<!-- Done overlay — just dim board, buttons are below -->
-			{#if tutorialDone}
-				<div
-					class="absolute inset-0 rounded-xl bg-black/20 pointer-events-none z-10"
-				></div>
-			{/if}
-		</div>
-	</main>
-
-	<!-- Footer: dots + buttons -->
-	<footer class="flex-none px-4 pb-8 pt-4 flex flex-col gap-3">
-		<!-- Progress dots -->
-		{#if !tutorialDone}
-			<div class="flex gap-1.5 justify-center mb-1">
-				{#each TUTORIAL_STEPS as _, i (i)}
+			<!-- Step dots — only visual chrome remaining at bottom -->
+			<div class="flex gap-1.5 mt-2">
+				{#each TUTORIAL_LESSONS as _, i (i)}
 					<div
 						class="h-1.5 rounded-full transition-all duration-300
-							{i === currentStepIndex
-							? 'w-6 bg-theme-text-primary'
-							: i < currentStepIndex
+							{i === lessonIndex
+							? 'w-5 bg-theme-text-primary'
+							: i < lessonIndex
 								? 'w-1.5 bg-theme-text-primary/50'
 								: 'w-1.5 bg-theme-text-primary/20'}"
 					></div>
 				{/each}
 			</div>
-		{/if}
+		</div>
+	{/if}
 
-		{#if tutorialDone}
-			<button
-				onclick={onComplete}
-				class="w-full px-4 py-3.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-base hover:opacity-90 active:scale-95 transition-all"
+	<!-- ── Celebration overlay ───────────────────────────────────────────────── -->
+	{#if phase === "celebrating"}
+		<div
+			in:fade={{ duration: 160 }}
+			class="absolute inset-0 z-30 flex flex-col items-center justify-center bg-theme-bg-primary px-8"
+		>
+			<div
+				in:scale={{ duration: 420, easing: elasticOut, start: 0.5 }}
+				class="flex flex-col items-center gap-5 text-center"
 			>
-				{completionLabel}
-			</button>
-			<button
-				onclick={handleRestart}
-				class="w-full px-4 py-2.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
-			>
-				Replay Tutorial
-			</button>
-		{:else}
-			<!-- Step counter -->
-			<p class="text-center text-xs text-theme-text-muted">
-				Step {currentStepIndex + 1} of {totalSteps} — follow the arrow
-			</p>
-		{/if}
-	</footer>
+				<span class="text-8xl leading-none"
+					>{lesson.celebrationEmoji}</span
+				>
+
+				<p class="text-2xl font-extrabold text-theme-text-primary">
+					{lesson.celebrationTitle}
+				</p>
+				<!-- One line of reinforcement — no walls of text -->
+				<p
+					class="text-sm text-theme-text-secondary leading-snug max-w-[240px]"
+				>
+					{lesson.celebrationSub}
+				</p>
+
+				{#if isLastLesson}
+					<div class="flex flex-col gap-3 w-full max-w-[240px] mt-1">
+						<button
+							onclick={onComplete}
+							class="w-full px-4 py-4 bg-urjo-blue text-white font-bold rounded-xl text-lg hover:opacity-90 active:scale-95 transition-all animate-bounce-btn"
+						>
+							Play now! 🎮
+						</button>
+						<button
+							onclick={() => {
+								lessonIndex = 0;
+								phase = "playing";
+							}}
+							class="text-xs text-theme-text-muted hover:text-theme-text-secondary transition-colors"
+						>
+							Replay tutorial
+						</button>
+					</div>
+				{:else}
+					<button
+						onclick={afterCelebration}
+						class="px-8 py-3.5 bg-theme-text-primary text-theme-bg-primary font-bold rounded-xl text-base hover:opacity-90 active:scale-95 transition-all"
+					>
+						Next →
+					</button>
+				{/if}
+			</div>
+		</div>
+	{/if}
 </div>
+
+<style>
+	@keyframes shake {
+		0%,
+		100% {
+			transform: translateX(0);
+		}
+		20% {
+			transform: translateX(-6px);
+		}
+		40% {
+			transform: translateX(6px);
+		}
+		60% {
+			transform: translateX(-4px);
+		}
+		80% {
+			transform: translateX(4px);
+		}
+	}
+	.animate-shake {
+		animation: shake 0.35s ease-in-out;
+	}
+</style>
