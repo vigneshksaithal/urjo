@@ -622,7 +622,7 @@
 {#if isCompleted}
 	<div
 		transition:fade={{ duration: 200 }}
-		class="fixed inset-0 z-20 flex flex-col items-center justify-between bg-theme-bg-primary px-6 py-10"
+		class="fixed inset-0 z-50 flex flex-col items-center justify-between bg-theme-bg-primary px-6 py-10"
 	>
 		<!-- Top spacer -->
 		<div class="flex-1"></div>

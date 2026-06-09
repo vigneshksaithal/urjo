@@ -91,7 +91,14 @@
 			i === flatIndex ? { ...c, color: newColor } : c,
 		);
 
-		if (lesson.successCriteria === "exact-targets" && newColor !== null) {
+		// For balance-row the success check is custom (row sum), so skip the
+		// per-cell exact-targets guard — it would block valid solutions where
+		// the user fills the cells in a different but correct order.
+		if (
+			lesson.successCriteria === "exact-targets" &&
+			lesson.id !== "balance-row" &&
+			newColor !== null
+		) {
 			const expected = cells[flatIndex]?.expectedColor;
 			if (expected && newColor !== expected) {
 				triggerError(flatIndex, lesson.errorMessage);
