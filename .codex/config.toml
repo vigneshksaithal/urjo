@@ -1,6 +1,0 @@
-[mcp_servers.devvit]
-command = "bunx"
-args = ["@devvit/mcp"]
-
-[mcp_servers.openaiDeveloperDocs]
-url = "https://developers.openai.com/mcp"
