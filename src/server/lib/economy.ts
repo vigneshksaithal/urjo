@@ -6,20 +6,18 @@
 import { redis } from '@devvit/web/server'
 import type { UserEconomy, CoinReward, ShopItem, TitleDef, StreakData } from '../../shared/types'
 import {
-	COIN_SPEED_BONUS,
 	COIN_DAILY_BONUS,
 	COIN_PERFECT_BONUS,
-	PAR_TIME_MULTIPLIER,
 	TITLES,
 	getTitleById,
-	getLevelConfig,
-	getCoinBaseForLevel,
 	getDailyLoginBonus,
+	getGridLevelConfig,
 	GRID_SIZE_MULTIPLIERS,
 } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
 import { getResultTier, getTierBonusMultiplier } from '../../shared/result-tiers'
 import { getStreakBonusForDay } from '../../shared/streak-rewards'
+import { speedFactor, MAX_SPEED_COIN_BONUS } from '../../shared/scoring'
 import { fetchUsername } from './helpers'
 
 const ECONOMY_KEY_PREFIX = 'user'
@@ -85,16 +83,17 @@ export const calculateCoinReward = (
 	consecutiveLoginDays: number = 0,
 	gridSize: GridSize = 4
 ): CoinReward => {
-	const config = getLevelConfig(level)
-	const parTime = config.expectedTime * PAR_TIME_MULTIPLIER
-	const speedBonusRaw = timeTaken <= parTime ? COIN_SPEED_BONUS : 0
+	const config = getGridLevelConfig(gridSize, level)
+	const speedBonusRaw = Math.round(MAX_SPEED_COIN_BONUS * speedFactor(timeTaken, config.expectedTime))
 	const perfectBonusRaw = mistakes === 0 ? COIN_PERFECT_BONUS : 0
 
 	const loginBonusRaw = isDailyFirst && consecutiveLoginDays > 0
 		? getDailyLoginBonus(consecutiveLoginDays)
 		: 0
 
-	const base = getCoinBaseForLevel(level)
+	// Base is the absolute authored coin reward for this bucket; the grid effect
+	// is folded into the table, so we no longer multiply base by a grid factor.
+	const base = config.coinBase
 	const gridSizeMultiplier = GRID_SIZE_MULTIPLIERS[gridSize]
 
 	// Determine the result tier and apply its bonus multiplier to the bonus
@@ -123,7 +122,7 @@ export const calculateCoinReward = (
 		perfectBonus,
 		loginBonus,
 		gridSizeMultiplier,
-		total: Math.round(base * gridSizeMultiplier + bonuses),
+		total: Math.round(base + bonuses),
 		tierId: tier.id,
 		tierMultiplier,
 	}

@@ -3,13 +3,13 @@ import { redis } from '@devvit/web/server'
 import { expect } from 'vitest'
 import { getUserEconomy, saveUserEconomy, calculateCoinReward, getUserStreakData } from '../economy'
 import {
-    COIN_BASE,
-    COIN_SPEED_BONUS,
     COIN_DAILY_BONUS,
     COIN_STREAK_MULTIPLIER,
     COIN_PERFECT_BONUS,
     getDailyLoginBonus,
+    getGridLevelConfig,
 } from '../../../shared/constants'
+import { MAX_SPEED_COIN_BONUS } from '../../../shared/scoring'
 
 // ─── calculateCoinReward (pure — no Redis needed) ─────────────────────────────
 
@@ -21,16 +21,19 @@ describe('calculateCoinReward', () => {
         expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus)
     })
 
-    it('includes COIN_SPEED_BONUS when timeTaken <= parTime (expectedTime * 2)', () => {
-        // level 1: expectedTime=45, parTime=90; timeTaken=90 is at par
-        const reward = calculateCoinReward(90, 1, 0, false, 0)
-        expect(reward.speedBonus).toBe(COIN_SPEED_BONUS)
+    it('awards a graduated speed bonus that scales with how far under par the solve is', () => {
+        // 4×4 L1 par = expectedTime = 45s; mistakes=0 → flawless tier (1.0× bonus pool)
+        const instant = calculateCoinReward(0, 1, 0, false, 0)
+        const halfway = calculateCoinReward(22, 1, 0, false, 0)
+        expect(instant.speedBonus).toBe(MAX_SPEED_COIN_BONUS)
+        expect(halfway.speedBonus).toBeGreaterThan(0)
+        expect(halfway.speedBonus).toBeLessThan(instant.speedBonus)
     })
 
-    it('does not include COIN_SPEED_BONUS when timeTaken > parTime', () => {
-        // level 1: parTime=90; timeTaken=91 exceeds par
-        const reward = calculateCoinReward(91, 1, 0, false, 0)
-        expect(reward.speedBonus).toBe(0)
+    it('speed bonus is 0 when timeTaken is at or beyond par time', () => {
+        // 4×4 L1 par = 45s
+        expect(calculateCoinReward(45, 1, 0, false, 0).speedBonus).toBe(0)
+        expect(calculateCoinReward(91, 1, 0, false, 0).speedBonus).toBe(0)
     })
 
     it('includes COIN_DAILY_BONUS when isDailyFirst is true', () => {
@@ -43,9 +46,9 @@ describe('calculateCoinReward', () => {
         expect(reward.dailyBonus).toBe(0)
     })
 
-    it('base is always COIN_BASE', () => {
+    it('base equals the authored 4×4 L1 coinBase (10)', () => {
         const reward = calculateCoinReward(5, 1, 0, false, 0)
-        expect(reward.base).toBe(COIN_BASE)
+        expect(reward.base).toBe(getGridLevelConfig(4, 1).coinBase)
     })
 
     it('streakBonus equals currentStreak * COIN_STREAK_MULTIPLIER', () => {
@@ -320,5 +323,89 @@ describe('calculateCoinReward grid size multiplier unit tests', () => {
         const reward6 = calculateCoinReward(100, 1, 0, false, 0, 0, 6)
         const reward8 = calculateCoinReward(100, 1, 0, false, 0, 0, 8)
         expect(reward8.total).toBeGreaterThan(reward6.total)
+    })
+})
+
+// ─── Property 3: Coin reward total is always a non-negative integer (Task 4.2) ─
+
+describe('Coin reward total is always a non-negative integer — Property 3', () => {
+    /**
+     * Feature: difficulty-weighted-scoring, Property 3: Coin reward total is always a non-negative integer
+     * For any valid completion parameters (timeTaken 1–9999, level 1–4, streak 0–500,
+     * isDailyFirst bool, mistakes 0–20, loginDays 0–60) and any valid grid size (4, 6, 8),
+     * calculateCoinReward(...).total SHALL satisfy Number.isInteger(total) && total >= 0.
+     * Validates: Requirements 2.4
+     */
+    it('total is a non-negative integer for any valid inputs and any valid grid size', () => {
+        const arb = fc.record({
+            timeTaken: fc.integer({ min: 1, max: 9999 }),
+            level: fc.integer({ min: 1, max: 4 }),
+            streak: fc.integer({ min: 0, max: 500 }),
+            isDailyFirst: fc.boolean(),
+            mistakes: fc.integer({ min: 0, max: 20 }),
+            loginDays: fc.integer({ min: 0, max: 60 }),
+            gridSize: fc.constantFrom(...VALID_GRID_SIZES),
+        })
+
+        fc.assert(
+            fc.property(arb, ({ timeTaken, level, streak, isDailyFirst, mistakes, loginDays, gridSize }) => {
+                const reward = calculateCoinReward(timeTaken, level, streak, isDailyFirst, mistakes, loginDays, gridSize)
+                expect(Number.isInteger(reward.total)).toBe(true)
+                expect(reward.total).toBeGreaterThanOrEqual(0)
+            }),
+            { numRuns: 100 }
+        )
+    })
+})
+
+// ─── Unit tests: difficulty-weighted calculateCoinReward (Task 4.3) ───────────
+
+describe('calculateCoinReward difficulty-weighted base + graduated speed (Task 4.3)', () => {
+    /**
+     * Validates: Requirements 2.2, 2.4, 3.4, 6.1
+     */
+
+    it('4×4 level 1 base is the authored entry value (10)', () => {
+        const reward = calculateCoinReward(100, 1, 0, false, 0, 0, 4)
+        expect(reward.base).toBe(10)
+    })
+
+    it('8×8 level 4 base is the authored hardest-bucket value (232)', () => {
+        const reward = calculateCoinReward(1000, 4, 0, false, 0, 0, 8)
+        expect(reward.base).toBe(232)
+    })
+
+    it('graduated speed bonus: a faster solve earns strictly more than a slower one (both under par)', () => {
+        // 4×4 L1 par (expectedTime) = 45s; flawless tier keeps the full bonus pool
+        const faster = calculateCoinReward(5, 1, 0, false, 0, 0, 4)
+        const slower = calculateCoinReward(40, 1, 0, false, 0, 0, 4)
+        expect(faster.speedBonus).toBeGreaterThan(slower.speedBonus)
+    })
+
+    it('graduated speed bonus: a near-instant solve reaches MAX_SPEED_COIN_BONUS (flawless tier)', () => {
+        const instant = calculateCoinReward(1, 1, 0, false, 0, 0, 4)
+        expect(instant.speedBonus).toBe(MAX_SPEED_COIN_BONUS)
+    })
+
+    it('graduated speed bonus: 0 at par and beyond par (4×4 L1 par = 45s)', () => {
+        expect(calculateCoinReward(45, 1, 0, false, 0, 0, 4).speedBonus).toBe(0)
+        expect(calculateCoinReward(60, 1, 0, false, 0, 0, 4).speedBonus).toBe(0)
+    })
+
+    it('result tier still scales the bonus pool: a mistake-laden solve has a smaller scaled pool than a flawless one', () => {
+        // Same fast solve + streak on a 4×4; 10 mistakes on a 4×4 → Scrappy (0.25×),
+        // 0 mistakes → Flawless (1.0×). The scaled bonuses must shrink with the lower tier.
+        const flawless = calculateCoinReward(5, 1, 10, false, 0, 0, 4)
+        const scrappy = calculateCoinReward(5, 1, 10, false, 10, 0, 4)
+        expect(flawless.speedBonus).toBeGreaterThan(scrappy.speedBonus)
+        expect(flawless.streakBonus).toBeGreaterThan(scrappy.streakBonus)
+    })
+
+    it('daily bonus is unscaled by tier: equals COIN_DAILY_BONUS for both flawless and mistake-laden solves', () => {
+        const flawless = calculateCoinReward(5, 1, 0, true, 0, 0, 4)
+        const scrappy = calculateCoinReward(5, 1, 0, true, 10, 0, 4)
+        expect(flawless.dailyBonus).toBe(COIN_DAILY_BONUS)
+        expect(scrappy.dailyBonus).toBe(COIN_DAILY_BONUS)
+        expect(flawless.dailyBonus).toBe(scrappy.dailyBonus)
     })
 })

@@ -99,18 +99,6 @@ import { forecastNextStreak } from '../../shared/streak-rewards'
 import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
 import { buildLoggedOutGameState, buildLoggedOutCompleteResponse } from '../lib/logged-out'
 
-// ─── Par Time Defaults ───────────────────────────────────────────────────────
-
-/** Default par times by grid size (seconds) for season score calculation */
-const PAR_TIME_BY_GRID_SIZE: Record<number, number> = {
-	4: 60,
-	6: 120,
-	8: 180,
-}
-
-const getParTimeForGrid = (gridSize: number): number =>
-	PAR_TIME_BY_GRID_SIZE[gridSize] ?? 60
-
 // ─── Result Comment Dedup Key ────────────────────────────────────────────────
 
 const RESULT_COMMENT_TTL = 172800 // 48 hours
@@ -1305,8 +1293,12 @@ gameRouter.post('/api/game/complete', async (c) => {
 		try {
 			const season = getCurrentSeason()
 			if (season.isActive) {
-				const parTime = getParTimeForGrid(gridSize)
-				const score = calculateSeasonScore(timeTaken, parTime, mistakes)
+				// Daily_Solve_Index: 1-based count of season-counted solves today.
+				// incrBy returns the post-increment value, so the first solve gets 1.
+				const seasonSolvesKey = `user:${userId}:seasonSolves:${getTodayUTC()}`
+				const dailySolveIndex = await redis.incrBy(seasonSolvesKey, 1)
+				await redis.expire(seasonSolvesKey, 172800)
+				const score = calculateSeasonScore(timeTaken, gridSize, currentLevel, mistakes, dailySolveIndex)
 				await recordSeasonScore(season.seasonId, userId, score)
 
 				// Read back the player's updated score and rank
@@ -1430,8 +1422,12 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 		try {
 			const season = getCurrentSeason()
 			if (season.isActive) {
-				const parTime = getParTimeForGrid(gridSize)
-				const score = calculateSeasonScore(timeTaken, parTime, mistakes)
+				// Daily_Solve_Index: 1-based count of season-counted solves today.
+				// incrBy returns the post-increment value, so the first solve gets 1.
+				const seasonSolvesKey = `user:${userId}:seasonSolves:${getTodayUTC()}`
+				const dailySolveIndex = await redis.incrBy(seasonSolvesKey, 1)
+				await redis.expire(seasonSolvesKey, 172800)
+				const score = calculateSeasonScore(timeTaken, gridSize, currentLevel, mistakes, dailySolveIndex)
 				await recordSeasonScore(season.seasonId, userId, score)
 				const leaderboardKey = `season:${season.seasonId}:leaderboard`
 				const playerScore = await redis.zScore(leaderboardKey, userId)

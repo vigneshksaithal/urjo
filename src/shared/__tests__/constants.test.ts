@@ -1,48 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import * as fc from 'fast-check'
 import {
-    getLevelConfig,
     getTitleById,
     getDailyLoginBonus,
     isValidGridSize,
     getGridLevelConfig,
-    DIFFICULTY_LADDER,
-    MIN_SKILL_LEVEL,
-    MAX_SKILL_LEVEL,
     DAILY_LOGIN_BONUS,
     PER_GRID_LADDER,
     PER_GRID_MAX_LEVEL,
     PER_GRID_MIN_LEVEL,
     VALID_GRID_SIZES,
 } from '../constants'
-
-describe('getLevelConfig', () => {
-    it('returns correct config for each level 1–6', () => {
-        for (const expected of DIFFICULTY_LADDER) {
-            const config = getLevelConfig(expected.level)
-            expect(config.level).toBe(expected.level)
-            expect(config.gridSize).toBe(expected.gridSize)
-            expect(config.difficulty).toBe(expected.difficulty)
-            expect(config.expectedTime).toBe(expected.expectedTime)
-        }
-    })
-
-    it('clamps level 0 to level 1 config', () => {
-        expect(getLevelConfig(0).level).toBe(1)
-    })
-
-    it('clamps level -5 to level 1 config', () => {
-        expect(getLevelConfig(-5).level).toBe(1)
-    })
-
-    it('clamps level 10 to level 9 config (MAX_SKILL_LEVEL)', () => {
-        expect(getLevelConfig(10).level).toBe(MAX_SKILL_LEVEL)
-    })
-
-    it('clamps level 99 to level 9 config (MAX_SKILL_LEVEL)', () => {
-        expect(getLevelConfig(99).level).toBe(MAX_SKILL_LEVEL)
-    })
-})
 
 describe('getTitleById', () => {
     it('returns correct TitleDef for "puzzler"', () => {

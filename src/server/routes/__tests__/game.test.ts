@@ -6,8 +6,10 @@
 
 import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis, runWithContext } from '@devvit/web/server'
-import { expect } from 'vitest'
+import { expect, vi } from 'vitest'
 import { app } from '../../index'
+import * as seasons from '../../lib/seasons'
+import { getTodayUTC } from '../../lib/helpers'
 
 // postId is not injected by createDevvitTest — it only sets userId/subreddit.
 // We must call runWithContext with a context that includes postId for routes that need it.
@@ -297,4 +299,216 @@ testPreviewNonDaily('POST /api/game/complete does not update preview for challen
     // Verify no dedup key was set (preview update logic was skipped)
     const dedupKey = await redis.get(`preview:updated:${POST_ID}`)
     expect(dedupKey).toBeUndefined()
+})
+
+// ─── Difficulty-Weighted Scoring: reworked completion flow ────────────────────
+// Feature: difficulty-weighted-scoring (task 7.3)
+// Requirements: 4.1, 5.1, 5.5, 5.6, 6.5
+
+/** Re-seed the post puzzle hash at a given grid size (drives the scored bucket). */
+const seedPuzzleGrid = async (gridSize: string): Promise<void> => {
+    await redis.hSet(`game:${POST_ID}:puzzle`, {
+        colors: 'rbrbbrbrrbbbbrbr',
+        numbers: '----------------',
+        solution: 'rbrbbrbrrbbbbrbr',
+        difficulty: 'easy',
+        gridSize,
+    })
+}
+
+const COMPLETE_INIT = (timeTaken: number, mistakes = 0): RequestInit => ({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timeTaken, mistakes }),
+})
+
+// gridSize reaches the route via the seeded puzzle hash (getCurrentPuzzle reads
+// game:{postId}:puzzle), not the request body — so we re-seed to switch buckets.
+
+const testDifficultyPays = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 4.1 / 2.x: a 6×6 completion records more coins and more season
+ * points than an equivalent 4×4 completion (same time, same mistakes).
+ */
+testDifficultyPays('POST /api/game/complete: 6×6 records more coins and season points than an equivalent 4×4', async () => {
+    const season = seasons.getCurrentSeason()
+    const leaderboardKey = `season:${season.seasonId}:leaderboard`
+    const solvesKey = `user:${USER_ID}:seasonSolves:${getTodayUTC()}`
+
+    // ── 4×4 completion. It is the day's first solve, so it also collects the
+    //    daily-first coin bonus — beating it with the 6×6 is therefore a
+    //    conservative, robust comparison. ──
+    await seedPuzzleGrid('4')
+    const before4 = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
+    const res4 = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+    expect(res4.status).toBe(200)
+    const json4 = await res4.json()
+    const after4 = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
+    const seasonDelta4 = after4 - before4
+
+    // Reset the daily solve counter so the 6×6 solve is also index 1 (full
+    // value) — isolates grid difficulty from the daily-decay confound.
+    await redis.del(solvesKey)
+
+    // ── 6×6 completion at the same time/mistakes. ──
+    await seedPuzzleGrid('6')
+    const before6 = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
+    const res6 = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+    expect(res6.status).toBe(200)
+    const json6 = await res6.json()
+    const after6 = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
+    const seasonDelta6 = after6 - before6
+
+    // Coins: the authored base and the resulting total are both higher for the
+    // larger grid.
+    expect(json6.coinReward.base).toBeGreaterThan(json4.coinReward.base)
+    expect(json6.coinReward.total).toBeGreaterThan(json4.coinReward.total)
+
+    // Season points: the 6×6 solve is awarded strictly more than the 4×4 solve.
+    // (seasonPoints in the response is the cumulative leaderboard score, so we
+    // compare the per-solve deltas read from the leaderboard zset.)
+    expect(seasonDelta6).toBeGreaterThan(seasonDelta4)
+})
+
+const testRepeatedSolvesDecay = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 5.5: repeated same-day season-counted solves award progressively
+ * fewer points (daily decay) but never zero (positive floor).
+ */
+testRepeatedSolvesDecay('POST /api/game/complete: repeated same-day solves award progressively fewer (never zero) season points', async () => {
+    await seedPuzzleGrid('4')
+    const season = seasons.getCurrentSeason()
+    const leaderboardKey = `season:${season.seasonId}:leaderboard`
+
+    // Solve the same puzzle four times in a row. The bucket is stable across
+    // these solves (a handful of fast solves can't promote/demote level), so
+    // only the daily-decay factor changes the awarded points.
+    const deltas: number[] = []
+    for (let i = 0; i < 4; i++) {
+        const before = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
+        const res = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+        expect(res.status).toBe(200)
+        const after = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
+        deltas.push(after - before)
+    }
+
+    // Each subsequent solve is worth strictly less than the previous one …
+    for (let i = 1; i < deltas.length; i++) {
+        expect(deltas[i]!).toBeLessThan(deltas[i - 1]!)
+    }
+    // … and the last solve still awards a positive (floored) amount.
+    expect(deltas[deltas.length - 1]!).toBeGreaterThan(0)
+})
+
+const testLoggedOutComplete = createDevvitTest({
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 6.5: a genuinely logged-out completion (no userId) succeeds with
+ * no errors and writes no per-user season state.
+ */
+testLoggedOutComplete('POST /api/game/complete: logged-out completion succeeds and writes no season counter', async () => {
+    // Context with NO userId — simulates a logged-out Reddit viewer.
+    const loggedOutCtx = {
+        postId: POST_ID,
+        subredditId: 't5_testsub',
+        subredditName: 'testsub',
+    } as Parameters<typeof runWithContext>[0]
+
+    await seedPuzzleGrid('4')
+
+    const res = await runWithContext(loggedOutCtx, () =>
+        app.request('/api/game/complete', COMPLETE_INIT(20)),
+    )
+    expect(res.status).toBe(200)
+
+    const json = await res.json()
+    // Logged-out result is returned but nothing account-scoped is persisted.
+    expect(json.isLoggedIn).toBe(false)
+    expect(json.coinReward).toBeUndefined()
+    expect(json.seasonPoints).toBeUndefined()
+
+    // No per-user season leaderboard row was created (no userId to key on, so
+    // the season block — and its seasonSolves counter — is never reached).
+    const season = seasons.getCurrentSeason()
+    const entries = await redis.zCard(`season:${season.seasonId}:leaderboard`)
+    expect(entries).toBe(0)
+})
+
+const testMigrateLoggedOut = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 5.1 / 6.5: the migrate-logged-out-score route credits the
+ * now-logged-in user — it returns 200 and writes the season counter for that
+ * user (the only logged-out-related route that persists season state).
+ */
+testMigrateLoggedOut('POST /api/game/migrate-logged-out-score: credits the user and writes the season counter', async () => {
+    await seedPuzzleGrid('4')
+
+    const res = await requestWithPost('/api/game/migrate-logged-out-score', COMPLETE_INIT(20))
+    expect(res.status).toBe(200)
+
+    const json = await res.json()
+    expect(json.migrated).toBe(true)
+    expect(json.coinReward).toBeDefined()
+    expect(json.seasonPoints).toBeGreaterThan(0)
+
+    // The Daily_Solve_Index counter is written exactly once for this solve.
+    const counter = await redis.get(`user:${USER_ID}:seasonSolves:${getTodayUTC()}`)
+    expect(counter).toBe('1')
+})
+
+const testSeasonInactive = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Requirement 5.6: when no season is active, no seasonSolves counter is written
+ * and the completion still succeeds.
+ *
+ * Note: getCurrentSeason() derives isActive from the real UTC date and every
+ * week is a season, so there is no real date that yields isActive=false. We
+ * therefore stub getCurrentSeason — matching the codebase's vi.spyOn
+ * convention — to exercise the season-inactive branch through the route.
+ */
+testSeasonInactive('POST /api/game/complete: season inactive writes no counter and still succeeds', async () => {
+    await seedPuzzleGrid('4')
+
+    const realSeason = seasons.getCurrentSeason()
+    const spy = vi
+        .spyOn(seasons, 'getCurrentSeason')
+        .mockReturnValue({ ...realSeason, isActive: false })
+
+    try {
+        const res = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+        expect(res.status).toBe(200)
+
+        const json = await res.json()
+        // Completion still succeeds; no season points are awarded.
+        expect(json.coinReward).toBeDefined()
+        expect(json.seasonPoints).toBeUndefined()
+
+        // The Daily_Solve_Index counter must NOT be written when inactive.
+        const counter = await redis.get(`user:${USER_ID}:seasonSolves:${getTodayUTC()}`)
+        expect(counter).toBeUndefined()
+
+        // And no season leaderboard row was created.
+        const entries = await redis.zCard(`season:${realSeason.seasonId}:leaderboard`)
+        expect(entries).toBe(0)
+    } finally {
+        spy.mockRestore()
+    }
 })

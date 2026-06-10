@@ -18,6 +18,9 @@ import {
     SEASON_PERFECT_BONUS,
     SEASON_TOP_REWARDS,
 } from '../../../shared/growth-constants'
+import { getGridLevelConfig } from '../../../shared/constants'
+import type { GridSize } from '../../../shared/constants'
+import { speedFactor, dailyDecay } from '../../../shared/scoring'
 
 const seasonDateArb = (): fc.Arbitrary<Date> =>
     fc.date({
@@ -28,29 +31,71 @@ const seasonDateArb = (): fc.Arbitrary<Date> =>
 // ─── calculateSeasonScore (pure) ──────────────────────────────────────────────
 
 describe('calculateSeasonScore', () => {
+    // 4×4 L1 is the anchor bucket: expectedTime 45s, seasonWeight 1.0.
     it('returns base points only when slow and has mistakes', () => {
-        const score = calculateSeasonScore(100, 50, 3)
+        const score = calculateSeasonScore(100, 4, 1, 3, 1)
         expect(score).toBe(SEASON_BASE_POINTS)
     })
 
-    it('includes speed bonus when timeTaken <= parTime', () => {
-        const score = calculateSeasonScore(50, 50, 3)
+    it('includes full speed bonus on an instant solve', () => {
+        const score = calculateSeasonScore(0, 4, 1, 3, 1)
         expect(score).toBe(SEASON_BASE_POINTS + SEASON_SPEED_BONUS)
     })
 
     it('includes perfect bonus when mistakes === 0', () => {
-        const score = calculateSeasonScore(100, 50, 0)
+        const score = calculateSeasonScore(100, 4, 1, 0, 1)
         expect(score).toBe(SEASON_BASE_POINTS + SEASON_PERFECT_BONUS)
     })
 
     it('includes both bonuses when fast and perfect', () => {
-        const score = calculateSeasonScore(30, 50, 0)
+        const score = calculateSeasonScore(0, 4, 1, 0, 1)
         expect(score).toBe(SEASON_BASE_POINTS + SEASON_SPEED_BONUS + SEASON_PERFECT_BONUS)
     })
 
-    it('speed bonus applies at exact par time boundary', () => {
-        const score = calculateSeasonScore(50, 50, 1)
-        expect(score).toBe(SEASON_BASE_POINTS + SEASON_SPEED_BONUS)
+    it('awards no speed bonus at or beyond par time', () => {
+        // 4×4 L1 par = 45s; solving exactly at par yields Speed_Factor 0.
+        const score = calculateSeasonScore(45, 4, 1, 1, 1)
+        expect(score).toBe(SEASON_BASE_POINTS)
+    })
+
+    it('weights harder buckets above the 4×4 anchor for identical play', () => {
+        const easy = calculateSeasonScore(0, 4, 1, 0, 1)
+        const hard = calculateSeasonScore(0, 8, 4, 0, 1)
+        expect(hard).toBeGreaterThan(easy)
+    })
+
+    it('applies daily decay to repeated solves without zeroing out', () => {
+        const first = calculateSeasonScore(100, 4, 1, 0, 1)
+        const tenth = calculateSeasonScore(100, 4, 1, 0, 10)
+        expect(tenth).toBeLessThan(first)
+        expect(tenth).toBeGreaterThan(0)
+    })
+
+    it('scores a flawless fast 8×8 L4 solve several times higher than a 4×4 L1 one', () => {
+        // Identical flawless, fast play (5s, no mistakes, first solve of the day).
+        // 8×8 L4 has seasonWeight 4.0 vs 4×4 L1's 1.0, so the harder bucket should
+        // dominate — not merely edge ahead.
+        const easy = calculateSeasonScore(5, 4, 1, 0, 1)
+        const hard = calculateSeasonScore(5, 8, 4, 0, 1)
+        expect(hard).toBeGreaterThan(easy)
+        expect(hard).toBeGreaterThanOrEqual(easy * 3)
+    })
+
+    it('strictly decreases season points across repeated same-day solves but stays positive', () => {
+        // Slow (≥ par, no speed bonus) flawless 4×4 L1 isolates the decay factor.
+        const first = calculateSeasonScore(100, 4, 1, 0, 1)
+        const third = calculateSeasonScore(100, 4, 1, 0, 3)
+        const fifth = calculateSeasonScore(100, 4, 1, 0, 5)
+        expect(first).toBeGreaterThan(third)
+        expect(third).toBeGreaterThan(fifth)
+        expect(fifth).toBeGreaterThan(0)
+    })
+
+    it('always returns an integer score', () => {
+        // 4×4 L2 (seasonWeight 1.3) with a partial speed bonus and decay produces a
+        // fractional pre-round value, so the integer guarantee is meaningful here.
+        const score = calculateSeasonScore(30, 4, 2, 0, 2)
+        expect(Number.isInteger(score)).toBe(true)
     })
 })
 
@@ -198,73 +243,102 @@ describe('Season Boundary Computation — Property 4', () => {
 
 describe('Season Score Calculation — Property 5', () => {
     /**
-     * **Validates: Requirements 5.3**
+     * **Validates: Requirements 4.1, 4.2, 4.5, 5.5**
      *
-     * Property 5: Season Score Calculation
-     * For any (timeTaken > 0, parTime > 0, mistakes >= 0), score is always in
-     * [SEASON_BASE_POINTS, SEASON_BASE_POINTS + SEASON_SPEED_BONUS + SEASON_PERFECT_BONUS],
-     * speed bonus iff timeTaken <= parTime, perfect bonus iff mistakes === 0.
+     * The recorded season score equals
+     * round((BASE + round(SPEED × speedFactor) + perfect) × seasonWeight × dailyDecay)
+     * and is always a non-negative integer. A perfect solve never scores below an
+     * otherwise-identical imperfect solve.
      */
-    const MIN_SCORE = SEASON_BASE_POINTS
-    const MAX_SCORE = SEASON_BASE_POINTS + SEASON_SPEED_BONUS + SEASON_PERFECT_BONUS
+    const arb = fc.record({
+        timeTaken: fc.integer({ min: 1, max: 99999 }),
+        gridSize: fc.constantFrom<GridSize>(4, 6, 8),
+        level: fc.integer({ min: 1, max: 4 }),
+        mistakes: fc.integer({ min: 0, max: 999 }),
+        dailySolveIndex: fc.integer({ min: 1, max: 100 }),
+    })
 
-    it('score is always within [BASE, BASE + SPEED + PERFECT]', () => {
-        const arb = fc.record({
-            timeTaken: fc.integer({ min: 1, max: 99999 }),
-            parTime: fc.integer({ min: 1, max: 99999 }),
-            mistakes: fc.integer({ min: 0, max: 999 }),
-        })
-
+    it('matches the difficulty-weighted, decayed formula exactly', () => {
         fc.assert(
-            fc.property(arb, ({ timeTaken, parTime, mistakes }) => {
-                const score = calculateSeasonScore(timeTaken, parTime, mistakes)
-                expect(score).toBeGreaterThanOrEqual(MIN_SCORE)
-                expect(score).toBeLessThanOrEqual(MAX_SCORE)
+            fc.property(arb, ({ timeTaken, gridSize, level, mistakes, dailySolveIndex }) => {
+                const config = getGridLevelConfig(gridSize, level)
+                const speedComponent = Math.round(SEASON_SPEED_BONUS * speedFactor(timeTaken, config.expectedTime))
+                const perfectComponent = mistakes === 0 ? SEASON_PERFECT_BONUS : 0
+                const preDecay = (SEASON_BASE_POINTS + speedComponent + perfectComponent) * config.seasonWeight
+                const expected = Math.round(preDecay * dailyDecay(dailySolveIndex))
+
+                expect(calculateSeasonScore(timeTaken, gridSize, level, mistakes, dailySolveIndex)).toBe(expected)
             }),
             { numRuns: 100 },
         )
     })
 
-    it('speed bonus is awarded iff timeTaken <= parTime', () => {
-        const arb = fc.record({
-            timeTaken: fc.integer({ min: 1, max: 99999 }),
-            parTime: fc.integer({ min: 1, max: 99999 }),
-            mistakes: fc.integer({ min: 0, max: 999 }),
-        })
-
+    it('always yields a non-negative integer', () => {
         fc.assert(
-            fc.property(arb, ({ timeTaken, parTime, mistakes }) => {
-                const score = calculateSeasonScore(timeTaken, parTime, mistakes)
-                const expectedSpeedBonus = timeTaken <= parTime ? SEASON_SPEED_BONUS : 0
-                const expectedPerfectBonus = mistakes === 0 ? SEASON_PERFECT_BONUS : 0
-
-                expect(score).toBe(SEASON_BASE_POINTS + expectedSpeedBonus + expectedPerfectBonus)
+            fc.property(arb, ({ timeTaken, gridSize, level, mistakes, dailySolveIndex }) => {
+                const score = calculateSeasonScore(timeTaken, gridSize, level, mistakes, dailySolveIndex)
+                expect(Number.isInteger(score)).toBe(true)
+                expect(score).toBeGreaterThanOrEqual(0)
             }),
             { numRuns: 100 },
         )
     })
 
-    it('perfect bonus is awarded iff mistakes === 0', () => {
-        const arb = fc.record({
+    it('perfect solves never score below equivalent imperfect solves', () => {
+        const playArb = fc.record({
             timeTaken: fc.integer({ min: 1, max: 99999 }),
-            parTime: fc.integer({ min: 1, max: 99999 }),
-            mistakes: fc.integer({ min: 0, max: 999 }),
+            gridSize: fc.constantFrom<GridSize>(4, 6, 8),
+            level: fc.integer({ min: 1, max: 4 }),
+            dailySolveIndex: fc.integer({ min: 1, max: 100 }),
         })
 
         fc.assert(
-            fc.property(arb, ({ timeTaken, parTime, mistakes }) => {
-                const score = calculateSeasonScore(timeTaken, parTime, mistakes)
-                const hasPerfectBonus = score >= SEASON_BASE_POINTS + SEASON_PERFECT_BONUS ||
-                    (score === SEASON_BASE_POINTS + SEASON_SPEED_BONUS + SEASON_PERFECT_BONUS)
+            fc.property(playArb, ({ timeTaken, gridSize, level, dailySolveIndex }) => {
+                const perfect = calculateSeasonScore(timeTaken, gridSize, level, 0, dailySolveIndex)
+                const imperfect = calculateSeasonScore(timeTaken, gridSize, level, 1, dailySolveIndex)
+                expect(perfect).toBeGreaterThanOrEqual(imperfect)
+            }),
+            { numRuns: 100 },
+        )
+    })
+})
 
-                if (mistakes === 0) {
-                    // Score must include perfect bonus
-                    const withoutPerfect = score - SEASON_PERFECT_BONUS
-                    expect(withoutPerfect).toBeGreaterThanOrEqual(SEASON_BASE_POINTS)
-                } else {
-                    // Score must NOT include perfect bonus
-                    expect(score).toBeLessThanOrEqual(SEASON_BASE_POINTS + SEASON_SPEED_BONUS)
-                }
+// ─── Property 7: Season score decay ordering ──────────────────────────────────
+
+describe('Season Score Decay Ordering — Property 7', () => {
+    /**
+     * Feature: difficulty-weighted-scoring, Property 7: Season score is a
+     * non-negative integer that respects decay ordering
+     *
+     * **Validates: Requirements 4.5, 5.5**
+     *
+     * For any fixed (timeTaken, gridSize, level, mistakes) and two indices i < j,
+     * calculateSeasonScore(..., i) >= calculateSeasonScore(..., j), and both are
+     * non-negative integers.
+     */
+    const arb = fc.record({
+        timeTaken: fc.integer({ min: 1, max: 9999 }),
+        gridSize: fc.constantFrom<GridSize>(4, 6, 8),
+        level: fc.integer({ min: 1, max: 4 }),
+        mistakes: fc.integer({ min: 0, max: 20 }),
+        indexA: fc.integer({ min: 1, max: 100 }),
+        indexB: fc.integer({ min: 1, max: 100 }),
+    })
+
+    it('earlier (lower-index) solves score at least as high as later ones', () => {
+        fc.assert(
+            fc.property(arb, ({ timeTaken, gridSize, level, mistakes, indexA, indexB }) => {
+                const i = Math.min(indexA, indexB)
+                const j = Math.max(indexA, indexB)
+
+                const scoreI = calculateSeasonScore(timeTaken, gridSize, level, mistakes, i)
+                const scoreJ = calculateSeasonScore(timeTaken, gridSize, level, mistakes, j)
+
+                expect(Number.isInteger(scoreI)).toBe(true)
+                expect(Number.isInteger(scoreJ)).toBe(true)
+                expect(scoreI).toBeGreaterThanOrEqual(0)
+                expect(scoreJ).toBeGreaterThanOrEqual(0)
+                expect(scoreI).toBeGreaterThanOrEqual(scoreJ)
             }),
             { numRuns: 100 },
         )

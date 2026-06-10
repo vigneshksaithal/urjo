@@ -18,6 +18,9 @@ import {
     SEASON_PERFECT_BONUS,
     SEASON_TOP_REWARDS,
 } from '../../shared/growth-constants'
+import { getGridLevelConfig } from '../../shared/constants'
+import type { GridSize } from '../../shared/constants'
+import { speedFactor, dailyDecay } from '../../shared/scoring'
 import { fetchUsername } from './helpers'
 
 // ─── Key Builders ──────────────────────────────────────────────────────────────
@@ -35,24 +38,24 @@ const economyKey = (userId: string): string =>
 
 /**
  * Calculate season score for a puzzle completion.
- * Base points + speed bonus (if within par) + perfect bonus (if zero mistakes).
+ *
+ * Difficulty-weighted: `(BASE + graduatedSpeed + perfect) × seasonWeight`, then
+ * scaled by the player's daily diminishing-returns factor. Par_Time and the
+ * difficulty weight both come from the authored Unified_Ladder bucket.
  */
 export const calculateSeasonScore = (
     timeTaken: number,
-    parTime: number,
+    gridSize: GridSize,
+    level: number,
     mistakes: number,
+    dailySolveIndex: number,
 ): number => {
-    let score = SEASON_BASE_POINTS
-
-    if (timeTaken <= parTime) {
-        score += SEASON_SPEED_BONUS
-    }
-
-    if (mistakes === 0) {
-        score += SEASON_PERFECT_BONUS
-    }
-
-    return score
+    const config = getGridLevelConfig(gridSize, level)
+    const sf = speedFactor(timeTaken, config.expectedTime)
+    const speedComponent = Math.round(SEASON_SPEED_BONUS * sf)
+    const perfectComponent = mistakes === 0 ? SEASON_PERFECT_BONUS : 0
+    const preDecay = (SEASON_BASE_POINTS + speedComponent + perfectComponent) * config.seasonWeight
+    return Math.round(preDecay * dailyDecay(dailySolveIndex))
 }
 
 /**
