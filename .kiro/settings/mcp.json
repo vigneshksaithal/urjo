@@ -26,8 +26,9 @@
       ]
     },
     "devvit": {
-      "command": "bunx",
+      "command": "npx",
       "args": [
+        "-y",
         "@devvit/mcp"
       ],
       "disabled": false,
