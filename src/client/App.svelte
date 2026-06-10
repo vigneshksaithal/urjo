@@ -64,6 +64,10 @@
 	let puzzleNumbers = $state(PLACEHOLDER_NUMBERS);
 	let tutorialCompleted = $state(false);
 	let startTime = $state(0);
+	// The puzzle timer starts on the user's first cell touch (see
+	// handleCellChange), not on load, so time spent reading the board before
+	// engaging isn't counted. Reset to false whenever a new puzzle begins.
+	let timerStarted = $state(false);
 	let streakData = $state<StreakData>({
 		currentStreak: 0,
 		longestStreak: 0,
@@ -253,6 +257,7 @@
 			hasChallenged = false;
 			challengeUrl = null;
 			startTime = Date.now();
+			timerStarted = false;
 			coinReward = undefined;
 			seasonRank = null;
 			seasonPoints = 0;
@@ -359,6 +364,12 @@
 		const cell = gridRow[col];
 		if (!cell) return;
 		if (cell.locked) return;
+
+		// Start the puzzle timer on the first cell touch of this puzzle.
+		if (!timerStarted) {
+			startTime = Date.now();
+			timerStarted = true;
+		}
 
 		// Track mistakes: check previous cell when moving to a new one
 		onCellChange(row, col, color, grid, gridSize);
@@ -555,7 +566,9 @@
 		void fireOnce(postId ?? "", "next-puzzle");
 		resetHints();
 		try {
-			const timeSpent = Math.round((Date.now() - startTime) / 1000);
+			const timeSpent = timerStarted
+				? Math.round((Date.now() - startTime) / 1000)
+				: 0;
 			const response = await fetch("/api/game/next-challenge", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -578,6 +591,7 @@
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
 			startTime = Date.now();
+			timerStarted = false;
 			resetMistakes();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 		} catch (error) {
@@ -602,6 +616,7 @@
 		);
 		isCompleted = false;
 		startTime = Date.now();
+		timerStarted = false;
 		resetMistakes();
 		setPuzzleData(puzzleNumbers, gridSize);
 	}
@@ -646,6 +661,7 @@
 			challengeUrl = null;
 			challengePromptEligible = false;
 			startTime = Date.now();
+			timerStarted = false;
 			coinReward = undefined;
 			resetMistakes();
 			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);

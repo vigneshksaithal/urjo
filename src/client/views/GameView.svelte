@@ -186,8 +186,11 @@
 	// After 3s of no cell interaction, reveal one correct cell as a dull
 	// pulsating hint. Resets whenever the user taps a cell.
 	const HINT_DELAY_MS = 3000;
-	// Idle hints are currently disabled. Set to true to re-enable showing the
-	// pulsating hint cell after HINT_DELAY_MS of inactivity.
+	// Idle/auto hints are DISABLED. They were launched enabled and drew
+	// many "I hate the auto hints" comments while engagement dropped (the
+	// game was partly solving itself). Do NOT flip this back to true — if
+	// hints return, make them an explicit user-initiated "Hint" button, not
+	// an automatic reveal. See the funnel post-mortem for context.
 	const HINTS_ENABLED = false;
 	let hintCell = $state<{
 		row: number;

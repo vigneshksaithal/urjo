@@ -14,7 +14,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/client/index.html'),
-        preview: resolve(__dirname, 'src/client/preview.html'),
       },
     },
   },
