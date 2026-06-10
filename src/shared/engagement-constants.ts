@@ -252,20 +252,6 @@ export const FLAIR_TIER_DEFS: readonly FlairTierDef[] = [
 
 // ─── Variable Reward Weights ───────────────────────────────────────────────────
 
-/** Bonus multiplier probability weights — must sum to 1.0 */
-export const BONUS_MULTIPLIER_WEIGHTS = {
-    none: 0.80,
-    double: 0.15,
-    triple: 0.05,
-} as const
-
-/** Mystery box reward type weights — must sum to 1.0 */
-export const MYSTERY_BOX_WEIGHTS = {
-    coins: 0.50,
-    streakFreeze: 0.30,
-    cosmeticTitle: 0.20,
-} as const
-
 /** Base probability of a mystery box drop per puzzle completion */
 export const MYSTERY_BOX_BASE_DROP_RATE = 0.10
 
@@ -298,11 +284,3 @@ export const REFERRAL_BONUS = 25
 
 /** Maximum referral bonuses per challenge post */
 export const REFERRAL_CAP_PER_POST = 10
-
-// ─── Mission Completion Bonuses ────────────────────────────────────────────────
-
-/** Bonus coins for completing all 3 daily missions in a single day */
-export const ALL_DAILY_BONUS = 25
-
-/** Bonus coins for completing both weekly missions in a single week */
-export const ALL_WEEKLY_BONUS = 75

@@ -125,5 +125,3 @@ export const getTierBonusMultiplier = (tier: ResultTierId): number => {
             return 0.25
     }
 }
-
-export const TIERS_BY_ID: Readonly<Record<ResultTierId, ResultTier>> = TIERS

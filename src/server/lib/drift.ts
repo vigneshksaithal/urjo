@@ -22,7 +22,7 @@
 
 import { redis } from '@devvit/web/server'
 
-import { dqpKeys, readGlobalDQP, readPerSubDQP } from './qualified'
+import { readGlobalDQP, readPerSubDQP } from './qualified'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -315,7 +315,3 @@ export const formatDriftLogLine = (rec: DriftRecord): string => {
     const driftStr = rec.drift === null ? 'n/a' : `${(rec.drift * 100).toFixed(1)}%`
     return `[DRIFT] ${rec.severity.toUpperCase()} date=${rec.date} scope=${rec.scope} dqp=${rec.ourDQP} redditQE=${rec.redditQE} drift=${driftStr} :: ${rec.severityLabel}`
 }
-
-// Re-export the qualified key builders so the drift cron can be tested
-// without re-wiring imports.
-export const _internalKeysForTest = { dqpKeys } as const

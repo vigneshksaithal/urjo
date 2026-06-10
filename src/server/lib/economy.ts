@@ -130,35 +130,6 @@ export const calculateCoinReward = (
 }
 
 /**
- * Check if user meets a title's condition
- */
-export const checkTitleCondition = async (
-	title: TitleDef,
-	userId: string,
-	skillLevel: number,
-	streakData: StreakData
-): Promise<boolean> => {
-	if (!title.condition) return true
-
-	switch (title.condition.type) {
-		case 'minSolves': {
-			const economy = await getUserEconomy(userId)
-			return economy.totalSolves >= title.condition.value
-		}
-		case 'minSpeedSolves': {
-			const economy = await getUserEconomy(userId)
-			return economy.speedSolves >= title.condition.value
-		}
-		case 'minSkillLevel':
-			return skillLevel >= title.condition.value
-		case 'minLongestStreak':
-			return streakData.longestStreak >= title.condition.value
-		default:
-			return false
-	}
-}
-
-/**
  * Get all shop items with ownership and unlock status
  */
 export const getShopItems = async (

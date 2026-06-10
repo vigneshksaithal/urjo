@@ -60,15 +60,6 @@ export const getSessionRun = (): number => {
 }
 
 /**
- * Reset the counter — used when a player explicitly bails out (rare) or when
- * the session is determined invalid (e.g. day rollover).
- */
-export const resetSessionRun = (): void => {
-    sessionRunStore.set(0)
-    persist(0)
-}
-
-/**
  * Compute the session-run coin multiplier on the CLIENT side (for display
  * preview only). The server is the source of truth — see
  * src/shared/session-run.ts and the /api/game/complete handler.

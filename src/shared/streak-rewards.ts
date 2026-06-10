@@ -49,9 +49,6 @@ const STREAK_TIERS: ReadonlyArray<{ minDay: number; bonus: number; label: string
     { minDay: 365, bonus: 200, label: 'Year-long flame' },
 ] as const
 
-/** Days that mark a tier boundary — used to render the ladder preview. */
-export const STREAK_MILESTONE_DAYS: ReadonlyArray<number> = STREAK_TIERS.map((t) => t.minDay)
-
 /**
  * Get the daily streak bonus for a given streak day (clamped to >= 1).
  * Pure function.

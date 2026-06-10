@@ -27,13 +27,6 @@ export const getSessionId = (): string => {
 }
 
 /**
- * Test seam — reset the cached id so tests can simulate a fresh page load.
- */
-export const resetSessionIdForTests = (): void => {
-    cachedSessionId = null
-}
-
-/**
  * Convenience: build a Headers object pre-stamped with `Content-Type` and
  * the session id. Centralizes the header name so it doesn't drift across
  * call sites.
