@@ -20,8 +20,6 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 		title: 'Urjo Puzzle - Can you solve it?',
 		postData: expect.objectContaining({
 			[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
-			previewIsChallenge: false,
-			previewGridSize: 4,
 		}),
 	})
 
@@ -30,18 +28,6 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 	expect(puzzle.solution).toBeDefined()
 	expect(puzzle.difficulty).toBe('easy')
 	expect(puzzle.gridSize).toBe('4')
-})
-
-test('createPost includes previewColors matching the generated puzzle', async () => {
-	vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_preview' } as never)
-
-	await createPost()
-
-	const call = vi.mocked(reddit.submitCustomPost).mock.calls[0]
-	const passedPostData = (call?.[0] as { postData?: Record<string, unknown> })?.postData
-	expect(typeof passedPostData?.['previewColors']).toBe('string')
-	const colors = passedPostData?.['previewColors'] as string
-	expect(colors.length).toBe(16) // 4×4 grid
 })
 
 // ─── createPost — missing subredditName ──────────────────────────────────────

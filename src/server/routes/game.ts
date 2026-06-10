@@ -1808,14 +1808,6 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			userGeneratedContent: { text: title },
 			postData: {
 				postType: 'urjo-puzzle',
-				// Preview data baked in for zero-latency inline splash rendering.
-				// Use the solved board so the splash shows a full, vivid mosaic.
-				previewColors: puzzle.solution,
-				previewGridSize: parseInt(puzzle.gridSize, 10),
-				previewIsChallenge: true,
-				previewChallengerUsername: username !== 'Anon' ? username : null,
-				previewChallengerTime: timeTaken,
-				previewAvatarUrl: challengerAvatar || null,
 			},
 		})
 

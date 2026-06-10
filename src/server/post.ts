@@ -22,12 +22,6 @@ export const createPost = async (customTitle?: string, ctxOverride?: any): Promi
 		title,
 		postData: {
 			[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
-			// Preview data baked in so the inline splash renders instantly
-			// without a server round-trip (read via context.postData on client).
-			// Use the solved board so the splash shows a full, vivid mosaic.
-			previewColors: puzzle.solution,
-			previewGridSize: puzzle.gridSize,
-			previewIsChallenge: false,
 		},
 	})
 

@@ -381,14 +381,11 @@ challengeTest('challenge route: stores postType and leaderboardCommentId in a si
     expect(meta['leaderboardCommentId']).toBe('t1_leaderboard')
     expect(meta['stickyCommentId']).toBe('t1_leaderboard')
 
-    // Preview fields must be baked into postData so the client reads them instantly
+    // The challenge post must be tagged with the puzzle post type in postData
     expect(reddit.submitCustomPost).toHaveBeenCalledWith(
         expect.objectContaining({
             postData: expect.objectContaining({
-                previewIsChallenge: true,
-                previewChallengerTime: 45,
-                previewChallengerUsername: 'ChallengerUser',
-                previewAvatarUrl: 'https://img/c.png',
+                postType: 'urjo-puzzle',
             }),
         }),
     )
