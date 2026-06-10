@@ -157,6 +157,35 @@ export const mockApiPlugin = (): Plugin => ({
                 return
             }
 
+            if (path === '/api/preview') {
+                // Default to a challenge preview so the avatar + battle prompt
+                // are exercised. Append `?daily=1` to the page URL to review the
+                // non-challenge variant.
+                const daily = /[?&]daily=1/.test(referer) || /[?&]daily=1/.test(url)
+                const previewColors = 'rb.brb.b.brb.brbr.brbb.r.brb.r.b'.slice(0, 16)
+                sendJson(res, {
+                    status: 'success',
+                    data: daily
+                        ? {
+                            colors: previewColors,
+                            gridSize: 4,
+                            isChallenge: false,
+                            challengerUsername: null,
+                            challengerTime: null,
+                            avatarUrl: null,
+                        }
+                        : {
+                            colors: previewColors,
+                            gridSize: 4,
+                            isChallenge: true,
+                            challengerUsername: 'speedrunner',
+                            challengerTime: 42,
+                            avatarUrl: 'https://www.redditstatic.com/avatars/defaults/v2/avatar_default_3.png',
+                        },
+                })
+                return
+            }
+
             if (loggedOut) {
                 // Account-scoped endpoints are gated server-side for logged-out
                 // users — mirror that here so the client hides the UI.

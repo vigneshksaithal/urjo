@@ -7,7 +7,7 @@
  * information to maximize click-through from the Reddit feed.
  */
 
-import type { ChallengePreviewData, DailyPreviewData } from '../../shared/social-types'
+import type { ChallengePreviewData, DailyPreviewData, PreviewState } from '../../shared/social-types'
 
 // ─── Preview Block Types ─────────────────────────────────────────────────────
 
@@ -84,20 +84,20 @@ export const maskPuzzleGrid = (
     const rows = emojiGrid.split('\n')
     const totalCells = gridSize * gridSize
     const revealCount = Math.floor(totalCells * revealPercent)
-    
+
     // Build list of cell indices and shuffle deterministically
     const indices = Array.from({ length: totalCells }, (_, i) => i)
     const random = seededRandom(stringToSeed(seed))
-    
+
     // Fisher-Yates shuffle with seeded PRNG
     for (let i = indices.length - 1; i > 0; i--) {
         const j = Math.floor(random() * (i + 1))
-        ;[indices[i], indices[j]] = [indices[j]!, indices[i]!]
+            ;[indices[i], indices[j]] = [indices[j]!, indices[i]!]
     }
-    
+
     // First `revealCount` indices after shuffle are revealed
     const revealSet = new Set(indices.slice(0, revealCount))
-    
+
     // Rebuild grid with masking
     let cellIdx = 0
     return rows.map(row => {
@@ -130,16 +130,16 @@ export const buildChallengePreview = (data: ChallengePreviewData): PreviewBlocks
     ]
     const titleIndex = (data.challengerTime + data.gridSize) % titleTemplates.length
     const title = titleTemplates[titleIndex] ?? titleTemplates[0]!
-    
+
     // Subtitle: grid size without "Level X" (Level 1 signals beginner content)
     const difficultyLabel = data.gridSize <= 4 ? 'Quick' : data.gridSize <= 6 ? 'Standard' : 'Hard'
     const subtitle = `${difficultyLabel} ${formatGridLabel(data.gridSize)} puzzle`
-    
+
     // Stats with social proof (attempts create urgency)
     const statsLine = data.attemptsCount > 0
         ? `${data.attemptsCount} attempting · ${data.beatsCount} beaten`
         : 'Be the first to attempt!'
-    
+
     const blocks: PreviewTextBlock[] = [
         {
             type: 'text',
@@ -226,4 +226,45 @@ export const buildDailyPreview = (data: DailyPreviewData): PreviewBlocks => {
     ]
 
     return { blocks }
+}
+
+// ─── Inline Preview State ─────────────────────────────────────────────────────
+
+/** Raw inputs for building the inline preview state */
+export type PreviewStateInput = {
+    /** The `game:{postId}:puzzle` Redis hash */
+    puzzle: Record<string, string> | undefined
+    /** Resolved challenger username (challenge posts only) */
+    challengerUsername: string | null
+    /** Resolved challenger snoovatar URL (challenge posts only) */
+    avatarUrl: string | null
+}
+
+/**
+ * Build the inline preview state served to the feed splash webview.
+ *
+ * Exposes only the puzzle's starting colors (never the solution) and, for
+ * challenge posts, the challenger's identity and target time. Challenger
+ * fields are forced to null on non-challenge posts even if callers pass
+ * resolved values, so daily/regular posts never render a bogus author.
+ */
+export const buildPreviewState = (input: PreviewStateInput): PreviewState | null => {
+    const { puzzle } = input
+    if (!puzzle || !puzzle.colors) return null
+
+    const parsedGridSize = parseInt(puzzle.gridSize ?? '', 10)
+    const gridSize = Number.isNaN(parsedGridSize) ? 4 : parsedGridSize
+    const isChallenge = Boolean(puzzle.challengeBy)
+
+    const parsedScore = parseInt(puzzle.challengeScore ?? '', 10)
+    const hasValidScore = !Number.isNaN(parsedScore) && parsedScore > 0
+
+    return {
+        colors: puzzle.colors,
+        gridSize,
+        isChallenge,
+        challengerUsername: isChallenge ? input.challengerUsername : null,
+        challengerTime: isChallenge && hasValidScore ? parsedScore : null,
+        avatarUrl: isChallenge ? input.avatarUrl : null,
+    }
 }

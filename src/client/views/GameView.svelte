@@ -186,6 +186,9 @@
 	// After 3s of no cell interaction, reveal one correct cell as a dull
 	// pulsating hint. Resets whenever the user taps a cell.
 	const HINT_DELAY_MS = 3000;
+	// Idle hints are currently disabled. Set to true to re-enable showing the
+	// pulsating hint cell after HINT_DELAY_MS of inactivity.
+	const HINTS_ENABLED = false;
 	let hintCell = $state<{
 		row: number;
 		col: number;
@@ -195,6 +198,7 @@
 	let hintTimerId: ReturnType<typeof setTimeout> | null = null;
 
 	function scheduleHint(): void {
+		if (!HINTS_ENABLED) return;
 		if (hintTimerId !== null) clearTimeout(hintTimerId);
 		hintTimerId = setTimeout(() => {
 			hintCell = computeHintCell(grid, solution, gridSize);

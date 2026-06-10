@@ -1774,6 +1774,17 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			// fallback to Anon
 		}
 
+		// Precompute the challenger's snoovatar so the inline preview can render
+		// the avatar from Redis on first load — no per-view Reddit lookup.
+		let challengerAvatar = ''
+		if (username !== 'Anon') {
+			try {
+				challengerAvatar = (await reddit.getSnoovatarUrl(username)) ?? ''
+			} catch {
+				// non-critical — preview falls back to a default avatar
+			}
+		}
+
 		// Build title — rotating high-CTR templates WITHOUT "Level X" (removes beginner signal)
 		const perfectTag = mistakes === 0 ? ' (zero mistakes)' : ''
 		const gridLabel = `${puzzle.gridSize}×${puzzle.gridSize}`
@@ -1797,6 +1808,14 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			userGeneratedContent: { text: title },
 			postData: {
 				postType: 'urjo-puzzle',
+				// Preview data baked in for zero-latency inline splash rendering.
+				// Use the solved board so the splash shows a full, vivid mosaic.
+				previewColors: puzzle.solution,
+				previewGridSize: parseInt(puzzle.gridSize, 10),
+				previewIsChallenge: true,
+				previewChallengerUsername: username !== 'Anon' ? username : null,
+				previewChallengerTime: timeTaken,
+				previewAvatarUrl: challengerAvatar || null,
 			},
 		})
 
@@ -1810,6 +1829,8 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			created: new Date().toISOString(),
 			challengeBy: userId,
 			challengeScore: timeTaken.toString(),
+			challengeByUsername: username,
+			challengeByAvatar: challengerAvatar,
 			sourcePostId: postId,
 			challengeChainLength: challengeChainLength.toString(),
 		})

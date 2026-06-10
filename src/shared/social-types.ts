@@ -56,3 +56,21 @@ export type DailyPreviewData = {
     fastestTime: number | null
     fastestUsername: string | null
 }
+
+// ─── Inline Preview (webview splash) ─────────────────────────────────────────
+
+/**
+ * Data the inline preview webview (`default` entrypoint) fetches from
+ * `/api/preview` to render the feed splash: a faded grid backdrop, a
+ * battle-style prompt, and — for challenge posts — the creator's avatar.
+ * Challenge-only fields are null on daily/regular posts.
+ */
+export type PreviewState = {
+    /** Puzzle starting colors string (r/b/.) — never the solution */
+    colors: string
+    gridSize: number
+    isChallenge: boolean
+    challengerUsername: string | null
+    challengerTime: number | null
+    avatarUrl: string | null
+}

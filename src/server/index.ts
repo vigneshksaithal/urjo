@@ -21,6 +21,7 @@ import { adminRouter } from './routes/admin'
 import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
 import { dwellRouter } from './routes/dwell'
+import { previewRouter } from './routes/preview'
 import {
   computeDailyMentionBatch,
   getOptInUserIds,
@@ -535,6 +536,7 @@ app.route('/', adminRouter)
 app.route('/', seasonRouter)
 app.route('/', notifyRouter)
 app.route('/', dwellRouter)
+app.route('/', previewRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports

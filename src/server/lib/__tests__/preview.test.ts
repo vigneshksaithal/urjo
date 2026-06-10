@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { buildChallengePreview, buildDailyPreview, buildChallengeBeatPreview } from '../preview'
+import { buildChallengePreview, buildDailyPreview, buildChallengeBeatPreview, buildPreviewState } from '../preview'
 import type { ChallengePreviewData, DailyPreviewData } from '../../../shared/social-types'
 import type { ChallengeBeatPreviewData } from '../preview'
 
@@ -246,5 +246,90 @@ describe('buildChallengeBeatPreview', () => {
     it('block has type "text"', () => {
         const result = buildChallengeBeatPreview(sampleData)
         expect(result.blocks[0]?.type).toBe('text')
+    })
+})
+
+describe('buildPreviewState', () => {
+    const challengePuzzle = {
+        colors: 'rb.brb.brb.brb..',
+        numbers: '----------------',
+        solution: 'rbrbrbrbrbrbrbrb',
+        difficulty: 'easy',
+        gridSize: '4',
+        challengeBy: 't2_challenger',
+        challengeScore: '42',
+    }
+
+    const dailyPuzzle = {
+        colors: 'rb.brb.brb.brb..',
+        numbers: '----------------',
+        solution: 'rbrbrbrbrbrbrbrb',
+        difficulty: 'easy',
+        gridSize: '4',
+    }
+
+    it('returns null when puzzle is undefined', () => {
+        expect(buildPreviewState({ puzzle: undefined, challengerUsername: null, avatarUrl: null })).toBeNull()
+    })
+
+    it('returns null when puzzle has no colors', () => {
+        const result = buildPreviewState({ puzzle: { gridSize: '4' }, challengerUsername: null, avatarUrl: null })
+        expect(result).toBeNull()
+    })
+
+    it('exposes the starting colors and grid size', () => {
+        const result = buildPreviewState({ puzzle: dailyPuzzle, challengerUsername: null, avatarUrl: null })
+        expect(result?.colors).toBe(dailyPuzzle.colors)
+        expect(result?.gridSize).toBe(4)
+    })
+
+    it('never exposes the solution', () => {
+        const result = buildPreviewState({ puzzle: challengePuzzle, challengerUsername: 'alice', avatarUrl: null })
+        expect(JSON.stringify(result)).not.toContain(challengePuzzle.solution)
+    })
+
+    it('marks challenge posts and carries challenger fields', () => {
+        const result = buildPreviewState({
+            puzzle: challengePuzzle,
+            challengerUsername: 'alice',
+            avatarUrl: 'https://img/alice.png',
+        })
+        expect(result?.isChallenge).toBe(true)
+        expect(result?.challengerUsername).toBe('alice')
+        expect(result?.challengerTime).toBe(42)
+        expect(result?.avatarUrl).toBe('https://img/alice.png')
+    })
+
+    it('nulls challenger fields for non-challenge posts even if passed', () => {
+        const result = buildPreviewState({
+            puzzle: dailyPuzzle,
+            challengerUsername: 'alice',
+            avatarUrl: 'https://img/alice.png',
+        })
+        expect(result?.isChallenge).toBe(false)
+        expect(result?.challengerUsername).toBeNull()
+        expect(result?.challengerTime).toBeNull()
+        expect(result?.avatarUrl).toBeNull()
+    })
+
+    it('defaults grid size to 4 when missing or invalid', () => {
+        const result = buildPreviewState({
+            puzzle: { colors: 'rb.b', gridSize: 'oops' },
+            challengerUsername: null,
+            avatarUrl: null,
+        })
+        expect(result?.gridSize).toBe(4)
+    })
+
+    it('nulls challenger time when score is missing, zero, or invalid', () => {
+        const { challengeScore: _omit, ...noScore } = challengePuzzle
+        expect(buildPreviewState({ puzzle: noScore, challengerUsername: 'alice', avatarUrl: null })?.challengerTime).toBeNull()
+        expect(buildPreviewState({ puzzle: { ...challengePuzzle, challengeScore: '0' }, challengerUsername: 'alice', avatarUrl: null })?.challengerTime).toBeNull()
+        expect(buildPreviewState({ puzzle: { ...challengePuzzle, challengeScore: 'NaN' }, challengerUsername: 'alice', avatarUrl: null })?.challengerTime).toBeNull()
+    })
+
+    it('parses 8x8 grid size', () => {
+        const result = buildPreviewState({ puzzle: { ...dailyPuzzle, gridSize: '8' }, challengerUsername: null, avatarUrl: null })
+        expect(result?.gridSize).toBe(8)
     })
 })

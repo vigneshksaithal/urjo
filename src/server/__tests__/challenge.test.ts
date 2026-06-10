@@ -368,6 +368,7 @@ challengeTest('challenge route: stores postType and leaderboardCommentId in a si
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_newpost1' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
     vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_leaderboard' } as never)
+    vi.spyOn(reddit, 'getSnoovatarUrl').mockResolvedValue('https://img/c.png' as never)
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>
         challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
@@ -379,6 +380,18 @@ challengeTest('challenge route: stores postType and leaderboardCommentId in a si
     expect(meta['postType']).toBe('urjo-puzzle')
     expect(meta['leaderboardCommentId']).toBe('t1_leaderboard')
     expect(meta['stickyCommentId']).toBe('t1_leaderboard')
+
+    // Preview fields must be baked into postData so the client reads them instantly
+    expect(reddit.submitCustomPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+            postData: expect.objectContaining({
+                previewIsChallenge: true,
+                previewChallengerTime: 45,
+                previewChallengerUsername: 'ChallengerUser',
+                previewAvatarUrl: 'https://img/c.png',
+            }),
+        }),
+    )
 })
 
 challengeTest('challenge route: returns comments URL and increments challengesCreated', async () => {
@@ -426,4 +439,55 @@ challengeTest('challenge route: initializes stats with attempts=0 and beats=0', 
     const stats = await redis.hGetAll('game:t3_newpost2:stats')
     expect(stats['attempts']).toBe('0')
     expect(stats['beats']).toBe('0')
+})
+
+challengeTest('challenge route: precomputes and stores challenger username and avatar on the puzzle', async () => {
+    const sourcePostId = 't3_sourcepost_avatar'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+    await redis.set(
+        `user:t2_challenger:puzzleStartTime:${sourcePostId}`,
+        (Date.now() - 30000).toString()
+    )
+
+    vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_avatarpost' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_avatar' } as never)
+    vi.spyOn(reddit, 'getSnoovatarUrl').mockResolvedValue('https://img/challenger.png' as never)
+
+    await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
+    )
+
+    const puzzle = await redis.hGetAll('game:t3_avatarpost:puzzle')
+    expect(puzzle['challengeByUsername']).toBe('ChallengerUser')
+    expect(puzzle['challengeByAvatar']).toBe('https://img/challenger.png')
+})
+
+challengeTest('challenge route: still creates the post when snoovatar lookup fails', async () => {
+    const sourcePostId = 't3_sourcepost_noavatar'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+    await redis.set(
+        `user:t2_challenger:puzzleStartTime:${sourcePostId}`,
+        (Date.now() - 30000).toString()
+    )
+
+    vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_noavatarpost' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_noavatar' } as never)
+    vi.spyOn(reddit, 'getSnoovatarUrl').mockRejectedValue(new Error('no avatar'))
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
+    )
+    expect(res.status).toBe(200)
+
+    const puzzle = await redis.hGetAll('game:t3_noavatarpost:puzzle')
+    expect(puzzle['challengeByUsername']).toBe('ChallengerUser')
+    expect(puzzle['challengeByAvatar'] ?? '').toBe('')
 })
