@@ -6,6 +6,7 @@
 import { Hono } from 'hono'
 
 import { getDailyMetrics } from '../lib/analytics'
+import { getSimpleMetrics } from '../lib/metrics'
 import { computeDashboard } from '../lib/dashboard'
 import { requireModerator } from '../lib/moderator'
 
@@ -33,6 +34,26 @@ const getLastNDates = (days: number): string[] => {
 
     return dates
 }
+
+// ─── GET /api/analytics/metrics ───────────────────────────────────────────────
+
+/**
+ * The simplified report: the six product metrics (opens, views, completions,
+ * play time, D1, D7) for the last N days (default 14, max 30). This is the
+ * single surface the in-app dashboard consumes.
+ */
+analyticsRouter.get('/api/analytics/metrics', async (c) => {
+    try {
+        const daysParam = parseInt(c.req.query('days') ?? '14', 10)
+        const days = Number.isNaN(daysParam) ? 14 : Math.min(Math.max(daysParam, 1), 30)
+        const dates = getLastNDates(days)
+        const data = await Promise.all(dates.map((d) => getSimpleMetrics(d)))
+        return c.json({ status: 'success', data })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
 
 // ─── GET /api/analytics/daily ──────────────────────────────────────────────────
 

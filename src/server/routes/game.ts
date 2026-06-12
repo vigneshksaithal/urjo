@@ -67,6 +67,7 @@ import {
 	markFirstTapAndCommit,
 	getSessionIdFromHeader,
 } from '../lib/qualified'
+import { trackOpen } from '../lib/metrics'
 import {
 	isDifficulty,
 	markS2REligible,
@@ -635,6 +636,7 @@ gameRouter.get('/api/game/state', async (c) => {
 				// "started puzzle 2" conversion.
 				await tryConvertS2R(sessionId, postId)
 			}
+			await trackOpen(today, postId, userId)
 			if (isChallenge) {
 				await trackChallengeOpen(today, postId, userId)
 			}

@@ -38,6 +38,105 @@ const seedModCache = async (subredditId: string, userId: string): Promise<void> 
     await redis.expire(`mod:${subredditId}:${userId}`, 300)
 }
 
+// ─── GET /api/analytics/metrics — simplified six-metric report ────────────────
+
+const testMetrics = createDevvitTest({
+    userId: 't2_moduser',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testMetrics('GET /api/analytics/metrics returns the six simplified metrics for a moderator', async () => {
+    await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => seedModCache('t5_testsub', 't2_moduser'),
+    )
+
+    const res = await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => app.request('/api/analytics/metrics?days=7'),
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as {
+        status: string
+        data: Array<{
+            date: string
+            opens: number
+            views: number
+            completions: number
+            averagePlaySeconds: number | null
+            sessions: number
+            d1Retention: number | null
+            d7Retention: number | null
+        }>
+    }
+    expect(body.status).toBe('success')
+    expect(body.data).toHaveLength(7)
+
+    const first = body.data[0]!
+    expect(first).toHaveProperty('opens')
+    expect(first).toHaveProperty('views')
+    expect(first).toHaveProperty('completions')
+    expect(first).toHaveProperty('averagePlaySeconds')
+    expect(first).toHaveProperty('d1Retention')
+    expect(first).toHaveProperty('d7Retention')
+})
+
+const testMetricsForbidden = createDevvitTest({
+    userId: 't2_nonmod',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testMetricsForbidden('GET /api/analytics/metrics returns 403 for non-moderator', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'nonmod_user' } as never)
+    vi.spyOn(webReddit, 'getModerators').mockReturnValue({
+        all: () => Promise.resolve([]),
+    } as never)
+
+    const res = await withCtx(
+        { userId: 't2_nonmod', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => app.request('/api/analytics/metrics'),
+    )
+
+    expect(res.status).toBe(403)
+    vi.restoreAllMocks()
+})
+
+const testMetricsClamp = createDevvitTest({
+    userId: 't2_moduser',
+    subredditName: 'testsub',
+    subredditId: 't5_testsub',
+})
+
+testMetricsClamp('GET /api/analytics/metrics clamps the days param into [1,30]', async () => {
+    await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        () => seedModCache('t5_testsub', 't2_moduser'),
+    )
+
+    const lengths = await withCtx(
+        { userId: 't2_moduser', subredditId: 't5_testsub', subredditName: 'testsub' },
+        async () => {
+            const lenFor = async (q: string): Promise<number> => {
+                const res = await app.request(`/api/analytics/metrics${q}`)
+                const body = await res.json() as { data: unknown[] }
+                return body.data.length
+            }
+            return {
+                zero: await lenFor('?days=0'),
+                huge: await lenFor('?days=999'),
+                nan: await lenFor('?days=abc'),
+            }
+        },
+    )
+
+    expect(lengths.zero).toBe(1)
+    expect(lengths.huge).toBe(30)
+    expect(lengths.nan).toBe(14)
+})
+
 // ─── GET /api/analytics/daily — 403 for non-moderator ─────────────────────────
 
 const testDailyForbidden = createDevvitTest({

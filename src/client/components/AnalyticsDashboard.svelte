@@ -1,22 +1,10 @@
 <script lang="ts">
-    import type {
-        DashboardData,
-        QualifiedSummary,
-    } from "../../shared/growth-types";
+    import type { SimpleMetrics } from "../../shared/metrics-types";
     import { focusTrap } from "../lib/focus-trap";
-    import {
-        generateMarkdownSnapshot,
-        copyToClipboard,
-    } from "../lib/markdown-export";
     import X from "lucide-svelte/icons/x";
     import Loader2 from "lucide-svelte/icons/loader-2";
     import BarChart2 from "lucide-svelte/icons/bar-chart-2";
-    import AlertTriangle from "lucide-svelte/icons/alert-triangle";
-    import TrendingUp from "lucide-svelte/icons/trending-up";
     import RefreshCw from "lucide-svelte/icons/refresh-cw";
-    import Clipboard from "lucide-svelte/icons/clipboard";
-    import Check from "lucide-svelte/icons/check";
-    import XCircle from "lucide-svelte/icons/x-circle";
 
     type Props = {
         isOpen: boolean;
@@ -25,66 +13,28 @@
 
     let { isOpen, onClose }: Props = $props();
 
-    type Tab = "overview" | "daily";
-
-    let activeTab = $state<Tab>("overview");
-    let dashboards = $state<DashboardData[]>([]);
-    let qualified = $state<QualifiedSummary | null>(null);
+    let metrics = $state<SimpleMetrics[]>([]);
     let loading = $state(false);
     let error = $state<string | null>(null);
 
-    type CopyState = "idle" | "success" | "error";
-    let copyState = $state<CopyState>("idle");
-
-    // Latest dashboard entry (most recent day)
-    let latest = $derived(dashboards[dashboards.length - 1] ?? null);
-
-    async function handleCopy(): Promise<void> {
-        if (dashboards.length === 0 || !latest) return;
-
-        const markdown = generateMarkdownSnapshot(
-            dashboards,
-            latest.rolling,
-            latest.currentPhase,
-        );
-        const success = await copyToClipboard(markdown);
-
-        copyState = success ? "success" : "error";
-        setTimeout(() => {
-            copyState = "idle";
-        }, 2000);
-    }
+    // Most recent day with a closed retention window drives the headline tiles.
+    let latest = $derived(metrics[metrics.length - 1] ?? null);
 
     $effect(() => {
-        if (isOpen && dashboards.length === 0) {
-            fetchDashboard();
+        if (isOpen && metrics.length === 0) {
+            void fetchMetrics();
         }
     });
 
-    async function fetchDashboard(): Promise<void> {
+    async function fetchMetrics(): Promise<void> {
         loading = true;
         error = null;
         try {
-            const [dashboardRes, qualifiedRes] = await Promise.all([
-                fetch("/api/analytics/dashboard"),
-                fetch("/api/analytics/qualified-summary"),
-            ]);
-            if (!dashboardRes.ok)
-                throw new Error(`HTTP ${dashboardRes.status}`);
-            if (!qualifiedRes.ok)
-                throw new Error(`HTTP ${qualifiedRes.status}`);
-
-            const dashboardJson = await dashboardRes.json();
-            if (dashboardJson.status === "error") {
-                throw new Error(dashboardJson.message);
-            }
-            const qualifiedJson = await qualifiedRes.json();
-            if (qualifiedJson.status === "error") {
-                throw new Error(qualifiedJson.message);
-            }
-
-            dashboards = dashboardJson.data as DashboardData[];
-            qualified = qualifiedJson.data as QualifiedSummary | null;
+            const res = await fetch("/api/analytics/metrics?days=14");
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (json.status === "error") throw new Error(json.message);
+            metrics = json.data as SimpleMetrics[];
         } catch (e) {
             error = e instanceof Error ? e.message : "Failed to load analytics";
         } finally {
@@ -92,31 +42,49 @@
         }
     }
 
+    const num = (n: number): string => n.toLocaleString();
     const pct = (n: number | null): string =>
         n === null ? "—" : `${(n * 100).toFixed(1)}%`;
-    const num = (n: number): string => n.toLocaleString();
     const secs = (n: number | null): string =>
-        n === null ? "—" : `${n.toFixed(0)}s`;
+        n === null ? "—" : `${Math.round(n)}s`;
 
-    function alertBg(type: "kill" | "scale"): string {
-        return type === "kill"
-            ? "bg-red-500/10 border-red-500/40 text-red-400"
-            : "bg-emerald-500/10 border-emerald-500/40 text-emerald-400";
-    }
-
-    function alertIcon(type: "kill" | "scale"): string {
-        return type === "kill" ? "🚨" : "🚀";
-    }
-
-    function phaseColor(phase: number): string {
-        const colors: Record<number, string> = {
-            1: "text-blue-400",
-            2: "text-yellow-400",
-            3: "text-orange-400",
-            4: "text-emerald-400",
-        };
-        return colors[phase] ?? "text-theme-text-muted";
-    }
+    type Tile = { label: string; value: string; hint: string };
+    let tiles = $derived<Tile[]>(
+        latest === null
+            ? []
+            : [
+                  {
+                      label: "Opens",
+                      value: num(latest.opens),
+                      hint: "unique/day",
+                  },
+                  {
+                      label: "Views",
+                      value: num(latest.views),
+                      hint: "no action",
+                  },
+                  {
+                      label: "Completions",
+                      value: num(latest.completions),
+                      hint: "solved",
+                  },
+                  {
+                      label: "Play Time",
+                      value: secs(latest.averagePlaySeconds),
+                      hint: "avg/session",
+                  },
+                  {
+                      label: "D1 Retention",
+                      value: pct(latest.d1Retention),
+                      hint: "next day",
+                  },
+                  {
+                      label: "D7 Retention",
+                      value: pct(latest.d7Retention),
+                      hint: "7 days",
+                  },
+              ],
+    );
 </script>
 
 {#if isOpen}
@@ -139,54 +107,28 @@
         >
             <!-- Header -->
             <div
-                class="flex items-center justify-between p-4 border-b border-theme-border flex-none"
+                class="flex items-center justify-between px-4 py-3 border-b border-theme-border"
             >
                 <div class="flex items-center gap-2">
-                    <BarChart2 class="w-5 h-5 text-blue-400" />
-                    <h2 class="text-lg font-bold text-theme-text-primary">
+                    <BarChart2 class="w-5 h-5 text-theme-text-primary" />
+                    <h2 class="text-base font-bold text-theme-text-primary">
                         Analytics
                     </h2>
-                    {#if latest}
-                        <span class="text-xs text-theme-text-muted">
-                            Day {latest.currentPhase.dayNumber}
-                        </span>
-                    {/if}
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1">
                     <button
-                        onclick={fetchDashboard}
-                        class="text-theme-text-muted hover:text-theme-text-primary transition-colors p-1"
-                        aria-label="Refresh"
+                        class="p-2 rounded-lg hover:bg-theme-bg-hover text-theme-text-muted disabled:opacity-50"
+                        onclick={() => void fetchMetrics()}
                         disabled={loading}
+                        aria-label="Refresh"
                     >
                         <RefreshCw
                             class="w-4 h-4 {loading ? 'animate-spin' : ''}"
                         />
                     </button>
                     <button
-                        onclick={handleCopy}
-                        class="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors
-                            {copyState === 'success'
-                            ? 'text-emerald-400'
-                            : copyState === 'error'
-                              ? 'text-red-400'
-                              : 'text-theme-text-muted hover:text-theme-text-primary'}
-                            disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-label="Copy to Clipboard"
-                        disabled={dashboards.length === 0}
-                    >
-                        {#if copyState === "success"}
-                            <Check class="w-4 h-4" />
-                        {:else if copyState === "error"}
-                            <XCircle class="w-4 h-4" />
-                        {:else}
-                            <Clipboard class="w-4 h-4" />
-                        {/if}
-                        <span>Copy</span>
-                    </button>
-                    <button
+                        class="p-2 rounded-lg hover:bg-theme-bg-hover text-theme-text-muted"
                         onclick={onClose}
-                        class="text-theme-text-muted hover:text-theme-text-primary transition-colors p-1"
                         aria-label="Close"
                     >
                         <X class="w-5 h-5" />
@@ -194,528 +136,124 @@
                 </div>
             </div>
 
-            <!-- Tabs -->
-            <div class="flex border-b border-theme-border flex-none">
-                <button
-                    onclick={() => (activeTab = "overview")}
-                    class="flex-1 px-4 py-3 text-sm font-medium transition-colors
-						{activeTab === 'overview'
-                        ? 'text-theme-text-primary bg-theme-hover border-b-2 border-blue-400'
-                        : 'text-theme-text-muted hover:text-theme-text-primary'}"
-                >
-                    Overview
-                </button>
-                <button
-                    onclick={() => (activeTab = "daily")}
-                    class="flex-1 px-4 py-3 text-sm font-medium transition-colors
-						{activeTab === 'daily'
-                        ? 'text-theme-text-primary bg-theme-hover border-b-2 border-blue-400'
-                        : 'text-theme-text-muted hover:text-theme-text-primary'}"
-                >
-                    14-Day Table
-                </button>
-            </div>
-
             <!-- Body -->
-            <div class="flex-1 min-h-0 overflow-y-auto">
-                {#if loading}
-                    <div class="flex items-center justify-center py-12">
-                        <Loader2
-                            class="w-8 h-8 text-theme-text-muted animate-spin"
-                        />
+            <div class="flex-1 overflow-y-auto p-4">
+                {#if loading && metrics.length === 0}
+                    <div
+                        class="flex flex-col items-center justify-center py-12 text-theme-text-muted"
+                    >
+                        <Loader2 class="w-6 h-6 animate-spin mb-2" />
+                        <p class="text-sm">Loading metrics…</p>
                     </div>
                 {:else if error}
-                    <div class="text-center py-10 px-4">
-                        <p class="text-red-400 mb-4">{error}</p>
-                        <button
-                            onclick={fetchDashboard}
-                            class="px-4 py-2 border border-red-400 text-red-400 rounded-lg text-sm hover:bg-red-400/10 active:scale-95 transition-all"
-                        >
-                            Retry
-                        </button>
-                    </div>
-                {:else if !latest}
                     <div
-                        class="text-center py-10 text-theme-text-muted text-sm"
+                        class="rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 px-4 py-3 text-sm"
                     >
-                        No data yet. Analytics will appear once users start
-                        playing.
+                        {error}
                     </div>
-                {:else if activeTab === "overview"}
-                    <div class="p-4 space-y-4">
-                        <!-- Roadmap phase -->
-                        <div
-                            class="rounded-lg border border-theme-border bg-theme-hover p-3"
-                        >
-                            <div class="flex items-center justify-between">
-                                <span
-                                    class="text-xs text-theme-text-muted uppercase tracking-wide"
-                                    >Roadmap Phase</span
-                                >
-                                {#if latest.currentPhase.isComplete}
-                                    <span class="text-xs text-emerald-400"
-                                        >✅ Complete</span
-                                    >
-                                {/if}
-                            </div>
-                            <p
-                                class="mt-1 font-bold {phaseColor(
-                                    latest.currentPhase.phase,
-                                )}"
-                            >
-                                Phase {latest.currentPhase.phase}: {latest
-                                    .currentPhase.label}
-                            </p>
-                            {#if latest.currentPhase.suggestedActions.length > 0}
-                                <ul class="mt-2 space-y-1">
-                                    {#each latest.currentPhase.suggestedActions as action}
-                                        <li
-                                            class="text-xs text-theme-text-muted flex gap-1.5"
-                                        >
-                                            <span class="text-theme-text-muted"
-                                                >→</span
-                                            >
-                                            {action}
-                                        </li>
-                                    {/each}
-                                </ul>
-                            {/if}
-                        </div>
-
-                        <!-- Qualified Engagement (bounded, server-validated) -->
-                        <div
-                            class="rounded-lg border border-theme-border bg-theme-hover p-3"
-                        >
-                            <div class="flex items-center justify-between">
-                                <span
-                                    class="text-xs text-theme-text-muted uppercase tracking-wide"
-                                    >Qualified Engagement</span
-                                >
-                                {#if qualified}
-                                    <span class="text-xs text-theme-text-muted"
-                                        >{qualified.dqpDate}</span
-                                    >
-                                {/if}
-                            </div>
-                            {#if qualified}
-                                <p
-                                    class="mt-1 text-[10px] text-theme-text-muted"
-                                >
-                                    Estimated from a bounded daily filter and
-                                    capped cohort sample.
-                                </p>
-                                <div class="grid grid-cols-2 gap-2 mt-2">
-                                    <div>
-                                        <p
-                                            class="text-xs text-theme-text-muted"
-                                        >
-                                            DQP (est.)
-                                        </p>
-                                        <p
-                                            class="text-xl font-bold text-theme-text-primary"
-                                        >
-                                            {num(qualified.dqp)}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p
-                                            class="text-xs text-theme-text-muted"
-                                        >
-                                            Avg Play Time
-                                        </p>
-                                        <p
-                                            class="text-xl font-bold text-theme-text-primary"
-                                        >
-                                            {secs(qualified.averagePlaySeconds)}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p
-                                            class="text-xs text-theme-text-muted"
-                                        >
-                                            D1 Retention (est.)
-                                        </p>
-                                        <p
-                                            class="text-lg font-semibold {qualified.d1Retention ===
-                                            null
-                                                ? 'text-theme-text-muted'
-                                                : 'text-theme-text-primary'}"
-                                        >
-                                            {pct(qualified.d1Retention)}
-                                            <span
-                                                class="text-[10px] text-theme-text-muted font-normal"
-                                                >· n={num(
-                                                    qualified.d1SampleSize,
-                                                )}</span
-                                            >
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p
-                                            class="text-xs text-theme-text-muted"
-                                        >
-                                            D7 Retention (est.)
-                                        </p>
-                                        <p
-                                            class="text-lg font-semibold {qualified.d7Retention ===
-                                            null
-                                                ? 'text-theme-text-muted'
-                                                : 'text-theme-text-primary'}"
-                                        >
-                                            {pct(qualified.d7Retention)}
-                                            <span
-                                                class="text-[10px] text-theme-text-muted font-normal"
-                                                >· n={num(
-                                                    qualified.d7SampleSize,
-                                                )}</span
-                                            >
-                                        </p>
-                                    </div>
-                                </div>
-                                <div
-                                    class="mt-2 pt-2 border-t border-theme-border"
-                                >
-                                    <p
-                                        class="text-xs text-theme-text-muted mb-1"
-                                    >
-                                        Session length ({num(
-                                            qualified.qualifiedSessions,
-                                        )} qualified)
-                                    </p>
-                                    <div
-                                        class="flex justify-between text-xs text-theme-text-primary"
-                                    >
-                                        <span
-                                            >20–29s: {num(
-                                                qualified.playtimeBuckets
-                                                    .b20_29,
-                                            )}</span
-                                        >
-                                        <span
-                                            >30–44s: {num(
-                                                qualified.playtimeBuckets
-                                                    .b30_44,
-                                            )}</span
-                                        >
-                                        <span
-                                            >45–60s: {num(
-                                                qualified.playtimeBuckets
-                                                    .b45_60,
-                                            )}</span
-                                        >
-                                    </div>
-                                </div>
-                            {:else}
-                                <p class="mt-2 text-sm text-theme-text-muted">
-                                    No qualified engagement recorded yet.
-                                </p>
-                            {/if}
-                        </div>
-
-                        <!-- Alerts -->
-                        {#if latest.alerts.length > 0 || latest.dqSuppressedRuleIds.length > 0}
-                            <div class="space-y-2">
-                                <p
-                                    class="text-xs text-theme-text-muted uppercase tracking-wide flex items-center gap-1"
-                                >
-                                    <AlertTriangle class="w-3 h-3" />
-                                    Alerts
-                                </p>
-                                {#each latest.alerts.filter((a) => !latest.dqSuppressedRuleIds.includes(a.ruleId)) as alert}
-                                    <div
-                                        class="rounded-lg border px-3 py-2 text-sm {alertBg(
-                                            alert.type,
-                                        )}"
-                                    >
-                                        {alertIcon(alert.type)}
-                                        {alert.message}
-                                        <span class="text-xs opacity-70 ml-1">
-                                            ({pct(alert.metricValue)} vs {pct(
-                                                alert.threshold,
-                                            )})
-                                        </span>
-                                    </div>
-                                {/each}
-                                {#if latest.dqSuppressedRuleIds.length > 0}
-                                    <div
-                                        class="rounded-lg border border-theme-border bg-theme-hover px-3 py-2 text-sm text-theme-text-muted"
-                                    >
-                                        ℹ️ {latest.dqSuppressedRuleIds.length}
-                                        {latest.dqSuppressedRuleIds.length === 1
-                                            ? "rule"
-                                            : "rules"} suppressed due to data quality
-                                    </div>
-                                {/if}
-                            </div>
-                        {/if}
-
-                        <!-- 7-day rolling metrics -->
-                        <div>
-                            <p
-                                class="text-xs text-theme-text-muted uppercase tracking-wide flex items-center gap-1 mb-2"
-                            >
-                                <TrendingUp class="w-3 h-3" />
-                                7-Day Rolling Averages
-                            </p>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div
-                                    class="rounded-lg border border-theme-border bg-theme-hover p-3"
-                                >
-                                    <p class="text-xs text-theme-text-muted">
-                                        DQE (avg)
-                                    </p>
-                                    <p
-                                        class="text-xl font-bold text-theme-text-primary mt-0.5"
-                                    >
-                                        {latest.rolling.dqe7d === null
-                                            ? "—"
-                                            : num(
-                                                  Math.round(
-                                                      latest.rolling.dqe7d,
-                                                  ),
-                                              )}
-                                        {#if latest.rolling.dqe7d === null}
-                                            <span
-                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
-                                                >DQ</span
-                                            >
-                                        {/if}
-                                    </p>
-                                </div>
-                                <div
-                                    class="rounded-lg border border-theme-border bg-theme-hover p-3"
-                                >
-                                    <p class="text-xs text-theme-text-muted">
-                                        D1 Return
-                                    </p>
-                                    <p
-                                        class="text-xl font-bold {latest.rolling
-                                            .d1ReturnRate7d === null
-                                            ? 'text-theme-text-muted'
-                                            : latest.rolling.d1ReturnRate7d >=
-                                                0.4
-                                              ? 'text-emerald-400'
-                                              : latest.rolling.d1ReturnRate7d <
-                                                  0.15
-                                                ? 'text-red-400'
-                                                : 'text-theme-text-primary'} mt-0.5"
-                                    >
-                                        {pct(latest.rolling.d1ReturnRate7d)}
-                                        {#if latest.rolling.d1ReturnRate7d === null}
-                                            <span
-                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
-                                                >DQ</span
-                                            >
-                                        {/if}
-                                    </p>
-                                </div>
-                                <div
-                                    class="rounded-lg border border-theme-border bg-theme-hover p-3"
-                                >
-                                    <p class="text-xs text-theme-text-muted">
-                                        First Action Rate
-                                    </p>
-                                    <p
-                                        class="text-xl font-bold {latest.rolling
-                                            .firstActionRate7d === null
-                                            ? 'text-theme-text-muted'
-                                            : latest.rolling
-                                                    .firstActionRate7d >= 0.5
-                                              ? 'text-emerald-400'
-                                              : 'text-red-400'} mt-0.5"
-                                    >
-                                        {pct(latest.rolling.firstActionRate7d)}
-                                        {#if latest.rolling.firstActionRate7d === null}
-                                            <span
-                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
-                                                >DQ</span
-                                            >
-                                        {/if}
-                                    </p>
-                                </div>
-                                <div
-                                    class="rounded-lg border border-theme-border bg-theme-hover p-3"
-                                >
-                                    <p class="text-xs text-theme-text-muted">
-                                        Completion Rate
-                                    </p>
-                                    <p
-                                        class="text-xl font-bold {latest.rolling
-                                            .completionRate7d === null
-                                            ? 'text-theme-text-muted'
-                                            : latest.rolling.completionRate7d >=
-                                                0.3
-                                              ? 'text-emerald-400'
-                                              : 'text-red-400'} mt-0.5"
-                                    >
-                                        {pct(latest.rolling.completionRate7d)}
-                                        {#if latest.rolling.completionRate7d === null}
-                                            <span
-                                                class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
-                                                >DQ</span
-                                            >
-                                        {/if}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Today's snapshot -->
-                        <div>
-                            <p
-                                class="text-xs text-theme-text-muted uppercase tracking-wide mb-2"
-                            >
-                                Today ({latest.date})
-                            </p>
-                            <div
-                                class="rounded-lg border border-theme-border overflow-hidden"
-                            >
-                                {#each [{ label: "Post Opens", value: num(latest.daily.postOpens) }, { label: "First Actions", value: num(latest.daily.firstActions) }, { label: "Completions", value: num(latest.daily.completions) }, { label: "D3 Return", value: pct(latest.daily.d3ReturnRate ?? null) }, { label: "Daily Engagers", value: num(latest.daily.growth?.dailyActiveEngagers ?? 0) }, { label: "Challenge Posts", value: num(latest.daily.growth?.challengePosts ?? 0) }, { label: "K", value: latest.daily.growth?.kFactor === null || latest.daily.growth?.kFactor === undefined ? "—" : latest.daily.growth.kFactor.toFixed(2) }, { label: "Season Players", value: num(latest.seasonParticipants) }] as row, i}
-                                    <div
-                                        class="flex justify-between px-3 py-2 text-sm {i %
-                                            2 ===
-                                        0
-                                            ? ''
-                                            : 'bg-theme-hover'}"
-                                    >
-                                        <span class="text-theme-text-muted"
-                                            >{row.label}</span
-                                        >
-                                        <span
-                                            class="font-medium text-theme-text-primary"
-                                            >{row.value}</span
-                                        >
-                                    </div>
-                                {/each}
-                            </div>
-                        </div>
-                    </div>
+                {:else if latest === null}
+                    <p class="text-sm text-theme-text-muted text-center py-12">
+                        No data yet.
+                    </p>
                 {:else}
+                    <!-- Headline tiles: most recent day -->
+                    <p class="text-xs text-theme-text-muted mb-2">
+                        Latest day · {latest.date}
+                    </p>
+                    <div class="grid grid-cols-2 gap-2 mb-4">
+                        {#each tiles as tile (tile.label)}
+                            <div
+                                class="rounded-lg border border-theme-border p-3"
+                            >
+                                <p class="text-xs text-theme-text-muted">
+                                    {tile.label}
+                                </p>
+                                <p
+                                    class="text-xl font-bold text-theme-text-primary mt-0.5"
+                                >
+                                    {tile.value}
+                                </p>
+                                <p class="text-[10px] text-theme-text-muted">
+                                    {tile.hint}
+                                </p>
+                            </div>
+                        {/each}
+                    </div>
+
                     <!-- Daily table -->
-                    <div class="overflow-x-auto">
-                        <table
-                            class="w-full text-xs border-collapse min-w-[480px]"
-                        >
+                    <div
+                        class="rounded-lg border border-theme-border overflow-hidden"
+                    >
+                        <table class="w-full text-xs">
                             <thead>
                                 <tr
-                                    class="border-b border-theme-border text-theme-text-muted"
+                                    class="bg-theme-bg-hover text-theme-text-muted"
                                 >
-                                    <th class="px-3 py-2 text-left font-medium"
+                                    <th
+                                        class="px-2 py-2 text-left font-semibold"
                                         >Date</th
                                     >
-                                    <th class="px-3 py-2 text-right font-medium"
+                                    <th
+                                        class="px-2 py-2 text-right font-semibold"
                                         >Opens</th
                                     >
-                                    <th class="px-3 py-2 text-right font-medium"
-                                        >Actions</th
+                                    <th
+                                        class="px-2 py-2 text-right font-semibold"
+                                        >Views</th
                                     >
-                                    <th class="px-3 py-2 text-right font-medium"
-                                        >Completions</th
+                                    <th
+                                        class="px-2 py-2 text-right font-semibold"
+                                        >Compl.</th
                                     >
-                                    <th class="px-3 py-2 text-right font-medium"
-                                        >1st Act%</th
+                                    <th
+                                        class="px-2 py-2 text-right font-semibold"
+                                        >Play</th
                                     >
-                                    <th class="px-3 py-2 text-right font-medium"
-                                        >Compl%</th
+                                    <th
+                                        class="px-2 py-2 text-right font-semibold"
+                                        >D1</th
                                     >
-                                    <th class="px-3 py-2 text-right font-medium"
-                                        >D1 Ret%</th
+                                    <th
+                                        class="px-2 py-2 text-right font-semibold"
+                                        >D7</th
                                     >
                                 </tr>
                             </thead>
                             <tbody>
-                                {#each [...dashboards].reverse() as d, i}
+                                {#each [...metrics].reverse() as d, i (d.date)}
                                     <tr
-                                        class="border-b border-theme-border {i %
-                                            2 ===
-                                        0
-                                            ? ''
-                                            : 'bg-theme-hover'}"
+                                        class={i % 2 === 0
+                                            ? "bg-theme-bg-modal"
+                                            : "bg-theme-bg-hover/40"}
                                     >
                                         <td
-                                            class="px-3 py-2 text-theme-text-muted font-mono"
-                                        >
-                                            {d.date}
-                                            {#if d.daily.dq.firstActionMissing}
-                                                <span
-                                                    class="ml-1 text-xs font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded px-1 py-0.5"
-                                                    >DQ</span
-                                                >
-                                            {/if}
-                                        </td>
-                                        <td
-                                            class="px-3 py-2 text-right text-theme-text-primary"
-                                            >{num(d.daily.postOpens)}</td
+                                            class="px-2 py-2 text-left text-theme-text-muted whitespace-nowrap"
+                                            >{d.date.slice(5)}</td
                                         >
                                         <td
-                                            class="px-3 py-2 text-right text-theme-text-primary"
-                                            >{num(d.daily.firstActions)}</td
+                                            class="px-2 py-2 text-right text-theme-text-primary"
+                                            >{num(d.opens)}</td
                                         >
                                         <td
-                                            class="px-3 py-2 text-right text-theme-text-primary"
-                                            >{num(d.daily.completions)}</td
+                                            class="px-2 py-2 text-right text-theme-text-primary"
+                                            >{num(d.views)}</td
                                         >
                                         <td
-                                            class="px-3 py-2 text-right {d.daily
-                                                .firstActionRate === null
-                                                ? 'text-theme-text-muted'
-                                                : d.daily.firstActionRate >= 0.5
-                                                  ? 'text-emerald-400'
-                                                  : d.daily.firstActionRate > 0
-                                                    ? 'text-red-400'
-                                                    : 'text-theme-text-muted'}"
+                                            class="px-2 py-2 text-right text-theme-text-primary"
+                                            >{num(d.completions)}</td
                                         >
-                                            {d.daily.firstActionRate === null
-                                                ? "—"
-                                                : d.daily.postOpens > 0
-                                                  ? pct(d.daily.firstActionRate)
-                                                  : "—"}
-                                        </td>
                                         <td
-                                            class="px-3 py-2 text-right {d.daily
-                                                .completionRate === null
-                                                ? 'text-theme-text-muted'
-                                                : d.daily.completionRate >= 0.3
-                                                  ? 'text-emerald-400'
-                                                  : d.daily.completionRate > 0
-                                                    ? 'text-red-400'
-                                                    : 'text-theme-text-muted'}"
+                                            class="px-2 py-2 text-right text-theme-text-primary"
+                                            >{secs(d.averagePlaySeconds)}</td
                                         >
-                                            {d.daily.completionRate === null
-                                                ? "—"
-                                                : d.daily.firstActions > 0
-                                                  ? pct(d.daily.completionRate)
-                                                  : "—"}
-                                        </td>
                                         <td
-                                            class="px-3 py-2 text-right {d.daily
-                                                .d1ReturnRate === null
-                                                ? 'text-theme-text-muted'
-                                                : d.daily.d1ReturnRate >= 0.4
-                                                  ? 'text-emerald-400'
-                                                  : d.daily.d1ReturnRate >= 0.15
-                                                    ? 'text-theme-text-primary'
-                                                    : d.daily.d1ReturnRate > 0
-                                                      ? 'text-red-400'
-                                                      : 'text-theme-text-muted'}"
+                                            class="px-2 py-2 text-right text-theme-text-primary"
+                                            >{pct(d.d1Retention)}</td
                                         >
-                                            {#if d.daily.d1ReturnRate === null && d.daily.dq.d1WindowIncomplete}
-                                                <span
-                                                    class="text-theme-text-muted"
-                                                    title="D+1 cohort window has not closed yet — value will populate after the next UTC day rolls over"
-                                                    >—</span
-                                                >
-                                                <span
-                                                    class="ml-1 text-[10px] font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/40 rounded px-1 py-0.5"
-                                                    title="Incomplete window"
-                                                    >WIN</span
-                                                >
-                                            {:else if d.daily.d1ReturnRate === null}
-                                                —
-                                            {:else}
-                                                {pct(d.daily.d1ReturnRate)}
-                                            {/if}
-                                        </td>
+                                        <td
+                                            class="px-2 py-2 text-right text-theme-text-primary"
+                                            >{pct(d.d7Retention)}</td
+                                        >
                                     </tr>
                                 {/each}
                             </tbody>

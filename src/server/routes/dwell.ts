@@ -21,6 +21,7 @@ import {
     getSessionIdFromHeader,
     recordDwellTick,
 } from '../lib/qualified'
+import { recordPlaytimeTick } from '../lib/metrics'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 
@@ -49,6 +50,7 @@ dwellRouter.post('/api/dwell/tick', async (c) => {
 
     try {
         const today = getTodayUTC()
+        await recordPlaytimeTick(today, sessionId, tickSeconds)
         const evaluation = await recordDwellTick(sessionId, userId, tickSeconds, today)
         return c.json({
             qualified: evaluation.qualified,
