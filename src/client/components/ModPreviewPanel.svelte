@@ -2,7 +2,6 @@
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import GameView from "../views/GameView.svelte";
-    import HowToPlayModal from "./HowToPlayModal.svelte";
     import MissionsPanel from "./MissionsPanel.svelte";
     import AchievementsPanel from "./AchievementsPanel.svelte";
     import ProfilePanel from "./ProfilePanel.svelte";
@@ -17,7 +16,6 @@
     import Grid3x3 from "lucide-svelte/icons/grid-3x3";
     import LayoutGrid from "lucide-svelte/icons/layout-grid";
     import Trophy from "lucide-svelte/icons/trophy";
-    import CircleHelp from "lucide-svelte/icons/circle-help";
     import Target from "lucide-svelte/icons/target";
     import Medal from "lucide-svelte/icons/medal";
     import User from "lucide-svelte/icons/user";
@@ -72,7 +70,6 @@
     type PreviewMode =
         | { kind: "game"; gridSize: 4 | 6 | 8 }
         | { kind: "completion"; gridSize: 4 | 6 | 8 }
-        | { kind: "howtoplay" }
         | { kind: "missions" }
         | { kind: "achievements" }
         | { kind: "profile" }
@@ -157,12 +154,6 @@
             icon: Trophy,
             iconClass: "text-yellow-400",
             mode: { kind: "completion", gridSize: 4 },
-        },
-        {
-            label: "How to Play",
-            icon: CircleHelp,
-            iconClass: "text-urjo-blue",
-            mode: { kind: "howtoplay" },
         },
         {
             label: "Missions",
@@ -282,13 +273,6 @@
 {/if}
 
 <!-- Modal / panel previews -->
-<HowToPlayModal
-    isOpen={preview?.kind === "howtoplay"}
-    onClose={close}
-    gridSize={4}
-    onOpenTutorial={close}
-/>
-
 <MissionsPanel isOpen={preview?.kind === "missions"} onClose={close} />
 <AchievementsPanel isOpen={preview?.kind === "achievements"} onClose={close} />
 <ProfilePanel isOpen={preview?.kind === "profile"} onClose={close} />

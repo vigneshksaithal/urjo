@@ -13,7 +13,6 @@
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
-	import HowToPlayModal from "../components/HowToPlayModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import MissionsPanel from "../components/MissionsPanel.svelte";
@@ -165,7 +164,6 @@
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
-	let showHowToPlay = $state(false);
 	let showSettings = $state(false);
 	let showModPreview = $state(false);
 	let showChallengeConfirm = $state(false);
@@ -279,7 +277,7 @@
 
 	function handleHelpTap(): void {
 		void fireOnce(postId ?? "", "help");
-		showHowToPlay = true;
+		handleOpenOptInTutorial();
 		fetch("/api/game/help-tap", { method: "POST" }).catch(() => {
 			// Non-blocking: tracking failure does not affect gameplay
 		});
@@ -881,14 +879,6 @@
 	}}
 />
 
-<!-- How to Play modal -->
-<HowToPlayModal
-	isOpen={showHowToPlay}
-	onClose={() => (showHowToPlay = false)}
-	{gridSize}
-	onOpenTutorial={handleOpenOptInTutorial}
-/>
-
 <!-- Settings bottom sheet -->
 {#if showSettings}
 	<!-- Backdrop — fades in/out -->
@@ -927,7 +917,7 @@
 			<button
 				onclick={() => {
 					showSettings = false;
-					showHowToPlay = true;
+					handleOpenOptInTutorial();
 				}}
 				class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
 			>
