@@ -4,7 +4,6 @@
     import GameView from "../views/GameView.svelte";
     import MissionsPanel from "./MissionsPanel.svelte";
     import AchievementsPanel from "./AchievementsPanel.svelte";
-    import ProfilePanel from "./ProfilePanel.svelte";
     import LeaderboardModal from "./LeaderboardModal.svelte";
     import { deserializeGrid } from "../lib/utils";
     import type { Grid, StreakData } from "../../shared/types";
@@ -18,7 +17,6 @@
     import Trophy from "lucide-svelte/icons/trophy";
     import Target from "lucide-svelte/icons/target";
     import Medal from "lucide-svelte/icons/medal";
-    import User from "lucide-svelte/icons/user";
     import BarChart2 from "lucide-svelte/icons/bar-chart-2";
     import Microscope from "lucide-svelte/icons/microscope";
 
@@ -72,7 +70,6 @@
         | { kind: "completion"; gridSize: 4 | 6 | 8 }
         | { kind: "missions" }
         | { kind: "achievements" }
-        | { kind: "profile" }
         | { kind: "leaderboard" };
 
     let preview = $state<PreviewMode | null>(null);
@@ -166,12 +163,6 @@
             icon: Medal,
             iconClass: "text-yellow-400",
             mode: { kind: "achievements" },
-        },
-        {
-            label: "Profile",
-            icon: User,
-            iconClass: "text-theme-text-secondary",
-            mode: { kind: "profile" },
         },
         {
             label: "Leaderboard",
@@ -275,7 +266,6 @@
 <!-- Modal / panel previews -->
 <MissionsPanel isOpen={preview?.kind === "missions"} onClose={close} />
 <AchievementsPanel isOpen={preview?.kind === "achievements"} onClose={close} />
-<ProfilePanel isOpen={preview?.kind === "profile"} onClose={close} />
 <LeaderboardModal
     isOpen={preview?.kind === "leaderboard"}
     onClose={close}

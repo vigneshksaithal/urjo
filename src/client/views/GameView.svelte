@@ -17,7 +17,6 @@
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import MissionsPanel from "../components/MissionsPanel.svelte";
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
-	import ProfilePanel from "../components/ProfilePanel.svelte";
 	import MysteryBoxAnimation from "../components/MysteryBoxAnimation.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 	import ResultCard from "../components/ResultCard.svelte";
@@ -171,7 +170,6 @@
 	let showSubscribeConfirm = $state(false);
 	let showMissions = $state(false);
 	let showAchievements = $state(false);
-	let showProfile = $state(false);
 	let dismissedMysteryBoxKey = $state<string | null>(null);
 	let dismissedMilestoneKey = $state<string | null>(null);
 	let showSeasonLeaderboard = $state(false);
@@ -960,7 +958,6 @@
 	isOpen={showAchievements}
 	onClose={() => (showAchievements = false)}
 />
-<ProfilePanel isOpen={showProfile} onClose={() => (showProfile = false)} />
 
 <!-- Mod component preview panel -->
 {#if isMod}

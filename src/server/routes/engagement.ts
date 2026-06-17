@@ -4,12 +4,11 @@
  */
 
 import { Hono } from 'hono'
-import { context, redis } from '@devvit/web/server'
-import type { MissionsResponse, ProfileResponse } from '../../shared/engagement-types'
+import { context } from '@devvit/web/server'
+import type { MissionsResponse } from '../../shared/engagement-types'
 import { ACHIEVEMENT_DEFS } from '../../shared/engagement-constants'
 import { getMissionState, claimMission } from '../lib/missions'
 import { getUnlockedAchievements } from '../lib/achievements'
-import { calculateInvestmentScore, calculateRankPercentile } from '../lib/profile'
 
 export const engagementRouter = new Hono()
 
@@ -90,56 +89,5 @@ engagementRouter.get('/api/achievements', async (c) => {
     } catch (error) {
         console.error('Error fetching achievements:', error)
         return c.json({ error: 'Failed to fetch achievements' }, 500)
-    }
-})
-
-// ─── GET /api/profile ─────────────────────────────────────────────────────────
-
-engagementRouter.get('/api/profile', async (c) => {
-    const { userId } = context
-    if (!userId) return c.json({ error: 'User ID required' }, 400)
-
-    try {
-        const [economyData, currentStreakStr, longestStreakStr, flairTierStr, unlocked, allScoreEntries] =
-            await Promise.all([
-                redis.hGetAll(`user:${userId}:economy`),
-                redis.get(`user:${userId}:streak:current`),
-                redis.get(`user:${userId}:streak:longest`),
-                redis.get(`user:${userId}:flairTier`),
-                getUnlockedAchievements(userId),
-                redis.zRange('leaderboard:coins', 0, -1, { by: 'rank' }),
-            ])
-
-        const totalCoinsEarned = parseInt(economyData?.totalCoins ?? '0', 10)
-        const ownedTitles: string[] = economyData?.ownedTitles
-            ? (JSON.parse(economyData.ownedTitles) as string[])
-            : ['puzzler']
-        const currentStreak = parseInt(currentStreakStr ?? '0', 10)
-        const longestStreak = parseInt(longestStreakStr ?? '0', 10)
-        const totalReferrals = parseInt(economyData?.totalReferrals ?? '0', 10)
-
-        const investmentScore = calculateInvestmentScore({
-            totalCoinsEarned,
-            titlesOwned: ownedTitles.length,
-            achievementsUnlocked: unlocked.length,
-            currentStreak,
-            longestStreak,
-        })
-
-        const allScores = allScoreEntries.map((e) => e.score)
-        const rankPercentile = calculateRankPercentile(investmentScore.totalScore, allScores)
-
-        const response: ProfileResponse = {
-            investmentScore,
-            flairTier: (flairTierStr as ProfileResponse['flairTier']) ?? 'bronze',
-            totalReferrals,
-            achievements: unlocked,
-            rankPercentile,
-        }
-
-        return c.json(response)
-    } catch (error) {
-        console.error('Error fetching profile:', error)
-        return c.json({ error: 'Failed to fetch profile' }, 500)
     }
 })

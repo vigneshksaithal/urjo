@@ -134,41 +134,7 @@ export type VariableRewardResult = {
     mysteryBox: MysteryBoxReward | null
 }
 
-// ─── Profile & Score Types ─────────────────────────────────────────────────────
-
-/** Investment score breakdown */
-export type InvestmentScoreBreakdown = {
-    totalCoinsEarned: number
-    titlesOwned: number
-    titlesScore: number
-    achievementsUnlocked: number
-    achievementsScore: number
-    currentStreak: number
-    currentStreakScore: number
-    longestStreak: number
-    longestStreakScore: number
-    totalScore: number
-}
-
-/** Input data for investment score calculation */
-export type InvestmentScoreInput = {
-    totalCoinsEarned: number
-    titlesOwned: number
-    achievementsUnlocked: number
-    currentStreak: number
-    longestStreak: number
-}
-
-/** Profile API response */
-export type ProfileResponse = {
-    investmentScore: InvestmentScoreBreakdown
-    flairTier: FlairTier
-    totalReferrals: number
-    achievements: AchievementUnlock[]
-    rankPercentile: number
-}
-
-/** Missions API response */
+// ─── Missions API response ─────────────────────────────────────────────────────
 export type MissionsResponse = {
     daily: MissionInstance[]
     weekly: MissionInstance[]

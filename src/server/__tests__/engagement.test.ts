@@ -9,7 +9,7 @@ import { expect, vi } from 'vitest'
 import { app } from '../index'
 import { saveMissionState, getMissionState } from '../lib/missions'
 import { ACHIEVEMENT_DEFS } from '../../shared/engagement-constants'
-import type { MissionsResponse, ProfileResponse } from '../../shared/engagement-types'
+import type { MissionsResponse } from '../../shared/engagement-types'
 import type { AchievementUnlock } from '../../shared/engagement-types'
 
 vi.mock('../lib/helpers', async (importOriginal) => {
@@ -123,32 +123,4 @@ testAchievementsUnlocked('GET /api/achievements marks unlocked achievements corr
     const solve50 = body.achievements.find((a) => a.id === 'solve_50')
     expect(solve50?.unlocked).toBe(false)
     expect(solve50?.progressPercent).toBe(0)
-})
-
-// ─── GET /api/profile ─────────────────────────────────────────────────────────
-
-const testProfile = createDevvitTest({ userId: 't2_testuser' })
-
-testProfile('GET /api/profile returns investment score and flair tier', async () => {
-    // Seed some economy data
-    await redis.hSet('user:t2_testuser:economy', {
-        totalCoins: '500',
-        ownedTitles: '["puzzler","streak_lord"]',
-        coins: '200',
-        totalReferrals: '3',
-    })
-    await redis.set('user:t2_testuser:streak:current', '7')
-    await redis.set('user:t2_testuser:streak:longest', '14')
-    await redis.set('user:t2_testuser:flairTier', 'silver')
-
-    const res = await app.request('/api/profile')
-    expect(res.status).toBe(200)
-
-    const body = await res.json() as ProfileResponse
-    expect(body.investmentScore).toBeDefined()
-    expect(body.investmentScore.totalScore).toBeGreaterThan(0)
-    expect(body.flairTier).toBe('silver')
-    expect(body.totalReferrals).toBe(3)
-    expect(Array.isArray(body.achievements)).toBe(true)
-    expect(typeof body.rankPercentile).toBe('number')
 })
