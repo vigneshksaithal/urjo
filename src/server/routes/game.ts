@@ -48,7 +48,6 @@ import {
 	getISOWeek,
 } from '../lib/helpers'
 import { isUserMigrated, migrateUserToPerGrid } from '../lib/migration'
-import { getMissionState, saveMissionState, updateMissionProgress } from '../lib/missions'
 import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
 import { rollVariableRewards } from '../lib/variable-rewards'
 import { checkAndAwardReferral } from '../lib/referrals'
@@ -94,7 +93,7 @@ import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../li
 import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, incrementSharesCount } from '../lib/social'
 import { serializeResultCard } from '../../shared/result-card'
 import type { ResultCardData } from '../../shared/growth-types'
-import type { EngagementCompletionData, MissionEvent, UserStats } from '../../shared/engagement-types'
+import type { EngagementCompletionData, UserStats } from '../../shared/engagement-types'
 import { getSessionRunMultiplier, getSessionRunBonusCoins } from '../../shared/session-run'
 import { forecastNextStreak } from '../../shared/streak-rewards'
 import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
@@ -740,36 +739,6 @@ gameRouter.get('/api/game/state', async (c) => {
 			console.error('[State] Season progress fetch failed (non-critical):', err)
 		}
 
-		// ─── Next active daily mission (preview) ───────────────────────────
-		// Pick the first not-yet-completed daily mission so the home strip
-		// can show "Solve 3 puzzles: 1/3" with a progress bar. CoC-style:
-		// progression is always visible on the home screen, never hidden in
-		// a modal.
-		let nextMission: {
-			templateId: string
-			description: string
-			currentProgress: number
-			targetValue: number
-			coinReward: number
-		} | undefined
-		try {
-			const dailyState = await getMissionState(userId, 'daily')
-			const activeMission =
-				dailyState.missions.find((m) => !m.completed) ??
-				dailyState.missions.find((m) => !m.claimed) ??
-				dailyState.missions[0]
-			if (activeMission) {
-				nextMission = {
-					templateId: activeMission.templateId,
-					description: activeMission.description,
-					currentProgress: activeMission.currentProgress,
-					targetValue: activeMission.targetValue,
-					coinReward: activeMission.coinReward,
-				}
-			}
-		} catch (err) {
-			console.error('[State] Next mission fetch failed (non-critical):', err)
-		}
 
 		const gameState: GameState = {
 			puzzle: serializedPuzzle,
@@ -794,7 +763,6 @@ gameRouter.get('/api/game/state', async (c) => {
 			weekendEvent: getActiveWeekendEvent(new Date()),
 			// Always-on progression strip data
 			...(seasonProgress !== undefined && { seasonProgress }),
-			...(nextMission !== undefined && { nextMission }),
 		}
 
 		return c.json(gameState)
@@ -1134,28 +1102,6 @@ gameRouter.post('/api/game/complete', async (c) => {
 				coinReward.mysteryBox = box
 			}
 
-			// Update mission progress
-			const missionEvent: MissionEvent = {
-				type: 'puzzle_complete',
-				timeTaken,
-				mistakes,
-				gridSize,
-				skillLevel: currentLevel,
-				coinsEarned: coinReward.total,
-				currentStreak: streak.currentStreak,
-			}
-
-			const [dailyState, weeklyState] = await Promise.all([
-				getMissionState(userId, 'daily'),
-				getMissionState(userId, 'weekly'),
-			])
-			const updatedDaily = updateMissionProgress(dailyState, missionEvent)
-			const updatedWeekly = updateMissionProgress(weeklyState, missionEvent)
-			await Promise.all([
-				saveMissionState(userId, 'daily', updatedDaily),
-				saveMissionState(userId, 'weekly', updatedWeekly),
-			])
-
 			// Increment weekly leaderboard for community highlights
 			await redis.zAdd(`leaderboard:weekly:${isoWeek}`, { score: 1, member: userId })
 
@@ -1200,7 +1146,6 @@ gameRouter.post('/api/game/complete', async (c) => {
 				variableReward,
 				newAchievements,
 				streakMilestone,
-				missionsUpdated: true,
 			}
 		} catch (engagementErr) {
 			// Engagement logic is non-blocking — failures don't prevent completion from succeeding

@@ -15,7 +15,6 @@
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
-	import MissionsPanel from "../components/MissionsPanel.svelte";
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
 	import MysteryBoxAnimation from "../components/MysteryBoxAnimation.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
@@ -98,16 +97,6 @@
 					score: number;
 			  }
 			| undefined;
-		/** First incomplete daily mission for the always-on strip preview. */
-		nextMission?:
-			| {
-					templateId: string;
-					description: string;
-					currentProgress: number;
-					targetValue: number;
-					coinReward: number;
-			  }
-			| undefined;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -153,7 +142,6 @@
 		sessionRunMultiplier = 1,
 		weekendEvent = undefined,
 		seasonProgress = undefined,
-		nextMission = undefined,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
 		hintsDismissed: _hintsDismissed = {
 			numberConstraint: false,
@@ -168,7 +156,6 @@
 	let showChallengeConfirm = $state(false);
 	let showChallengeAndContinueConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
-	let showMissions = $state(false);
 	let showAchievements = $state(false);
 	let dismissedMysteryBoxKey = $state<string | null>(null);
 	let dismissedMilestoneKey = $state<string | null>(null);
@@ -550,18 +537,15 @@
 	{/if}
 
 	<!-- Always-on progression strip — Subway Surfers / CoC home-screen
-	     pattern. Surfaces streak calendar, season standing, and next daily
-	     mission so meta-progression is never hidden in modals. Only on the
-	     in-game view (hidden during completion overlay & challenge posts to
-	     avoid clutter). -->
+	     pattern. Surfaces streak calendar and season standing so meta-progression
+	     is never hidden in modals. Only on the in-game view (hidden during
+	     completion overlay & challenge posts to avoid clutter). -->
 	{#if !isCompleted && !isChallenge && loginGate.showSeason}
 		<SeasonStrip
 			streak={streakData}
 			{currentSeason}
 			{seasonProgress}
-			{nextMission}
 			onOpenSeason={() => (showSeasonLeaderboard = true)}
-			onOpenMissions={() => (showMissions = true)}
 		/>
 	{/if}
 
@@ -951,10 +935,7 @@
 {/if}
 
 <!-- Engagement modals -->
-<MissionsPanel
-	isOpen={showMissions}
-	onClose={() => (showMissions = false)}
-/><AchievementsPanel
+<AchievementsPanel
 	isOpen={showAchievements}
 	onClose={() => (showAchievements = false)}
 />

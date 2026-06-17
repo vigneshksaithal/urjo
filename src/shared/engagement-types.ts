@@ -3,7 +3,7 @@
  * Shared between client and server
  */
 
-// ─── Mission Types ─────────────────────────────────────────────────────────────
+// ─── Mission Types (for daily post comment preview) ─────────────────────────────
 
 /** Mission cadence — daily resets each UTC day, weekly resets each UTC Monday */
 export type MissionCadence = 'daily' | 'weekly'
@@ -29,35 +29,6 @@ export type MissionTemplate = {
     readonly targetValue: number
     readonly coinReward: number
     readonly cadence: MissionCadence
-}
-
-/** Runtime mission instance with progress */
-export type MissionInstance = {
-    templateId: string
-    type: MissionType
-    description: string
-    targetValue: number
-    currentProgress: number
-    completed: boolean
-    claimed: boolean
-    coinReward: number
-}
-
-/** Daily/weekly mission state stored in Redis */
-export type MissionState = {
-    missions: MissionInstance[]
-    allCompleteBonusClaimed: boolean
-}
-
-/** Event data for mission progress tracking */
-export type MissionEvent = {
-    type: 'puzzle_complete'
-    timeTaken: number
-    mistakes: number
-    gridSize: number
-    skillLevel: number
-    coinsEarned: number
-    currentStreak: number
 }
 
 // ─── Achievement Types ─────────────────────────────────────────────────────────
@@ -134,14 +105,6 @@ export type VariableRewardResult = {
     mysteryBox: MysteryBoxReward | null
 }
 
-// ─── Missions API response ─────────────────────────────────────────────────────
-export type MissionsResponse = {
-    daily: MissionInstance[]
-    weekly: MissionInstance[]
-    dailyBonusAvailable: boolean
-    weeklyBonusAvailable: boolean
-}
-
 // ─── Completion Response Extension ─────────────────────────────────────────────
 
 /** Extended completion response fields for engagement data */
@@ -149,7 +112,6 @@ export type EngagementCompletionData = {
     variableReward: VariableRewardResult
     newAchievements: AchievementDef[]
     streakMilestone: { threshold: number; bonus: number } | null
-    missionsUpdated: boolean
 }
 
 // ─── Community Highlight Types ─────────────────────────────────────────────────

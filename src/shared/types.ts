@@ -85,15 +85,6 @@ export type GameState = {
 		rank: number | null
 		score: number
 	}
-	/** First incomplete daily mission — preview shown in the always-on
-	 *  progression strip so missions feel alive without opening the modal. */
-	nextMission?: {
-		templateId: string
-		description: string
-		currentProgress: number
-		targetValue: number
-		coinReward: number
-	}
 }
 
 export type NextChallengeResponse = {

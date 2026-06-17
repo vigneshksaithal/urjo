@@ -65,13 +65,6 @@ const buildGameState = (gridSize: number): Record<string, unknown> => ({
     streak: { currentStreak: 3, longestStreak: 5, lastPlayedDate: null },
     username: 'dev_tester',
     seasonProgress: { rank: 12, score: 340 },
-    nextMission: {
-        templateId: 'solve_3',
-        description: 'Solve 3 puzzles today',
-        currentProgress: 1,
-        targetValue: 3,
-        coinReward: 25,
-    },
 })
 
 /**

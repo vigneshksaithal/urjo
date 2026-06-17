@@ -121,16 +121,6 @@
 	let seasonProgress = $state<
 		{ rank: number | null; score: number } | undefined
 	>(undefined);
-	let nextMission = $state<
-		| {
-				templateId: string;
-				description: string;
-				currentProgress: number;
-				targetValue: number;
-				coinReward: number;
-		  }
-		| undefined
-	>(undefined);
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
 	let puzzleSolution = $state("");
@@ -237,7 +227,6 @@
 			// Always-on strip data — both fields are optional, set when
 			// present and clear otherwise so previous renders don't ghost.
 			seasonProgress = data.seasonProgress;
-			nextMission = data.nextMission;
 
 			// Update streak data
 			if (data.streak) {
@@ -779,7 +768,6 @@
 			weekendEvent,
 			weekendBonusCoins,
 			seasonProgress,
-			nextMission,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}

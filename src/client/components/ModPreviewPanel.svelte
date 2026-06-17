@@ -2,7 +2,6 @@
     import { fly, fade } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
     import GameView from "../views/GameView.svelte";
-    import MissionsPanel from "./MissionsPanel.svelte";
     import AchievementsPanel from "./AchievementsPanel.svelte";
     import LeaderboardModal from "./LeaderboardModal.svelte";
     import { deserializeGrid } from "../lib/utils";
@@ -15,7 +14,6 @@
     import Grid3x3 from "lucide-svelte/icons/grid-3x3";
     import LayoutGrid from "lucide-svelte/icons/layout-grid";
     import Trophy from "lucide-svelte/icons/trophy";
-    import Target from "lucide-svelte/icons/target";
     import Medal from "lucide-svelte/icons/medal";
     import BarChart2 from "lucide-svelte/icons/bar-chart-2";
     import Microscope from "lucide-svelte/icons/microscope";
@@ -39,7 +37,6 @@
         variableReward: { bonusMultiplier: null, mysteryBox: null },
         newAchievements: [],
         streakMilestone: null,
-        missionsUpdated: false,
     };
 
     function buildColors(size: number): string {
@@ -68,7 +65,6 @@
     type PreviewMode =
         | { kind: "game"; gridSize: 4 | 6 | 8 }
         | { kind: "completion"; gridSize: 4 | 6 | 8 }
-        | { kind: "missions" }
         | { kind: "achievements" }
         | { kind: "leaderboard" };
 
@@ -151,12 +147,6 @@
             icon: Trophy,
             iconClass: "text-yellow-400",
             mode: { kind: "completion", gridSize: 4 },
-        },
-        {
-            label: "Missions",
-            icon: Target,
-            iconClass: "text-orange-400",
-            mode: { kind: "missions" },
         },
         {
             label: "Achievements",
@@ -264,7 +254,6 @@
 {/if}
 
 <!-- Modal / panel previews -->
-<MissionsPanel isOpen={preview?.kind === "missions"} onClose={close} />
 <AchievementsPanel isOpen={preview?.kind === "achievements"} onClose={close} />
 <LeaderboardModal
     isOpen={preview?.kind === "leaderboard"}
