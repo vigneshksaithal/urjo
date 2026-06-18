@@ -86,7 +86,7 @@
 	type UserProps = {
 		username?: string;
 		isLoggedIn?: boolean;
-		hasSubscribed?: boolean;
+		hasJoinedSubreddit?: boolean;
 		isMod?: boolean;
 		notifyOptIn?: boolean;
 		hintsDismissed?: {
@@ -135,7 +135,7 @@
 		isMod = false,
 		timeTaken,
 		mistakes = 0,
-		hasSubscribed = false,
+		hasJoinedSubreddit = false,
 		isLoggedIn = true,
 		onSubscribe,
 		isChallenge = false,
@@ -218,7 +218,7 @@
 		skillLevel,
 		hasChallenged,
 		challengeUrl,
-		hasSubscribed,
+		hasJoinedSubreddit,
 	});
 	const simplifiedCtas = $derived(
 		getSimplifiedCompletionCtas(completionContext),
@@ -277,7 +277,7 @@
 		showSubscribeConfirm = false;
 		void fireOnce(postId ?? "", "subscribe");
 		onSubscribe?.();
-		// Persist subscription status so the button stays hidden
+		// Persist join status so the button stays hidden
 		fetch("/api/game/subscribe", { method: "POST" }).catch(() => {
 			// Non-blocking — UI will still update optimistically
 		});
@@ -474,7 +474,7 @@
 		? () => (showChallengeAndContinueConfirm = true)
 		: undefined}
 	onSubscribe={onSubscribe ? () => (showSubscribeConfirm = true) : undefined}
-	{hasSubscribed}
+	{hasJoinedSubreddit}
 />
 
 <!-- Confetti effect -->{#if showConfetti}
