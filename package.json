@@ -23,7 +23,7 @@
     "@tailwindcss/vite": "^4.3.1",
     "canvas-confetti": "^1.9.4",
     "devvit": "0.13.4",
-    "hono": "^4.12.25",
+    "hono": "^4.12.26",
     "lucide-svelte": "^1.0.1",
     "tailwindcss": "^4.3.1"
   },
