@@ -85,7 +85,7 @@
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
 	let isLoggedIn = $state(true);
-	let hasJoinedSubreddit = $state(false);
+	let hasSubscribed = $state(false);
 	// Run-again loop state — persisted via sessionStorage in session-run store.
 	let sessionRun = $state(getSessionRun());
 	let sessionRunMultiplier = $state(1);
@@ -287,7 +287,7 @@
 			const response = await fetch("/api/subscribe/status");
 			if (response.ok) {
 				const data = await response.json();
-				hasJoinedSubreddit = data.subscribed;
+				hasSubscribed = data.subscribed;
 			}
 		} catch {
 			// Non-critical
@@ -330,14 +330,12 @@
 			showLoginPrompt();
 			return;
 		}
-		if (hasJoinedSubreddit) return;
+		if (hasSubscribed) return;
 		void fireOnce(postId ?? "", "subscribe");
 		try {
-			const response = await fetch("/api/game/subscribe", {
-				method: "POST",
-			});
+			const response = await fetch("/api/subscribe", { method: "POST" });
 			if (response.ok) {
-				hasJoinedSubreddit = true;
+				hasSubscribed = true;
 			}
 		} catch {
 			// Non-critical
@@ -732,7 +730,7 @@
 			coins,
 			timeTaken,
 			mistakes: $mistakeCount,
-			hasJoinedSubreddit,
+			hasSubscribed,
 			isLoggedIn,
 			isChallenge,
 			postId,

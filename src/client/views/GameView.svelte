@@ -86,7 +86,7 @@
 	type UserProps = {
 		username?: string;
 		isLoggedIn?: boolean;
-		hasJoinedSubreddit?: boolean;
+		hasSubscribed?: boolean;
 		isMod?: boolean;
 		notifyOptIn?: boolean;
 		hintsDismissed?: {
@@ -135,7 +135,8 @@
 		isMod = false,
 		timeTaken,
 		mistakes = 0,
-		hasJoinedSubreddit = false,
+		username,
+		hasSubscribed = false,
 		isLoggedIn = true,
 		onSubscribe,
 		isChallenge = false,
@@ -143,14 +144,23 @@
 		engagement,
 		puzzleColors,
 		skillLevel = 1,
+		puzzleNumber = 0,
 		seasonRank = null,
 		seasonPoints = 0,
 		currentSeason,
+		notifyOptIn = false,
 		postId,
+		challengePromptEligible = false,
 		sessionRun = 0,
 		sessionRunMultiplier = 1,
 		weekendEvent = undefined,
 		seasonProgress = undefined,
+		// hintsDismissed is accepted for forward-compat; wired in task 13.3
+		hintsDismissed: _hintsDismissed = {
+			numberConstraint: false,
+			adjacencyViolation: false,
+		},
+		solution = "",
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -163,6 +173,15 @@
 	let dismissedMilestoneKey = $state<string | null>(null);
 	let showSeasonLeaderboard = $state(false);
 	let showOptInTutorial = $state(false);
+	let showAchievements = $state(false);
+
+	// ─── Notify toggle ─────────────────────────────────────────────────────────
+	// Optimistic update with revert on failure (Reqs 13.1–13.5)
+	// Using a function initialiser avoids the Svelte "captures initial value" warning
+	// while still seeding from the server-provided prop on first render.
+	let localNotifyOptIn = $state((() => notifyOptIn)());
+	let notifySubmitting = $state(false);
+	let notifyError = $state<string | null>(null);
 
 	// ─── Help-tap tracking ────────────────────────────────────────────────────
 	// POST to /api/game/help-tap on the first Help icon tap per session (Req 11.1).
@@ -218,7 +237,7 @@
 		skillLevel,
 		hasChallenged,
 		challengeUrl,
-		hasJoinedSubreddit,
+		hasSubscribed,
 	});
 	const simplifiedCtas = $derived(
 		getSimplifiedCompletionCtas(completionContext),
@@ -277,10 +296,6 @@
 		showSubscribeConfirm = false;
 		void fireOnce(postId ?? "", "subscribe");
 		onSubscribe?.();
-		// Persist join status so the button stays hidden
-		fetch("/api/game/subscribe", { method: "POST" }).catch(() => {
-			// Non-blocking — UI will still update optimistically
-		});
 	}
 
 	function handleGridSizeSelect(size: number): void {
@@ -294,6 +309,32 @@
 
 	function dismissMilestone(): void {
 		dismissedMilestoneKey = milestoneKey;
+	}
+
+	// Notify toggle handler — optimistic update, revert on failure (Req 13.5)
+	async function handleNotifyToggle(): Promise<void> {
+		if (notifySubmitting) return;
+		void fireOnce(postId ?? "", "notify");
+		notifySubmitting = true;
+		notifyError = null;
+		const previous = localNotifyOptIn;
+		localNotifyOptIn = !previous;
+		const endpoint = previous
+			? "/api/game/notify/opt-out"
+			: "/api/game/notify/opt-in";
+		try {
+			const res = await fetch(endpoint, { method: "POST" });
+			if (!res.ok) throw new Error("Request failed");
+			const json = (await res.json()) as { optedIn: boolean };
+			localNotifyOptIn = json.optedIn;
+		} catch {
+			// Revert on failure and show inline error (Req 13.5)
+			localNotifyOptIn = previous;
+			notifyError =
+				"Could not update notification preference. Try again.";
+		} finally {
+			notifySubmitting = false;
+		}
 	}
 
 	function handleOpenOptInTutorial(): void {
@@ -474,7 +515,7 @@
 		? () => (showChallengeAndContinueConfirm = true)
 		: undefined}
 	onSubscribe={onSubscribe ? () => (showSubscribeConfirm = true) : undefined}
-	{hasJoinedSubreddit}
+	{hasSubscribed}
 />
 
 <!-- Confetti effect -->{#if showConfetti}
