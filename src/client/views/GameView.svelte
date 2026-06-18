@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from "svelte";
 	import { navigateTo, showLoginPrompt } from "@devvit/web/client";
 	import type { CellColor, Grid, StreakData } from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
@@ -18,67 +17,54 @@
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
 	import MysteryBoxAnimation from "../components/MysteryBoxAnimation.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
-	import ResultCard from "../components/ResultCard.svelte";
+
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
 	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
 	import ModPreviewPanel from "../components/ModPreviewPanel.svelte";
-	import { fly, fade } from "svelte/transition";
-	import { cubicOut } from "svelte/easing";
-	import CircleHelp from "lucide-svelte/icons/circle-help";
+	import ConfirmDialog from "../components/ConfirmDialog.svelte";
+	import CompletionOverlay from "../components/CompletionOverlay.svelte";
+	import SettingsSheet from "../components/SettingsSheet.svelte";
 	import Settings from "lucide-svelte/icons/settings";
-	import ExternalLink from "lucide-svelte/icons/external-link";
-	import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
-	import Trophy from "lucide-svelte/icons/trophy";
-	import Clock from "lucide-svelte/icons/clock";
-	import Coins from "lucide-svelte/icons/coins";
-	import Flame from "lucide-svelte/icons/flame";
 
-	type Props = {
+	// ─── Grouped Props Types ─────────────────────────────────────────────────────
+	// Props are grouped by domain for better API design, type safety, and testing.
+	// See CODE_REVIEW_GAMEVIEW.md for rationale.
+
+	type GameProps = {
 		grid: Grid;
 		gridSize: number;
-		onCellChange: (row: number, col: number, color: CellColor) => void;
 		isCompleted: boolean;
-		onNextChallenge: () => void;
-		onRestart: () => void;
-		streakData: StreakData;
-		hasChallenged: boolean;
-		challengeUrl: string | null;
-		onChallenge: () => void;
-		onChallengeAndContinue?: () => void;
-		coins?: number;
-		onOpenShop?: () => void;
-		onOpenAnalytics?: () => void;
-		isMod?: boolean;
 		timeTaken?: number;
 		mistakes?: number;
-		username?: string;
-		hasSubscribed?: boolean;
-		/** False when the viewer is a logged-out Reddit user. Drives the
-		 *  login gate — account-scoped UI is hidden and a sign-in CTA shows. */
-		isLoggedIn?: boolean;
-		onSubscribe?: () => void;
-		isChallenge?: boolean;
-		onGridSizeChange?: (size: number) => void;
-		engagement?: EngagementCompletionData;
-		onEngagementDismissed?: () => void;
+		solution?: string;
 		puzzleColors?: string;
-		skillLevel?: number;
 		puzzleNumber?: number;
+	};
+
+	type ProgressionProps = {
+		coins?: number;
+		streakData: StreakData;
+		skillLevel?: number;
 		seasonRank?: number | null;
 		seasonPoints?: number;
+		seasonProgress?:
+			| {
+					rank: number | null;
+					score: number;
+			  }
+			| undefined;
 		currentSeason?: SeasonInfo | undefined;
-		notifyOptIn?: boolean;
-		postId?: string | undefined;
-		/** True on a perfect solve — surfaces an explicit "Challenge friends"
-		 *  prompt. The challenge post is only created on an explicit tap. */
+	};
+
+	type ChallengeProps = {
+		isChallenge?: boolean;
+		hasChallenged: boolean;
+		challengeUrl: string | null;
 		challengePromptEligible?: boolean;
-		/** Run-again loop: number of solves this session (incl. the latest). */
-		sessionRun?: number;
-		/** Coin multiplier already applied for this session run. */
-		sessionRunMultiplier?: number;
-		/** Active Weekend Event payload — when active, shows a persistent
-		 *  banner with countdown + applies a coin multiplier to all solves. */
+	};
+
+	type EventProps = {
 		weekendEvent?:
 			| {
 					active: boolean;
@@ -89,21 +75,48 @@
 					hoursLeft: number | null;
 			  }
 			| undefined;
-		/** Always-on progression strip data — player rank/score in the
-		 *  current season. Optional; the strip hides cleanly without it. */
-		seasonProgress?:
-			| {
-					rank: number | null;
-					score: number;
-			  }
-			| undefined;
+		engagement?: EngagementCompletionData;
+	};
+
+	type SessionProps = {
+		sessionRun?: number;
+		sessionRunMultiplier?: number;
+	};
+
+	type UserProps = {
+		username?: string;
+		isLoggedIn?: boolean;
+		hasSubscribed?: boolean;
+		isMod?: boolean;
+		notifyOptIn?: boolean;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
 		};
-		/** Solution string (e.g. "rbbrrbbr...") used to compute the idle hint. */
-		solution?: string;
 	};
+
+	type ActionProps = {
+		onCellChange: (row: number, col: number, color: CellColor) => void;
+		onNextChallenge: () => void;
+		onRestart: () => void;
+		onChallenge: () => void;
+		onChallengeAndContinue?: () => void;
+		onOpenShop?: () => void;
+		onOpenAnalytics?: () => void;
+		onSubscribe?: () => void;
+		onGridSizeChange?: (size: number) => void;
+		onEngagementDismissed?: () => void;
+	};
+
+	type Props = GameProps &
+		ProgressionProps &
+		ChallengeProps &
+		EventProps &
+		SessionProps &
+		UserProps &
+		ActionProps & {
+			postId?: string | undefined;
+		};
 
 	let {
 		grid,
@@ -122,7 +135,6 @@
 		isMod = false,
 		timeTaken,
 		mistakes = 0,
-		username,
 		hasSubscribed = false,
 		isLoggedIn = true,
 		onSubscribe,
@@ -131,23 +143,14 @@
 		engagement,
 		puzzleColors,
 		skillLevel = 1,
-		puzzleNumber = 0,
 		seasonRank = null,
 		seasonPoints = 0,
 		currentSeason,
-		notifyOptIn = false,
 		postId,
-		challengePromptEligible = false,
 		sessionRun = 0,
 		sessionRunMultiplier = 1,
 		weekendEvent = undefined,
 		seasonProgress = undefined,
-		// hintsDismissed is accepted for forward-compat; wired in task 13.3
-		hintsDismissed: _hintsDismissed = {
-			numberConstraint: false,
-			adjacencyViolation: false,
-		},
-		solution = "",
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -156,105 +159,10 @@
 	let showChallengeConfirm = $state(false);
 	let showChallengeAndContinueConfirm = $state(false);
 	let showSubscribeConfirm = $state(false);
-	let showAchievements = $state(false);
 	let dismissedMysteryBoxKey = $state<string | null>(null);
 	let dismissedMilestoneKey = $state<string | null>(null);
 	let showSeasonLeaderboard = $state(false);
-	let hasCommentedResult = $state(false);
-	let openMoreActionsKey = $state<string | null>(null);
 	let showOptInTutorial = $state(false);
-	let challengePromptDismissed = $state(false);
-
-	// ─── Idle hint ────────────────────────────────────────────────────────────
-	// After 3s of no cell interaction, reveal one correct cell as a dull
-	// pulsating hint. Resets whenever the user taps a cell.
-	const HINT_DELAY_MS = 3000;
-	// Idle/auto hints are DISABLED. They were launched enabled and drew
-	// many "I hate the auto hints" comments while engagement dropped (the
-	// game was partly solving itself). Do NOT flip this back to true — if
-	// hints return, make them an explicit user-initiated "Hint" button, not
-	// an automatic reveal. See the funnel post-mortem for context.
-	const HINTS_ENABLED = false;
-	let hintCell = $state<{
-		row: number;
-		col: number;
-		color: "blue" | "red";
-	} | null>(null);
-	// Plain let — not $state — so writes never trigger reactive re-runs.
-	let hintTimerId: ReturnType<typeof setTimeout> | null = null;
-
-	function scheduleHint(): void {
-		if (!HINTS_ENABLED) return;
-		if (hintTimerId !== null) clearTimeout(hintTimerId);
-		hintTimerId = setTimeout(() => {
-			hintCell = computeHintCell(grid, solution, gridSize);
-		}, HINT_DELAY_MS);
-	}
-
-	function cancelHint(): void {
-		if (hintTimerId !== null) {
-			clearTimeout(hintTimerId);
-			hintTimerId = null;
-		}
-		hintCell = null;
-	}
-
-	function computeHintCell(
-		currentGrid: Grid,
-		sol: string,
-		size: number,
-	): { row: number; col: number; color: "blue" | "red" } | null {
-		if (!sol) return null;
-		const candidates: {
-			row: number;
-			col: number;
-			color: "blue" | "red";
-		}[] = [];
-		for (let r = 0; r < size; r++) {
-			for (let c = 0; c < size; c++) {
-				const cell = currentGrid[r]?.[c];
-				if (!cell || cell.locked || cell.color !== null) continue;
-				const idx = r * size + c;
-				const solChar = sol[idx];
-				if (solChar === "b")
-					candidates.push({ row: r, col: c, color: "blue" });
-				else if (solChar === "r")
-					candidates.push({ row: r, col: c, color: "red" });
-			}
-		}
-		if (candidates.length === 0) return null;
-		return (
-			candidates[Math.floor(Math.random() * candidates.length)] ?? null
-		);
-	}
-
-	// Kick off the initial hint timer on mount; clean up on unmount.
-	onMount(() => {
-		if (!isCompleted) scheduleHint();
-		return () => {
-			if (hintTimerId !== null) clearTimeout(hintTimerId);
-		};
-	});
-
-	// Cancel hint when puzzle is completed.
-	$effect(() => {
-		if (isCompleted) cancelHint();
-	});
-
-	// Reset the challenge prompt each time a new perfect solve is signalled —
-	// prevents a previous dismiss from suppressing the nudge on future solves.
-	$effect(() => {
-		if (challengePromptEligible) {
-			challengePromptDismissed = false;
-		}
-	});
-
-	// Notify toggle — initialised from prop, updated optimistically on tap (Reqs 13.1–13.5)
-	// Using a function initialiser avoids the Svelte "captures initial value" warning
-	// while still seeding from the server-provided prop on first render.
-	let localNotifyOptIn = $state((() => notifyOptIn)());
-	let notifySubmitting = $state(false);
-	let notifyError = $state<string | null>(null);
 
 	// ─── Help-tap tracking ────────────────────────────────────────────────────
 	// POST to /api/game/help-tap on the first Help icon tap per session (Req 11.1).
@@ -266,17 +174,6 @@
 		fetch("/api/game/help-tap", { method: "POST" }).catch(() => {
 			// Non-blocking: tracking failure does not affect gameplay
 		});
-	}
-
-	function handleCellChangeWithHint(
-		row: number,
-		col: number,
-		color: import("../../shared/types").CellColor,
-	): void {
-		// Reset idle hint whenever the user interacts with a cell
-		cancelHint();
-		scheduleHint();
-		onCellChange(row, col, color);
 	}
 
 	const validation = $derived(validateGrid(grid, gridSize));
@@ -311,10 +208,6 @@
 	);
 	const showStreakMilestoneOverlay = $derived(
 		milestoneKey !== null && dismissedMilestoneKey !== milestoneKey,
-	);
-	const showMoreActionsPanel = $derived(
-		currentCompletionKey !== null &&
-			openMoreActionsKey === currentCompletionKey,
 	);
 
 	// Build CompletionContext for simplified CTAs (social viral mechanics)
@@ -375,21 +268,6 @@
 		}
 	}
 
-	function handleSecondaryCta(id: string): void {
-		// Secondary CTA is the demoted social action. Old primary handlers move
-		// here so "Challenge Friends" / "View Challenge" still work — they just
-		// live in the secondary slot now.
-		if (id === "challenge-friends") {
-			void fireOnce(postId ?? "", "challenge");
-			showChallengeConfirm = true;
-		} else if (id === "view-challenge") {
-			openChallenge();
-		} else if (id === "next-puzzle") {
-			// Backwards compat in case anything is still routed here
-			onNextChallenge();
-		}
-	}
-
 	function openChallenge(): void {
 		if (!challengeUrl) return;
 		navigateTo(challengeUrl);
@@ -399,6 +277,10 @@
 		showSubscribeConfirm = false;
 		void fireOnce(postId ?? "", "subscribe");
 		onSubscribe?.();
+		// Persist subscription status so the button stays hidden
+		fetch("/api/game/subscribe", { method: "POST" }).catch(() => {
+			// Non-blocking — UI will still update optimistically
+		});
 	}
 
 	function handleGridSizeSelect(size: number): void {
@@ -412,37 +294,6 @@
 
 	function dismissMilestone(): void {
 		dismissedMilestoneKey = milestoneKey;
-	}
-
-	function toggleMoreActions(): void {
-		if (currentCompletionKey === null) return;
-		openMoreActionsKey = showMoreActionsPanel ? null : currentCompletionKey;
-	}
-
-	// Notify toggle handler — optimistic update, revert on failure (Req 13.5)
-	async function handleNotifyToggle(): Promise<void> {
-		if (notifySubmitting) return;
-		void fireOnce(postId ?? "", "notify");
-		notifySubmitting = true;
-		notifyError = null;
-		const previous = localNotifyOptIn;
-		localNotifyOptIn = !previous;
-		const endpoint = previous
-			? "/api/game/notify/opt-out"
-			: "/api/game/notify/opt-in";
-		try {
-			const res = await fetch(endpoint, { method: "POST" });
-			if (!res.ok) throw new Error("Request failed");
-			const json = (await res.json()) as { optedIn: boolean };
-			localNotifyOptIn = json.optedIn;
-		} catch {
-			// Revert on failure and show inline error (Req 13.5)
-			localNotifyOptIn = previous;
-			notifyError =
-				"Could not update notification preference. Try again.";
-		} finally {
-			notifySubmitting = false;
-		}
 	}
 
 	function handleOpenOptInTutorial(): void {
@@ -460,15 +311,6 @@
 
 	function handleOptInTutorialDismiss(): void {
 		showOptInTutorial = false;
-	}
-
-	function startPerfectChallenge(): void {
-		void fireOnce(postId ?? "", "challenge");
-		showChallengeConfirm = true;
-	}
-
-	function dismissChallengePrompt(): void {
-		challengePromptDismissed = true;
 	}
 </script>
 
@@ -595,10 +437,9 @@
 				<GameBoard
 					{grid}
 					{gridSize}
-					onCellChange={handleCellChangeWithHint}
+					{onCellChange}
 					violatedRows={validation.violatedRows}
 					violatedCols={validation.violatedCols}
-					{hintCell}
 				/>
 			</div>
 		</div>
@@ -620,236 +461,56 @@
 	</footer>
 </div>
 
-<!-- Success full-screen -->
-{#if isCompleted}
-	<div
-		transition:fade={{ duration: 200 }}
-		class="fixed inset-0 z-50 flex flex-col items-center justify-between bg-theme-bg-primary px-6 py-10"
-	>
-		<!-- Top spacer -->
-		<div class="flex-1"></div>
-
-		<!-- Hero -->
-		<div class="flex flex-col items-center gap-5">
-			<div class="text-8xl leading-none select-none" aria-hidden="true">
-				🏆
-			</div>
-			<p class="text-3xl font-bold text-yellow-400 text-center">
-				Solved in {timeTaken ?? 0}s!
-			</p>
-		</div>
-
-		<!-- Stats row: time | coins | streak -->
-		<div class="grid grid-cols-3 gap-3 w-full mt-10">
-			<!-- Time -->
-			<div
-				class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
-			>
-				<Clock class="w-6 h-6 text-urjo-blue" />
-				<span
-					class="text-xl font-bold text-theme-text-primary leading-none"
-					>{timeTaken ?? 0}s</span
-				>
-				<span
-					class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-					>Time</span
-				>
-			</div>
-			<!-- Coins -->
-			{#if loginGate.showWallet && coins !== undefined}
-				<div
-					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-yellow-500/40 bg-yellow-500/10"
-				>
-					<Coins class="w-6 h-6 text-yellow-400" />
-					<span class="text-xl font-bold text-yellow-300 leading-none"
-						>{coins}</span
-					>
-					<span
-						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-						>Coins</span
-					>
-				</div>
-			{:else}
-				<div
-					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
-				>
-					<Coins class="w-6 h-6 text-theme-text-muted" />
-					<span
-						class="text-xl font-bold text-theme-text-muted leading-none"
-						>—</span
-					>
-					<span
-						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-						>Coins</span
-					>
-				</div>
-			{/if}
-			<!-- Streak -->
-			{#if loginGate.showStreak}
-				<div
-					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-orange-500/40 bg-orange-500/10"
-				>
-					<Flame class="w-6 h-6 text-orange-400" />
-					<span class="text-xl font-bold text-orange-300 leading-none"
-						>{streakData.currentStreak}</span
-					>
-					<span
-						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-						>Streak</span
-					>
-				</div>
-			{:else}
-				<div
-					class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
-				>
-					<Flame class="w-6 h-6 text-theme-text-muted" />
-					<span
-						class="text-xl font-bold text-theme-text-muted leading-none"
-						>—</span
-					>
-					<span
-						class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-						>Streak</span
-					>
-				</div>
-			{/if}
-		</div>
-
-		<!-- Bottom spacer -->
-		<div class="flex-1"></div>
-
-		<!-- Action buttons -->
-		<div class="flex flex-col gap-3 w-full">
-			<button
-				onclick={handlePrimaryCta}
-				class="w-full px-4 py-4 bg-urjo-blue text-white font-bold rounded-2xl text-base hover:opacity-90 active:scale-95 transition-all uppercase tracking-wide"
-			>
-				Continue
-			</button>
-			{#if onChallengeAndContinue && loginGate.showSocialActions}
-				<button
-					onclick={() => (showChallengeAndContinueConfirm = true)}
-					class="w-full px-4 py-3.5 border border-yellow-500/60 text-yellow-400 font-semibold rounded-2xl text-sm hover:bg-yellow-500/10 active:scale-95 transition-all"
-				>
-					Challenge &amp; Continue
-				</button>
-			{/if}
-			{#if onSubscribe && !hasSubscribed && loginGate.showSocialActions}
-				<button
-					onclick={() => (showSubscribeConfirm = true)}
-					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-2xl text-sm hover:bg-theme-hover active:scale-95 transition-all"
-				>
-					Join r/urjo
-				</button>
-			{/if}
-		</div>
-	</div>
-{/if}
+<!-- Completion overlay -->
+<CompletionOverlay
+	{isCompleted}
+	timeTaken={timeTaken ?? 0}
+	{mistakes}
+	{coins}
+	{streakData}
+	{loginGate}
+	onContinue={handlePrimaryCta}
+	onChallengeAndContinue={onChallengeAndContinue
+		? () => (showChallengeAndContinueConfirm = true)
+		: undefined}
+	onSubscribe={onSubscribe ? () => (showSubscribeConfirm = true) : undefined}
+	{hasSubscribed}
+/>
 
 <!-- Confetti effect -->{#if showConfetti}
 	<ConfettiEffect />
 {/if}
 
 <!-- Challenge confirmation dialog -->
-{#if showChallengeConfirm}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-	>
-		<div
-			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
-		>
-			<h2 class="text-base font-bold text-theme-text-primary">
-				Create Rival Challenge?
-			</h2>
-			<p class="text-sm text-theme-text-secondary">
-				This creates a public post in r/urjo with your time{username
-					? ` as u/${username}`
-					: ""} for others to beat.
-			</p>
-			<div class="flex gap-3">
-				<button
-					onclick={() => (showChallengeConfirm = false)}
-					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={confirmChallenge}
-					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
-				>
-					Create
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+<ConfirmDialog
+	isOpen={showChallengeConfirm}
+	title="Create Rival Challenge?"
+	message="This creates a public post in r/urjo for others to beat."
+	confirmLabel="Create"
+	onConfirm={confirmChallenge}
+	onCancel={() => (showChallengeConfirm = false)}
+/>
 
 <!-- Challenge & Continue confirmation dialog -->
-{#if showChallengeAndContinueConfirm}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-	>
-		<div
-			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
-		>
-			<h2 class="text-base font-bold text-theme-text-primary">
-				Challenge &amp; Continue?
-			</h2>
-			<p class="text-sm text-theme-text-secondary">
-				Creates a public post in r/urjo with your time{username
-					? ` as u/${username}`
-					: ""} for others to beat, then loads your next puzzle.
-			</p>
-			<div class="flex gap-3">
-				<button
-					onclick={() => (showChallengeAndContinueConfirm = false)}
-					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={confirmChallengeAndContinue}
-					class="flex-1 px-4 py-2 bg-yellow-500 text-black font-bold rounded-lg text-sm hover:opacity-90 transition-all"
-				>
-					Challenge &amp; Play
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+<ConfirmDialog
+	isOpen={showChallengeAndContinueConfirm}
+	title="Challenge & Continue?"
+	message="Creates a public post in r/urjo for others to beat, then loads your next puzzle."
+	confirmLabel="Challenge & Play"
+	confirmVariant="warning"
+	onConfirm={confirmChallengeAndContinue}
+	onCancel={() => (showChallengeAndContinueConfirm = false)}
+/>
 
 <!-- Subscribe confirmation dialog -->
-{#if showSubscribeConfirm}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-	>
-		<div
-			class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
-		>
-			<h2 class="text-base font-bold text-theme-text-primary">
-				Join r/urjo?
-			</h2>
-			<p class="text-sm text-theme-text-secondary">
-				This will subscribe you to r/urjo so you get daily puzzle
-				notifications in your feed.
-			</p>
-			<div class="flex gap-3">
-				<button
-					onclick={() => (showSubscribeConfirm = false)}
-					class="flex-1 px-4 py-2 border border-theme-border text-theme-text-secondary rounded-lg text-sm hover:bg-theme-hover transition-all"
-				>
-					Cancel
-				</button>
-				<button
-					onclick={confirmSubscribe}
-					class="flex-1 px-4 py-2 bg-theme-text-primary text-theme-bg-primary font-bold rounded-lg text-sm hover:opacity-90 transition-all"
-				>
-					Join
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+<ConfirmDialog
+	isOpen={showSubscribeConfirm}
+	title="Join r/urjo?"
+	message="This will subscribe you to r/urjo so you get daily puzzle notifications in your feed."
+	confirmLabel="Join"
+	onConfirm={confirmSubscribe}
+	onCancel={() => (showSubscribeConfirm = false)}
+/>
 
 <!-- Leaderboard modal -->
 <LeaderboardModal
@@ -862,77 +523,14 @@
 />
 
 <!-- Settings bottom sheet -->
-{#if showSettings}
-	<!-- Backdrop — fades in/out -->
-	<div
-		transition:fade={{ duration: 250 }}
-		class="fixed inset-0 z-50 bg-black/60"
-		role="button"
-		tabindex="-1"
-		aria-label="Close settings"
-		onclick={() => (showSettings = false)}
-		onkeydown={(e) => e.key === "Escape" && (showSettings = false)}
-	></div>
-	<!-- Sheet — springs up from bottom, slides back down on close -->
-	<div
-		transition:fly={{ y: 400, duration: 380, easing: cubicOut }}
-		class="fixed bottom-0 left-0 right-0 z-50 flex flex-col bg-theme-bg-primary border-t border-theme-border rounded-t-2xl shadow-2xl"
-		style="max-height: 60vh;"
-	>
-		<!-- Drag handle -->
-		<div class="flex justify-center pt-3 pb-1 shrink-0">
-			<div class="w-10 h-1 rounded-full bg-theme-border"></div>
-		</div>
-		<!-- Header -->
-		<div class="flex items-center justify-between px-5 py-3 shrink-0">
-			<h2 class="text-base font-bold text-theme-text-primary">
-				Settings
-			</h2>
-			<button
-				onclick={() => (showSettings = false)}
-				class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-theme-hover transition-colors text-theme-text-muted"
-				aria-label="Close settings">✕</button
-			>
-		</div>
-		<!-- Options -->
-		<div class="flex flex-col gap-2 px-4 pb-8 overflow-y-auto">
-			<button
-				onclick={() => {
-					showSettings = false;
-					handleOpenOptInTutorial();
-				}}
-				class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
-			>
-				<CircleHelp class="w-5 h-5 text-urjo-blue shrink-0" />
-				<span>How to Play / Tutorial</span>
-			</button>
-			{#if isMod && onOpenAnalytics}
-				<button
-					onclick={() => {
-						showSettings = false;
-						onOpenAnalytics?.();
-					}}
-					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
-				>
-					<Settings class="w-5 h-5 text-blue-400 shrink-0" />
-					<span>Analytics Dashboard</span>
-				</button>
-			{/if}
-			{#if isMod}
-				<button
-					onclick={() => {
-						showSettings = false;
-						showModPreview = true;
-					}}
-					class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-xl text-sm hover:bg-theme-hover active:scale-95 transition-all text-left flex items-center gap-3"
-				>
-					<Settings class="w-5 h-5 text-theme-text-muted shrink-0" />
-					<span>Component Preview</span>
-				</button>
-			{/if}
-		</div>
-	</div>
-{/if}
+<SettingsSheet
+	isOpen={showSettings}
+	onClose={() => (showSettings = false)}
+	{isMod}
+	onTutorial={handleOpenOptInTutorial}
+	{onOpenAnalytics}
+	onShowModPreview={() => (showModPreview = true)}
+/>
 
 <!-- Engagement modals -->
 <AchievementsPanel
