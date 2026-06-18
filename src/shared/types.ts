@@ -88,7 +88,7 @@ export type GameState = {
 	/** Whether the user has joined the subreddit via the in-game CTA.
 	 *  Persisted per-user so the "Join r/urjo" button stays hidden after
 	 *  the user clicks it once. */
-	hasSubscribed?: boolean
+	hasJoinedSubreddit?: boolean
 }
 
 export type NextChallengeResponse = {

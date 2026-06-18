@@ -11,9 +11,6 @@
     /** Time taken to solve puzzle (seconds) */
     timeTaken: number;
 
-    /** Number of mistakes made */
-    mistakes?: number;
-
     /** User's coin balance (undefined for logged-out users) */
     coins?: number;
 
@@ -36,30 +33,29 @@
     /** Called when Subscribe button is clicked (optional) */
     onSubscribe?: () => void;
 
-    /** Whether user has already subscribed */
-    hasSubscribed?: boolean;
+    /** Whether user has already joined the subreddit */
+    hasJoinedSubreddit?: boolean;
   };
 
   let {
     isCompleted,
     timeTaken,
-    mistakes = 0,
     coins,
     streakData,
     loginGate,
     onContinue,
     onChallengeAndContinue,
     onSubscribe,
-    hasSubscribed = false,
+    hasJoinedSubreddit = false,
   }: Props = $props();
 </script>
 
 /** * CompletionOverlay - Full-screen success screen * * Extracted from
 GameView.svelte to improve maintainability. * Shows when puzzle is completed
-with: * - Trophy emoji and solve time * - Stats row (time, coins, streak) * -
-Action buttons (Continue, Challenge, Subscribe) * * Design decisions: * -
-Full-screen overlay (fixed inset-0) * - Fade transition for smooth appearance *
-- Conditional rendering based on login state * - Consistent with mobile-first
+with: * - Trophy emoji and solve time * - Stats row (coins, streak) * - Action
+buttons (Challenge & Continue, Continue, Join Subreddit) * * Design decisions: *
+- Full-screen overlay (fixed inset-0) * - Fade transition for smooth appearance
+* - Conditional rendering based on login state * - Consistent with mobile-first
 design */
 
 {#if isCompleted}
@@ -144,7 +140,7 @@ design */
         Continue
       </button>
 
-      {#if onSubscribe && !hasSubscribed && loginGate.showSocialActions}
+      {#if onSubscribe && !hasJoinedSubreddit && loginGate.showSocialActions}
         <button
           onclick={onSubscribe}
           class="w-full px-4 py-3.5 border border-theme-border text-theme-text-secondary font-semibold rounded-2xl text-sm hover:bg-theme-hover active:scale-95 transition-all"

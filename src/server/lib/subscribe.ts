@@ -5,13 +5,13 @@
 
 import { redis } from '@devvit/web/server'
 
-const SUBSCRIBED_KEY = (userId: string) => `user:${userId}:subscribed`
+const JOINED_KEY = (userId: string) => `user:${userId}:joinedSubreddit`
 
 /**
  * Check if a user has already joined the subreddit via the in-game CTA.
  */
-export async function hasSubscribed(userId: string): Promise<boolean> {
-	const value = await redis.get(SUBSCRIBED_KEY(userId))
+export async function hasJoinedSubreddit(userId: string): Promise<boolean> {
+	const value = await redis.get(JOINED_KEY(userId))
 	return value === 'true'
 }
 
@@ -19,6 +19,6 @@ export async function hasSubscribed(userId: string): Promise<boolean> {
  * Mark a user as having joined the subreddit.
  * Called when the user taps "Join r/urjo" in the completion overlay.
  */
-export async function markSubscribed(userId: string): Promise<void> {
-	await redis.set(SUBSCRIBED_KEY(userId), 'true')
+export async function markJoinedSubreddit(userId: string): Promise<void> {
+	await redis.set(JOINED_KEY(userId), 'true')
 }

@@ -89,7 +89,7 @@ import { buildChallengePreview, buildChallengeBeatPreview, maskPuzzleGrid } from
 import type { ChallengePreviewData } from '../../shared/social-types'
 import { isModeratorCached } from '../lib/moderator'
 import { isOptedIn } from '../lib/notify'
-import { hasSubscribed, markSubscribed } from '../lib/subscribe'
+import { hasJoinedSubreddit, markJoinedSubreddit } from '../lib/subscribe'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
 import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, incrementSharesCount } from '../lib/social'
 import { serializeResultCard } from '../../shared/result-card'
@@ -645,10 +645,10 @@ gameRouter.get('/api/game/state', async (c) => {
 		}
 
 		// ─── Notify opt-in and hints dismissal (for GameView) ────────────────
-		const [notifyOptIn, hintsDismissed, userHasSubscribed] = await Promise.all([
+		const [notifyOptIn, hintsDismissed, userHasJoinedSubreddit] = await Promise.all([
 			isOptedIn(userId),
 			getHintsDismissed(userId),
-			hasSubscribed(userId),
+			hasJoinedSubreddit(userId),
 		])
 
 		const economy = await getUserEconomy(userId)
@@ -766,7 +766,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			// Always-on progression strip data
 			...(seasonProgress !== undefined && { seasonProgress }),
 			// Subreddit join status — hides "Join r/urjo" CTA after first tap
-			hasSubscribed: userHasSubscribed,
+			hasJoinedSubreddit: userHasJoinedSubreddit,
 		}
 
 		return c.json(gameState)
@@ -905,11 +905,11 @@ gameRouter.post('/api/game/subscribe', async (c) => {
 	if (!userId) return c.json({ error: 'Authentication required' }, 401)
 
 	try {
-		await markSubscribed(userId)
-		return c.json({ subscribed: true })
+		await markJoinedSubreddit(userId)
+		return c.json({ joined: true })
 	} catch (error) {
-		console.error('[Subscribe] Failed to mark subscription:', error)
-		return c.json({ error: 'Failed to record subscription' }, 500)
+		console.error('[Subscribe] Failed to mark subreddit join:', error)
+		return c.json({ error: 'Failed to record subreddit join' }, 500)
 	}
 })
 
