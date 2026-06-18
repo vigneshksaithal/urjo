@@ -24,7 +24,6 @@
 		onCellChange,
 		onPuzzleComplete,
 		resetMistakes,
-		setPuzzleData,
 	} from "./stores/mistakes";
 	import { hydrateFromServer, resetHints } from "./stores/hints";
 	import { fireOnce, resetLatch } from "./stores/first-action";
@@ -251,7 +250,6 @@
 			seasonRank = null;
 			seasonPoints = 0;
 			resetMistakes();
-			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 
 			currentView =
 				isFirstTimeUser && !tutorialCompleted ? "tutorial" : "game";
@@ -361,7 +359,7 @@
 		}
 
 		// Track mistakes: check previous cell when moving to a new one
-		onCellChange(row, col, color, grid, gridSize);
+		onCellChange(row, col, grid, gridSize);
 
 		// Fire first-action POST exactly once per session (fire-and-forget)
 		void fireOnce(postId ?? "", "cell");
@@ -582,7 +580,6 @@
 			startTime = Date.now();
 			timerStarted = false;
 			resetMistakes();
-			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 		} catch (error) {
 			errorMessage =
 				error instanceof Error
@@ -607,7 +604,6 @@
 		startTime = Date.now();
 		timerStarted = false;
 		resetMistakes();
-		setPuzzleData(puzzleNumbers, gridSize);
 	}
 
 	/**
@@ -653,7 +649,6 @@
 			timerStarted = false;
 			coinReward = undefined;
 			resetMistakes();
-			setPuzzleData(data.puzzle.numbers, data.puzzle.gridSize);
 		} catch {
 			// Revert to previous size on failure (non-disruptive)
 			gridSizePreference = previousSize;

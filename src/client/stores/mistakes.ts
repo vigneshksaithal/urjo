@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store'
-import type { CellColor, Grid } from '../../shared/types'
+import type { Grid } from '../../shared/types'
 import { doesCellViolateConstraints } from '../lib/validation'
 
 /**
@@ -17,6 +17,8 @@ import { doesCellViolateConstraints } from '../lib/validation'
  *
  * This replaces the old single-solution string comparison, so valid alternate
  * solutions are never incorrectly flagged as mistakes.
+ *
+ * NOTE: This module uses singleton state. Call resetMistakes() when starting a new puzzle.
  */
 
 export const mistakeCount = writable(0)
@@ -28,12 +30,22 @@ let lastActiveCell: { row: number; col: number } | null = null
 const countedMistakeCells = new Set<string>()
 
 /**
- * Set the current puzzle data. Call this when a new puzzle loads.
- * The numbers string is accepted for API compatibility but constraint
- * checking uses the grid directly (which already has number data from deserialization).
+ * Check if a cell violates constraints and count it as a mistake if so.
+ * Returns true if a mistake was counted.
  */
-export const setPuzzleData = (_numbers: string, _size: number): void => {
-	// No state needed: constraint checking uses the grid passed to onCellChange directly.
+const checkAndCountMistake = (row: number, col: number, grid: Grid, gridSize: number): boolean => {
+	const key = `${row}-${col}`
+	if (countedMistakeCells.has(key)) return false
+
+	const cell = grid[row]?.[col]
+	if (!cell || cell.color === null) return false
+
+	if (doesCellViolateConstraints(grid, row, col, gridSize)) {
+		mistakeCount.update(m => m + 1)
+		countedMistakeCells.add(key)
+		return true
+	}
+	return false
 }
 
 /**
@@ -43,26 +55,12 @@ export const setPuzzleData = (_numbers: string, _size: number): void => {
 export const onCellChange = (
 	row: number,
 	col: number,
-	_newColor: CellColor,
 	grid: Grid,
 	gridSize: number
 ): void => {
 	// If tapping a DIFFERENT cell than before, evaluate the previous cell
 	if (lastActiveCell && (lastActiveCell.row !== row || lastActiveCell.col !== col)) {
-		const prevRow = lastActiveCell.row
-		const prevCol = lastActiveCell.col
-		const prevKey = `${prevRow}-${prevCol}`
-
-		// Only count if not already counted for this cell
-		if (!countedMistakeCells.has(prevKey)) {
-			const prevCell = grid[prevRow]?.[prevCol]
-			if (prevCell && prevCell.color !== null) {
-				if (doesCellViolateConstraints(grid, prevRow, prevCol, gridSize)) {
-					mistakeCount.update(m => m + 1)
-					countedMistakeCells.add(prevKey)
-				}
-			}
-		}
+		checkAndCountMistake(lastActiveCell.row, lastActiveCell.col, grid, gridSize)
 	}
 
 	lastActiveCell = { row, col }
@@ -70,24 +68,11 @@ export const onCellChange = (
 
 /**
  * Called when the puzzle is completed.
- * The last active cell was never "left" — check it now.
+ * Checks the last active cell since the player never "left" it to trigger the normal check.
  */
-export const onPuzzleComplete = (
-	grid: Grid,
-	gridSize: number
-): void => {
+export const onPuzzleComplete = (grid: Grid, gridSize: number): void => {
 	if (lastActiveCell) {
-		const { row, col } = lastActiveCell
-		const key = `${row}-${col}`
-		if (!countedMistakeCells.has(key)) {
-			const cell = grid[row]?.[col]
-			if (cell && cell.color !== null) {
-				if (doesCellViolateConstraints(grid, row, col, gridSize)) {
-					mistakeCount.update(m => m + 1)
-					countedMistakeCells.add(key)
-				}
-			}
-		}
+		checkAndCountMistake(lastActiveCell.row, lastActiveCell.col, grid, gridSize)
 	}
 }
 

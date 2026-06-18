@@ -52,11 +52,11 @@ describe('onCellChange — valid cell not flagged as mistake', () => {
         const gridSize = 4
 
         // Touch cell (0,0) — sets lastActiveCell
-        onCellChange(0, 0, 'red', grid, gridSize)
+        onCellChange(0, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(0)
 
         // Move to cell (0,1) — evaluates previous cell (0,0) which is valid
-        onCellChange(0, 1, 'blue', grid, gridSize)
+        onCellChange(0, 1, grid, gridSize)
         expect(get(mistakeCount)).toBe(0)
     })
 
@@ -66,10 +66,10 @@ describe('onCellChange — valid cell not flagged as mistake', () => {
         const grid = makeValidGrid()
         const gridSize = 4
 
-        onCellChange(0, 0, 'red', grid, gridSize)
-        onCellChange(1, 0, 'blue', grid, gridSize)
-        onCellChange(2, 0, 'red', grid, gridSize)
-        onCellChange(3, 0, 'blue', grid, gridSize)
+        onCellChange(0, 0, grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
+        onCellChange(2, 0, grid, gridSize)
+        onCellChange(3, 0, grid, gridSize)
 
         expect(get(mistakeCount)).toBe(0)
     })
@@ -87,11 +87,11 @@ describe('onCellChange — constraint-violating cell flagged as mistake', () => 
         const gridSize = 4
 
         // Touch the violating cell (0,2) — sets lastActiveCell
-        onCellChange(0, 2, 'red', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
         expect(get(mistakeCount)).toBe(0) // not counted yet — still on this cell
 
         // Move to a different cell — evaluates previous cell (0,2) which violates balance
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(1)
     })
 
@@ -103,13 +103,13 @@ describe('onCellChange — constraint-violating cell flagged as mistake', () => 
         const gridSize = 4
 
         // Touch violating cell (0,2), then leave
-        onCellChange(0, 2, 'red', grid, gridSize)
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(1)
 
         // Return to (0,2) and leave again — should NOT count again
-        onCellChange(0, 2, 'red', grid, gridSize)
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(1)
     })
 })
@@ -123,8 +123,8 @@ describe('resetMistakes', () => {
         const gridSize = 4
 
         // Accumulate a mistake
-        onCellChange(0, 2, 'red', grid, gridSize)
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(1)
 
         resetMistakes()
@@ -138,13 +138,13 @@ describe('resetMistakes', () => {
         const gridSize = 4
 
         // Touch a violating cell
-        onCellChange(0, 2, 'red', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
 
         // Reset — clears lastActiveCell
         resetMistakes()
 
         // Move to another cell — no previous cell to evaluate, so count stays 0
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(0)
     })
 
@@ -156,8 +156,8 @@ describe('resetMistakes', () => {
         const gridSize = 4
 
         // Count a mistake for cell (0,2)
-        onCellChange(0, 2, 'red', grid, gridSize)
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(1)
 
         // Reset — clears all state
@@ -165,8 +165,8 @@ describe('resetMistakes', () => {
         expect(get(mistakeCount)).toBe(0)
 
         // Touch the same violating cell again and leave — should count again
-        onCellChange(0, 2, 'red', grid, gridSize)
-        onCellChange(1, 0, 'blue', grid, gridSize)
+        onCellChange(0, 2, grid, gridSize)
+        onCellChange(1, 0, grid, gridSize)
         expect(get(mistakeCount)).toBe(1)
     })
 })
