@@ -89,6 +89,7 @@ import { buildChallengePreview, buildChallengeBeatPreview, maskPuzzleGrid } from
 import type { ChallengePreviewData } from '../../shared/social-types'
 import { isModeratorCached } from '../lib/moderator'
 import { isOptedIn } from '../lib/notify'
+import { hasSubscribed, markSubscribed } from '../lib/subscribe'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
 import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, incrementSharesCount } from '../lib/social'
 import { serializeResultCard } from '../../shared/result-card'
@@ -644,9 +645,10 @@ gameRouter.get('/api/game/state', async (c) => {
 		}
 
 		// ─── Notify opt-in and hints dismissal (for GameView) ────────────────
-		const [notifyOptIn, hintsDismissed] = await Promise.all([
+		const [notifyOptIn, hintsDismissed, userHasSubscribed] = await Promise.all([
 			isOptedIn(userId),
 			getHintsDismissed(userId),
+			hasSubscribed(userId),
 		])
 
 		const economy = await getUserEconomy(userId)
@@ -763,6 +765,8 @@ gameRouter.get('/api/game/state', async (c) => {
 			weekendEvent: getActiveWeekendEvent(new Date()),
 			// Always-on progression strip data
 			...(seasonProgress !== undefined && { seasonProgress }),
+			// Subreddit join status — hides "Join r/urjo" CTA after first tap
+			hasSubscribed: userHasSubscribed,
 		}
 
 		return c.json(gameState)
@@ -890,6 +894,22 @@ gameRouter.post('/api/game/help-tap', async (c) => {
 	} catch (error) {
 		console.error('[Analytics] Help tap tracking failed:', error)
 		return c.json({ tracked: false })
+	}
+})
+
+// ─── POST /api/game/subscribe ─────────────────────────────────────────────────
+
+gameRouter.post('/api/game/subscribe', async (c) => {
+	const { userId } = context
+
+	if (!userId) return c.json({ error: 'Authentication required' }, 401)
+
+	try {
+		await markSubscribed(userId)
+		return c.json({ subscribed: true })
+	} catch (error) {
+		console.error('[Subscribe] Failed to mark subscription:', error)
+		return c.json({ error: 'Failed to record subscription' }, 500)
 	}
 })
 

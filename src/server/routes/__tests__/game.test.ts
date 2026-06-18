@@ -512,3 +512,109 @@ testSeasonInactive('POST /api/game/complete: season inactive writes no counter a
         spy.mockRestore()
     }
 })
+
+// ─── POST /api/game/subscribe ─────────────────────────────────────────────────
+
+const testSubscribe = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Subscribe route marks user as subscribed and persists to Redis
+ */
+testSubscribe('POST /api/game/subscribe marks user as subscribed', async () => {
+    const res = await app.request('/api/game/subscribe', { method: 'POST' })
+    expect(res.status).toBe(200)
+
+    const json = await res.json()
+    expect(json.subscribed).toBe(true)
+
+    // Verify Redis key was set
+    const value = await redis.get(`user:${USER_ID}:subscribed`)
+    expect(value).toBe('true')
+})
+
+const testSubscribeIdempotent = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Subscribe route is idempotent — repeated calls still return success
+ */
+testSubscribeIdempotent('POST /api/game/subscribe is idempotent', async () => {
+    // First call
+    const res1 = await app.request('/api/game/subscribe', { method: 'POST' })
+    expect(res1.status).toBe(200)
+
+    // Second call (idempotent)
+    const res2 = await app.request('/api/game/subscribe', { method: 'POST' })
+    expect(res2.status).toBe(200)
+
+    const json = await res2.json()
+    expect(json.subscribed).toBe(true)
+})
+
+const testSubscribeLoggedOut = createDevvitTest({
+    subredditName: 'testsub',
+})
+
+/**
+ * Subscribe route returns 401 for logged-out users
+ */
+testSubscribeLoggedOut('POST /api/game/subscribe returns 401 for logged-out users', async () => {
+    // Context with NO userId
+    const loggedOutCtx = {
+        postId: POST_ID,
+        subredditId: 't5_testsub',
+        subredditName: 'testsub',
+    } as Parameters<typeof runWithContext>[0]
+
+    const res = await runWithContext(loggedOutCtx, () =>
+        app.request('/api/game/subscribe', { method: 'POST' }),
+    )
+    expect(res.status).toBe(401)
+})
+
+// ─── GET /api/game/state includes hasSubscribed ───────────────────────────────
+
+const testStateIncludesSubscribe = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Game state includes hasSubscribed=false when user has not subscribed
+ */
+testStateIncludesSubscribe('GET /api/game/state includes hasSubscribed=false when not subscribed', async () => {
+    await seedPuzzle()
+
+    const res = await requestWithPost('/api/game/state')
+    expect(res.status).toBe(200)
+
+    const json = await res.json()
+    expect(json.hasSubscribed).toBe(false)
+})
+
+const testStateIncludesSubscribeTrue = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+/**
+ * Game state includes hasSubscribed=true after user subscribes
+ */
+testStateIncludesSubscribeTrue('GET /api/game/state includes hasSubscribed=true after subscribe', async () => {
+    await seedPuzzle()
+
+    // Subscribe first
+    await app.request('/api/game/subscribe', { method: 'POST' })
+
+    // Now check state
+    const res = await requestWithPost('/api/game/state')
+    expect(res.status).toBe(200)
+
+    const json = await res.json()
+    expect(json.hasSubscribed).toBe(true)
+})
