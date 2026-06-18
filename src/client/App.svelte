@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { showLoginPrompt } from "@devvit/web/client";
+	import { showLoginPrompt, getShareData } from "@devvit/web/client";
 	import type {
 		Grid,
 		CellColor,
@@ -12,6 +12,8 @@
 	} from "../shared/types";
 	import type { EngagementCompletionData } from "../shared/engagement-types";
 	import type { SeasonInfo } from "../shared/growth-types";
+	import type { PersonalChallengeData } from "../shared/social-types";
+	import { validatePersonalChallengeData } from "../shared/social-types";
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
 	import FirstScreen from "./components/FirstScreen.svelte";
@@ -140,6 +142,8 @@
 		numberConstraint: false,
 		adjacencyViolation: false,
 	});
+	// Personal challenge data from deeplink share (getShareData)
+	let personalChallenge = $state<PersonalChallengeData | null>(null);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -168,6 +172,13 @@
 	}
 
 	onMount(() => {
+		// Check for personal challenge deeplink data from shared link
+		const rawShareData = getShareData();
+		const validation = validatePersonalChallengeData(rawShareData);
+		if (validation.valid) {
+			personalChallenge = validation.data;
+		}
+
 		void loadGame();
 		// DQP dwell heartbeat: starts a single per-page-load session and
 		// emits /api/dwell/tick every ~5s of active foreground time. Stops
@@ -389,6 +400,10 @@
 	 * Report puzzle completion to server (non-critical).
 	 */
 	async function reportCompletion(time: number) {
+		// Check if user beat a personal challenge
+		const beatPersonalChallenge =
+			personalChallenge !== null && time < personalChallenge.time;
+
 		// Logged-out players: stash the result so it survives the login reload
 		// and can be credited once they sign in. Skip the session-run/economy
 		// round-trip — there's no wallet to credit server-side.
@@ -417,6 +432,16 @@
 					timeTaken: time,
 					mistakes: $mistakeCount,
 					sessionRun: newSessionRun,
+					// Include personal challenge beat info for bonus reward
+					...(beatPersonalChallenge && personalChallenge
+						? {
+								personalChallengeBeat: {
+									challengerUsername:
+										personalChallenge.username,
+									challengerTime: personalChallenge.time,
+								},
+							}
+						: {}),
 				}),
 			});
 
@@ -763,6 +788,7 @@
 			weekendEvent,
 			weekendBonusCoins,
 			seasonProgress,
+			personalChallenge,
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
 		}}

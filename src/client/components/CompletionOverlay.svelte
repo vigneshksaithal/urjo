@@ -1,10 +1,11 @@
 <script lang="ts">
   import { fade } from "svelte/transition";
-  import Clock from "lucide-svelte/icons/clock";
   import Coins from "lucide-svelte/icons/coins";
   import Flame from "lucide-svelte/icons/flame";
-  import XCircle from "lucide-svelte/icons/x-circle";
+  import Share2 from "lucide-svelte/icons/share-2";
+  import { showShareSheet } from "@devvit/web/client";
   import type { StreakData } from "../../shared/types";
+  import type { PersonalChallengeData } from "../../shared/social-types";
 
   type Props = {
     /** Whether the overlay is visible */
@@ -40,6 +41,21 @@
 
     /** Whether user has already subscribed */
     hasSubscribed?: boolean;
+
+    /** Post ID for sharing (required for Share Time button) */
+    postId?: string;
+
+    /** Grid size for share preview */
+    gridSize?: number;
+
+    /** Username for share message (optional, falls back to generic) */
+    username?: string;
+
+    /** Personal challenge beat info (if user beat a challenge) */
+    personalChallengeBeat?: {
+      challengerUsername: string;
+      challengerTime: number;
+    } | null;
   };
 
   let {
@@ -53,7 +69,44 @@
     onChallengeAndContinue,
     onSubscribe,
     hasSubscribed = false,
+    postId,
+    gridSize = 4,
+    username,
+    personalChallengeBeat = null,
   }: Props = $props();
+
+  /**
+   * Handle "Share Time" button click.
+   * Creates a personal challenge deeplink via showShareSheet.
+   * Compliant with Devvit rules: explicit user action, no auto-posting.
+   */
+  async function handleShareTime(): Promise<void> {
+    if (!postId) return;
+
+    const challengeData: PersonalChallengeData = {
+      type: "personal-challenge",
+      postId,
+      time: timeTaken,
+      username: username ?? "Someone",
+      gridSize,
+      createdAt: new Date().toISOString(),
+    };
+
+    const shareText =
+      username && username !== "Someone"
+        ? `I solved this puzzle in ${timeTaken}s. Can you beat my time?`
+        : `Beat my time of ${timeTaken}s on this puzzle!`;
+
+    try {
+      await showShareSheet({
+        title: "Can you beat my time?",
+        text: shareText,
+        data: JSON.stringify(challengeData),
+      });
+    } catch {
+      // User cancelled or share failed - silently ignore
+    }
+  }
 </script>
 
 /** * CompletionOverlay - Full-screen success screen * * Extracted from
@@ -75,68 +128,49 @@ design */
     <!-- Hero -->
     <div class="flex flex-col items-center gap-5">
       <div class="text-8xl leading-none select-none" aria-hidden="true">🏆</div>
-      <p class="text-3xl font-bold text-yellow-400 text-center">
-        Solved in {timeTaken}s!
-      </p>
+      {#if personalChallengeBeat}
+        <div class="flex flex-col items-center gap-1">
+          <p class="text-3xl font-bold text-yellow-400 text-center">
+            Solved in {timeTaken}s!
+          </p>
+          <p class="text-sm font-semibold text-green-400 text-center">
+            🎉 You beat {personalChallengeBeat.challengerUsername}'s {personalChallengeBeat.challengerTime}s!
+          </p>
+        </div>
+      {:else}
+        <p class="text-3xl font-bold text-yellow-400 text-center">
+          Solved in {timeTaken}s!
+        </p>
+      {/if}
     </div>
 
-    <!-- Stats row: time | mistakes | coins | streak -->
-    <div class="grid grid-cols-4 gap-2 w-full mt-10">
-      <!-- Time -->
-      <div
-        class="flex flex-col items-center gap-1 px-2 py-3 rounded-2xl border border-theme-border bg-theme-hover"
-      >
-        <Clock class="w-5 h-5 text-urjo-blue" />
-        <span class="text-lg font-bold text-theme-text-primary leading-none">
-          {timeTaken}s
-        </span>
-        <span
-          class="text-[9px] font-semibold text-theme-text-muted uppercase tracking-wide"
-        >
-          Time
-        </span>
-      </div>
-
-      <!-- Mistakes -->
-      <div
-        class="flex flex-col items-center gap-1 px-2 py-3 rounded-2xl border border-theme-border bg-theme-hover"
-      >
-        <XCircle class="w-5 h-5 text-red-400" />
-        <span class="text-lg font-bold text-theme-text-primary leading-none">
-          {mistakes}
-        </span>
-        <span
-          class="text-[9px] font-semibold text-theme-text-muted uppercase tracking-wide"
-        >
-          Mistakes
-        </span>
-      </div>
-
+    <!-- Stats row: coins | streak -->
+    <div class="grid grid-cols-2 gap-3 w-full mt-10 max-w-xs">
       <!-- Coins -->
       {#if loginGate.showWallet && coins !== undefined}
         <div
-          class="flex flex-col items-center gap-1 px-2 py-3 rounded-2xl border border-yellow-500/40 bg-yellow-500/10"
+          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-yellow-500/40 bg-yellow-500/10"
         >
-          <Coins class="w-5 h-5 text-yellow-400" />
-          <span class="text-lg font-bold text-yellow-300 leading-none">
+          <Coins class="w-6 h-6 text-yellow-400" />
+          <span class="text-xl font-bold text-yellow-300 leading-none">
             {coins}
           </span>
           <span
-            class="text-[9px] font-semibold text-theme-text-muted uppercase tracking-wide"
+            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
           >
             Coins
           </span>
         </div>
       {:else}
         <div
-          class="flex flex-col items-center gap-1 px-2 py-3 rounded-2xl border border-theme-border bg-theme-hover"
+          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
         >
-          <Coins class="w-5 h-5 text-theme-text-muted" />
-          <span class="text-lg font-bold text-theme-text-muted leading-none">
+          <Coins class="w-6 h-6 text-theme-text-muted" />
+          <span class="text-xl font-bold text-theme-text-muted leading-none">
             —
           </span>
           <span
-            class="text-[9px] font-semibold text-theme-text-muted uppercase tracking-wide"
+            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
           >
             Coins
           </span>
@@ -146,28 +180,28 @@ design */
       <!-- Streak -->
       {#if loginGate.showStreak}
         <div
-          class="flex flex-col items-center gap-1 px-2 py-3 rounded-2xl border border-orange-500/40 bg-orange-500/10"
+          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-orange-500/40 bg-orange-500/10"
         >
-          <Flame class="w-5 h-5 text-orange-400" />
-          <span class="text-lg font-bold text-orange-300 leading-none">
+          <Flame class="w-6 h-6 text-orange-400" />
+          <span class="text-xl font-bold text-orange-300 leading-none">
             {streakData.currentStreak}
           </span>
           <span
-            class="text-[9px] font-semibold text-theme-text-muted uppercase tracking-wide"
+            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
           >
             Streak
           </span>
         </div>
       {:else}
         <div
-          class="flex flex-col items-center gap-1 px-2 py-3 rounded-2xl border border-theme-border bg-theme-hover"
+          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
         >
-          <Flame class="w-5 h-5 text-theme-text-muted" />
-          <span class="text-lg font-bold text-theme-text-muted leading-none">
+          <Flame class="w-6 h-6 text-theme-text-muted" />
+          <span class="text-xl font-bold text-theme-text-muted leading-none">
             —
           </span>
           <span
-            class="text-[9px] font-semibold text-theme-text-muted uppercase tracking-wide"
+            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
           >
             Streak
           </span>
@@ -180,21 +214,31 @@ design */
 
     <!-- Action buttons -->
     <div class="flex flex-col gap-3 w-full">
-      <button
-        onclick={onContinue}
-        class="w-full px-4 py-4 bg-urjo-blue text-white font-bold rounded-2xl text-base hover:opacity-90 active:scale-95 transition-all uppercase tracking-wide"
-      >
-        Continue
-      </button>
-
       {#if onChallengeAndContinue && loginGate.showSocialActions}
         <button
           onclick={onChallengeAndContinue}
-          class="w-full px-4 py-3.5 border border-yellow-500/60 text-yellow-400 font-semibold rounded-2xl text-sm hover:bg-yellow-500/10 active:scale-95 transition-all"
+          class="w-full px-4 py-4 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-base hover:bg-yellow-400 active:scale-95 transition-all uppercase tracking-wide"
         >
           Challenge &amp; Continue
         </button>
       {/if}
+
+      {#if postId}
+        <button
+          onclick={handleShareTime}
+          class="w-full px-4 py-3.5 bg-urjo-blue text-white font-semibold rounded-2xl text-sm hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          <Share2 class="w-4 h-4" />
+          Comment Time
+        </button>
+      {/if}
+
+      <button
+        onclick={onContinue}
+        class="w-full px-4 py-3.5 border border-urjo-blue/60 text-urjo-blue font-semibold rounded-2xl text-sm hover:bg-urjo-blue/10 active:scale-95 transition-all"
+      >
+        Continue
+      </button>
 
       {#if onSubscribe && !hasSubscribed && loginGate.showSocialActions}
         <button

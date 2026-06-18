@@ -3,7 +3,10 @@
 	import type { CellColor, Grid, StreakData } from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
-	import type { CompletionContext } from "../../shared/social-types";
+	import type {
+		CompletionContext,
+		PersonalChallengeData,
+	} from "../../shared/social-types";
 	import { validateGrid } from "../lib/validation";
 	import { computeBoardSize } from "../lib/board-layout";
 	import { fireOnce } from "../stores/first-action";
@@ -24,6 +27,7 @@
 	import ModPreviewPanel from "../components/ModPreviewPanel.svelte";
 	import ConfirmDialog from "../components/ConfirmDialog.svelte";
 	import CompletionOverlay from "../components/CompletionOverlay.svelte";
+	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
 	import Settings from "lucide-svelte/icons/settings";
 
@@ -116,6 +120,7 @@
 		UserProps &
 		ActionProps & {
 			postId?: string | undefined;
+			personalChallenge?: PersonalChallengeData | null;
 		};
 
 	let {
@@ -161,6 +166,7 @@
 			adjacencyViolation: false,
 		},
 		solution = "",
+		personalChallenge = null,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
@@ -174,6 +180,8 @@
 	let showSeasonLeaderboard = $state(false);
 	let showOptInTutorial = $state(false);
 	let showAchievements = $state(false);
+	// Personal challenge banner - dismissed when user clicks X
+	let showPersonalChallengeBanner = $state(true);
 
 	// ─── Notify toggle ─────────────────────────────────────────────────────────
 	// Optimistic update with revert on failure (Reqs 13.1–13.5)
@@ -260,6 +268,20 @@
 			}
 		}
 		return filled / total;
+	});
+
+	// Check if user beat a personal challenge (for completion overlay)
+	const personalChallengeBeat = $derived(() => {
+		if (!personalChallenge || !isCompleted || timeTaken === undefined) {
+			return null;
+		}
+		if (timeTaken < personalChallenge.time) {
+			return {
+				challengerUsername: personalChallenge.username,
+				challengerTime: personalChallenge.time,
+			};
+		}
+		return null;
 	});
 
 	function handleLoginPrompt(): void {
@@ -353,6 +375,30 @@
 	function handleOptInTutorialDismiss(): void {
 		showOptInTutorial = false;
 	}
+
+	// ─── Mod Debug: Instant Solve ────────────────────────────────────────────────
+	// Testing-only feature for mods. Fills the entire grid with the correct solution.
+	function handleModSolve(): void {
+		if (!solution || isCompleted) return;
+
+		// Parse solution string (e.g., "rbbrrbbrrbbrrbbb")
+		const solutionColors: CellColor[] = solution.split("").map((char) => {
+			if (char === "r") return "red";
+			if (char === "b") return "blue";
+			return null;
+		});
+
+		// Fill each cell with the solution color
+		for (let row = 0; row < gridSize; row++) {
+			for (let col = 0; col < gridSize; col++) {
+				const index = row * gridSize + col;
+				const cell = grid[row]?.[col];
+				if (cell && !cell.locked && solutionColors[index]) {
+					onCellChange(row, col, solutionColors[index]!);
+				}
+			}
+		}
+	}
 </script>
 
 <div class="h-full w-full flex flex-col p-3 gap-2 overflow-hidden">
@@ -417,6 +463,14 @@
 				{/if}
 			</div>
 		</div>
+	{/if}
+
+	<!-- Personal challenge banner — shown when user opens a challenge link -->
+	{#if personalChallenge && showPersonalChallengeBanner && !isCompleted}
+		<PersonalChallengeBanner
+			challenge={personalChallenge}
+			onDismiss={() => (showPersonalChallengeBanner = false)}
+		/>
 	{/if}
 
 	<!-- Always-on progression strip — Subway Surfers / CoC home-screen
@@ -491,7 +545,16 @@
 	<!-- Footer -->
 	<footer class="flex-none flex items-center justify-between gap-2 px-1">
 		<div class="w-9"></div>
-		<div class="flex-1 flex justify-center"></div>
+		<div class="flex-1 flex justify-center">
+			{#if isMod && !isCompleted}
+				<button
+					onclick={handleModSolve}
+					class="px-3 py-1.5 text-xs font-bold rounded-lg bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 active:scale-95 transition-all"
+				>
+					⚡ Solve
+				</button>
+			{/if}
+		</div>
 		<button
 			onclick={() => (showSettings = true)}
 			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
@@ -516,6 +579,10 @@
 		: undefined}
 	onSubscribe={onSubscribe ? () => (showSubscribeConfirm = true) : undefined}
 	{hasSubscribed}
+	{postId}
+	{gridSize}
+	{username}
+	personalChallengeBeat={personalChallengeBeat()}
 />
 
 <!-- Confetti effect -->{#if showConfetti}
