@@ -90,6 +90,7 @@ Available skills in `.agents/skills/`:
 | `realtime/SKILL.md` | Live updates, multiplayer, event-driven features |
 | `scheduler/SKILL.md` | Cron jobs, delayed tasks, timed events |
 | `media-uploads/SKILL.md` | Uploading images to Reddit at runtime |
+| `user-actions/SKILL.md` | Posting, commenting, or subscribing on behalf of users |
 
 ### Step 2: Clarify Requirements
 
