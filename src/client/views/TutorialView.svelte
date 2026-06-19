@@ -73,6 +73,15 @@
 		phase === "done" ? 100 : (stepIndex / TOTAL_WALKTHROUGH_STEPS) * 100,
 	);
 
+	// Determine if the tooltip should be above or below the target cell.
+	// Top row cells (row 0-1) get tooltip below to avoid going off-screen.
+	const tooltipPosition = $derived.by((): "above" | "below" => {
+		if (phase !== "playing") return "above";
+		const row = Math.floor(step.targetIndex / size);
+		// If cell is in top half of the board, show tooltip below
+		return row < size / 2 ? "below" : "above";
+	});
+
 	function handleCellChange(index: number, newColor: CellColor): void {
 		if (phase !== "playing" || index !== activeIndex) return;
 		cells = cells.map((c, i) =>
@@ -97,19 +106,6 @@
 		stepIndex = 0;
 		phase = "playing";
 	}
-
-	// Outline placement on an overlay grid that mirrors the board template.
-	const highlightStyle = $derived.by((): string | null => {
-		if (phase !== "playing") return null;
-		const h = step.highlight;
-		if (h.type === "row")
-			return `grid-column: 1 / span ${size}; grid-row: ${h.index + 1} / span 1;`;
-		if (h.type === "col")
-			return `grid-column: ${h.index + 1} / span 1; grid-row: 1 / span ${size};`;
-		const r = Math.floor(h.index / size);
-		const c = h.index % size;
-		return `grid-column: ${c + 1} / span 1; grid-row: ${r + 1} / span 1;`;
-	});
 </script>
 
 <div class="h-full w-full flex flex-col bg-theme-bg-primary overflow-hidden">
@@ -130,20 +126,8 @@
 	</div>
 
 	{#if phase === "playing"}
-		<!-- Playing phase: instruction at top, board below, dots at bottom -->
+		<!-- Playing phase: instruction above/below target cell, board centered, dots at bottom -->
 		<div class="flex-1 min-h-0 flex flex-col">
-			<!-- Instruction line - fixed at top, visible on all screens -->
-			<div class="flex-none px-4 pt-4 pb-2">
-				{#key stepIndex}
-					<p
-						in:fly={{ y: -6, duration: 220 }}
-						class="text-center text-sm font-bold text-theme-text-primary leading-snug"
-					>
-						{step.instruction}
-					</p>
-				{/key}
-			</div>
-
 			<!-- Board container - takes remaining space -->
 			<div
 				class="flex-1 min-h-0 flex items-center justify-center"
@@ -170,9 +154,32 @@
 									colIndex={i % size}
 									isLoading={false}
 									gridSize={size}
+									isTutorialTarget={isActive}
 									onChange={(c) => handleCellChange(i, c)}
 								/>
 								{#if isActive}
+									<!-- Instruction tooltip positioned based on cell location -->
+									<div
+										class="pointer-events-none absolute z-20 w-max max-w-[180px] left-1/2 -translate-x-1/2
+											{tooltipPosition === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'}"
+									>
+										{#key stepIndex}
+											<p
+												in:fly={{
+													y:
+														tooltipPosition ===
+														"above"
+															? 6
+															: -6,
+													duration: 220,
+												}}
+												class="text-center text-sm font-bold text-theme-text-primary leading-snug bg-theme-bg-primary/95 px-2 py-1.5 rounded-lg shadow-lg border border-theme-border"
+											>
+												{step.instruction}
+											</p>
+										{/key}
+									</div>
+									<!-- Pointing hand -->
 									<span
 										class="pointer-events-none absolute left-full top-1/2 -ml-2 z-20"
 										style="transform: translateY(-8px)"
@@ -187,19 +194,6 @@
 							</div>
 						{/each}
 					</div>
-
-					<!-- Highlight outline -->
-					{#if highlightStyle}
-						<div
-							class="pointer-events-none absolute inset-0 grid gap-0.5"
-							style="grid-template-columns: repeat({size}, 1fr); grid-template-rows: repeat({size}, 1fr)"
-						>
-							<div
-								class="rounded-2xl border-2 border-white/80 transition-all duration-300"
-								style={highlightStyle}
-							></div>
-						</div>
-					{/if}
 				</div>
 			</div>
 

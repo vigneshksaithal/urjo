@@ -36,14 +36,6 @@ describe('walkthrough steps', () => {
 		const targets = WALKTHROUGH_STEPS.map((s) => s.targetIndex).sort()
 		expect(targets).toEqual(blankIndices)
 	})
-
-	it('highlight indices stay within the grid', () => {
-		for (const { highlight } of WALKTHROUGH_STEPS) {
-			expect(highlight.index).toBeGreaterThanOrEqual(0)
-			const max = highlight.type === 'cell' ? WALKTHROUGH_CELLS.length : WALKTHROUGH_GRID_SIZE
-			expect(highlight.index).toBeLessThan(max)
-		}
-	})
 })
 
 describe('isStepSatisfied', () => {

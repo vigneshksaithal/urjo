@@ -37,21 +37,13 @@ export type WalkCell = {
 	locked: boolean
 }
 
-/** What the current step draws attention to. */
-export type WalkHighlight =
-	| { type: 'row'; index: number }
-	| { type: 'col'; index: number }
-	| { type: 'cell'; index: number }
-
 export type WalkStep = {
-	/** One-line instruction shown above the board. */
+	/** One-line instruction shown near the target cell. */
 	instruction: string
 	/** Flat index (row-major) of the cell the player must fill this step. */
 	targetIndex: number
 	/** The color the target cell must become for the step to complete. */
 	expectedColor: WalkColor
-	/** The line or cell the step highlights with an outline. */
-	highlight: WalkHighlight
 }
 
 // ─── Board ───────────────────────────────────────────────────────────────────
@@ -85,25 +77,21 @@ export const WALKTHROUGH_STEPS: readonly WalkStep[] = [
 		instruction: 'Tap an empty spot to color it. Make this one blue.',
 		targetIndex: 14,
 		expectedColor: 'blue',
-		highlight: { type: 'cell', index: 14 },
 	},
 	{
 		instruction: 'Double-tap to change the color. Make this spot red.',
 		targetIndex: 6,
 		expectedColor: 'red',
-		highlight: { type: 'cell', index: 6 },
 	},
 	{
 		instruction: 'Every line needs 2 red and 2 blue. This row has 2 red — color this one blue.',
 		targetIndex: 9,
 		expectedColor: 'blue',
-		highlight: { type: 'row', index: 2 },
 	},
 	{
 		instruction: 'A number counts touching same-color spots (diagonals too). This red 2 needs one more red.',
 		targetIndex: 0,
 		expectedColor: 'red',
-		highlight: { type: 'row', index: 0 },
 	},
 ]
 

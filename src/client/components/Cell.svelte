@@ -12,6 +12,7 @@
 		gridSize?: number;
 		isHint?: boolean;
 		hintColor?: "blue" | "red";
+		isTutorialTarget?: boolean;
 		onChange: (color: CellColor) => void;
 	};
 
@@ -26,6 +27,7 @@
 		gridSize,
 		isHint = false,
 		hintColor,
+		isTutorialTarget = false,
 		onChange,
 	}: Props = $props();
 
@@ -98,12 +100,12 @@
 		</div>
 	{/if}
 
-	<!-- Empty cell: single neutral tone — replaces the old red/blue split that
-	     ambiguously implied "this cell is both colors". Subtle ambient breathe
-	     keeps the board feeling alive while the player is thinking. -->
+	<!-- Empty cell: single neutral tone. Animated with a floating effect when
+	     it's the tutorial target to draw attention to the cell to tap. -->
 	{#if !isLoading && color === null}
 		<div
-			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell animate-empty-breathe"
+			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
+				{isTutorialTarget ? 'animate-tutorial-float' : 'animate-empty-breathe'}"
 		></div>
 	{/if}
 
@@ -208,5 +210,43 @@
 
 	.animate-hint-pulse {
 		animation: hintPulse 1s ease-in-out infinite;
+	}
+
+	/* Floating water-like animation for tutorial target cell.
+	   Uses --color-urjo-blue for the tint to stay consistent with theme. */
+	@keyframes tutorialFloat {
+		0%,
+		100% {
+			transform: translateY(0) scale(1);
+			background-color: var(--color-theme-empty-cell);
+		}
+		25% {
+			transform: translateY(-3px) scale(1.03);
+			background-color: color-mix(
+				in srgb,
+				var(--color-theme-empty-cell) 90%,
+				var(--color-urjo-blue) 10%
+			);
+		}
+		50% {
+			transform: translateY(0) scale(1);
+			background-color: color-mix(
+				in srgb,
+				var(--color-theme-empty-cell) 80%,
+				var(--color-urjo-blue) 20%
+			);
+		}
+		75% {
+			transform: translateY(3px) scale(1.03);
+			background-color: color-mix(
+				in srgb,
+				var(--color-theme-empty-cell) 90%,
+				var(--color-urjo-blue) 10%
+			);
+		}
+	}
+
+	.animate-tutorial-float {
+		animation: tutorialFloat 2s ease-in-out infinite;
 	}
 </style>
