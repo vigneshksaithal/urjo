@@ -52,13 +52,6 @@
   );
 </script>
 
-/** * ConfirmDialog - Reusable confirmation modal * * Extracted from
-GameView.svelte to reduce duplication. * Used for: Challenge confirmation,
-Subscribe confirmation, etc. * * Design decisions: * - Backdrop click dismisses
-(common mobile pattern) * - Escape key dismisses (accessibility) * - Focus trap
-would be added by parent (if needed) * - Animations use Svelte transitions for
-consistency */
-
 {#if isOpen}
   <!-- Backdrop -->
   <div
@@ -67,6 +60,7 @@ consistency */
     role="dialog"
     aria-modal="true"
     aria-labelledby="dialog-title"
+    tabindex="-1"
     onclick={onCancel}
     onkeydown={(e) => e.key === "Escape" && onCancel()}
   >
@@ -74,6 +68,7 @@ consistency */
     <div
       transition:fly={{ y: 20, duration: 250, easing: cubicOut }}
       class="bg-theme-bg-primary border border-theme-border rounded-xl p-5 max-w-xs w-full flex flex-col gap-4 shadow-2xl"
+      role="none"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
     >

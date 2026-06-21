@@ -17,7 +17,6 @@
 	import GameView from "./views/GameView.svelte";
 	import TutorialView from "./views/TutorialView.svelte";
 	import FirstScreen from "./components/FirstScreen.svelte";
-	import ShopModal from "./components/ShopModal.svelte";
 	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
 	import { deserializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
@@ -81,7 +80,6 @@
 	let hasChallenged = $state(false);
 	let challengeUrl = $state<string | null>(null);
 	let challengePromptEligible = $state(false);
-	let showShop = $state(false);
 	let showAnalytics = $state(false);
 	let coins = $state(0);
 	let coinReward: CoinReward | undefined = $state(undefined);
@@ -173,7 +171,7 @@
 
 	onMount(() => {
 		// Check for personal challenge deeplink data from shared link
-		const rawShareData = getShareData();
+		const rawShareData = readShareData();
 		const validation = validatePersonalChallengeData(rawShareData);
 		if (validation.valid) {
 			personalChallenge = validation.data;
@@ -188,6 +186,14 @@
 		});
 		return () => heartbeat.stop();
 	});
+
+	function readShareData(): unknown {
+		try {
+			return getShareData();
+		} catch {
+			return null;
+		}
+	}
 
 	async function loadGame() {
 		resetLatch();
@@ -767,7 +773,6 @@
 				? handleChallengeAndContinue
 				: undefined,
 			solution: puzzleSolution,
-			onOpenShop: () => (showShop = true),
 			onOpenAnalytics: () => (showAnalytics = true),
 			isMod,
 			onSubscribe: handleSubscribe,
@@ -800,7 +805,6 @@
 	{/if}
 </div>
 
-<ShopModal isOpen={showShop} onClose={() => (showShop = false)} />
 <AnalyticsDashboard
 	isOpen={showAnalytics}
 	onClose={() => (showAnalytics = false)}

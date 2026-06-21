@@ -109,14 +109,6 @@
   }
 </script>
 
-/** * CompletionOverlay - Full-screen success screen * * Extracted from
-GameView.svelte to improve maintainability. * Shows when puzzle is completed
-with: * - Trophy emoji and solve time * - Stats row (time, coins, streak) * -
-Action buttons (Continue, Challenge, Subscribe) * * Design decisions: * -
-Full-screen overlay (fixed inset-0) * - Fade transition for smooth appearance *
-- Conditional rendering based on login state * - Consistent with mobile-first
-design */
-
 {#if isCompleted}
   <div
     transition:fade={{ duration: 200 }}

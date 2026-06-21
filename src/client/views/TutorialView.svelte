@@ -127,7 +127,7 @@
 
 	{#if phase === "playing"}
 		<!-- Playing phase: instruction above/below target cell, board centered, dots at bottom -->
-		<div class="flex-1 min-h-0 flex flex-col">
+		<div class="flex-1 min-h-0 flex flex-col px-4">
 			<!-- Board container - takes remaining space -->
 			<div
 				class="flex-1 min-h-0 flex items-center justify-center"
@@ -217,7 +217,7 @@
 		<!-- Done phase: celebration + rules + CTA -->
 		<div
 			in:fade={{ duration: 160 }}
-			class="flex-1 min-h-0 flex flex-col items-center justify-start pt-6 px-4 gap-3 overflow-y-auto"
+			class="flex-1 min-h-0 flex flex-col items-center justify-start pt-8 px-4 gap-3 overflow-y-auto"
 		>
 			<!-- Celebration -->
 			<div in:scale={{ duration: 420, easing: elasticOut, start: 0.5 }}>

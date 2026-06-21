@@ -32,6 +32,8 @@
 	}: Props = $props();
 
 	let pointerStartY = $state(0);
+	let isPressed = $state(false);
+	let releaseToken = $state(0);
 	const SWIPE_THRESHOLD = 20;
 
 	const animationDelay = $derived(
@@ -43,11 +45,15 @@
 	function handlePointerDown(e: PointerEvent) {
 		if (locked) return;
 		pointerStartY = e.clientY;
+		isPressed = true;
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
 
 	function handlePointerUp(e: PointerEvent) {
-		if (locked) return;
+		if (locked) {
+			isPressed = false;
+			return;
+		}
 		const deltaY = pointerStartY - e.clientY;
 
 		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
@@ -55,6 +61,12 @@
 		} else {
 			cycleColor();
 		}
+		isPressed = false;
+		releaseToken += 1;
+	}
+
+	function handlePointerCancel(): void {
+		isPressed = false;
 	}
 
 	function cycleColor() {
@@ -73,17 +85,28 @@
 <div
 	onpointerdown={handlePointerDown}
 	onpointerup={handlePointerUp}
+	onpointercancel={handlePointerCancel}
+	onlostpointercapture={handlePointerCancel}
 	role={locked ? undefined : "button"}
 	tabindex={locked ? undefined : 0}
 	class="
 		relative w-full aspect-square rounded-full
 		flex items-center justify-center
 		touch-none select-none
-		transition-transform
-		{locked ? 'cursor-default' : 'active:scale-95 cursor-pointer'}
+		transition-[transform,filter] duration-300 ease-[cubic-bezier(0.2,0.9,0.2,1.25)]
+		{locked ? 'cursor-default' : 'cursor-pointer hover:scale-[1.018]'}
+		{isPressed ? 'scale-[0.91] saturate-125' : ''}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
 >
+	{#key releaseToken}
+		{#if releaseToken > 0}
+			<div
+				class="absolute inset-[-12%] rounded-full pointer-events-none animate-liquid-release"
+			></div>
+		{/if}
+	{/key}
+
 	<!-- Loading state: animated empty cell with diagonal split -->
 	{#if isLoading && color === null}
 		<div
@@ -138,7 +161,9 @@
 	<!-- Non-loading: filled red -->
 	{#if !isLoading && color === "red"}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-opacity duration-500 pointer-events-none"
+			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
+				? 'scale-[1.08] blur-[0.2px]'
+				: 'scale-100 blur-0'}"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -146,7 +171,9 @@
 	<!-- Non-loading: filled blue -->
 	{#if !isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full transition-opacity duration-500 pointer-events-none"
+			class="absolute inset-0 bg-[#3997D7] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
+				? 'scale-[1.08] blur-[0.2px]'
+				: 'scale-100 blur-0'}"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -210,6 +237,37 @@
 
 	.animate-hint-pulse {
 		animation: hintPulse 1s ease-in-out infinite;
+	}
+
+	@keyframes liquidRelease {
+		0% {
+			opacity: 0.45;
+			transform: scale(0.72);
+			box-shadow:
+				inset 0 0 0 8px rgba(255, 255, 255, 0.28),
+				0 0 0 0 rgba(255, 255, 255, 0.16);
+			filter: blur(2px);
+		}
+		55% {
+			opacity: 0.25;
+			transform: scale(1.08);
+			box-shadow:
+				inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+				0 8px 26px rgba(255, 255, 255, 0.12);
+			filter: blur(5px);
+		}
+		100% {
+			opacity: 0;
+			transform: scale(1.28);
+			box-shadow:
+				inset 0 0 0 0 rgba(255, 255, 255, 0),
+				0 0 0 0 rgba(255, 255, 255, 0);
+			filter: blur(8px);
+		}
+	}
+
+	.animate-liquid-release {
+		animation: liquidRelease 520ms cubic-bezier(0.2, 0.9, 0.2, 1);
 	}
 
 	/* Floating water-like animation for tutorial target cell.

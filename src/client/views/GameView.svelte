@@ -29,6 +29,7 @@
 	import CompletionOverlay from "../components/CompletionOverlay.svelte";
 	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
+	import Megaphone from "lucide-svelte/icons/megaphone";
 	import Settings from "lucide-svelte/icons/settings";
 
 	// ─── Grouped Props Types ─────────────────────────────────────────────────────
@@ -105,7 +106,6 @@
 		onRestart: () => void;
 		onChallenge: () => void;
 		onChallengeAndContinue?: () => void;
-		onOpenShop?: () => void;
 		onOpenAnalytics?: () => void;
 		onSubscribe?: () => void;
 		onGridSizeChange?: (size: number) => void;
@@ -135,7 +135,6 @@
 		onChallenge,
 		onChallengeAndContinue,
 		coins,
-		onOpenShop,
 		onOpenAnalytics,
 		isMod = false,
 		timeTaken,
@@ -255,20 +254,6 @@
 	// Logged-out users see the puzzle only; wallet/streak/season/leaderboard/
 	// social actions are hidden and a sign-in CTA appears instead.
 	const loginGate = $derived(getLoginGate(isLoggedIn));
-
-	// Puzzle completion progress: fraction of cells that have been filled (color !== null).
-	// Used to drive the progress bar beside the coins button.
-	const puzzleProgress = $derived((): number => {
-		const total = gridSize * gridSize;
-		if (total === 0) return 0;
-		let filled = 0;
-		for (const row of grid) {
-			for (const cell of row) {
-				if (cell.color !== null) filled++;
-			}
-		}
-		return filled / total;
-	});
 
 	// Check if user beat a personal challenge (for completion overlay)
 	const personalChallengeBeat = $derived(() => {
@@ -401,68 +386,40 @@
 	}
 </script>
 
-<div class="h-full w-full flex flex-col p-3 gap-2 overflow-hidden">
-	<!-- Header: coins · session run -->
-	<header class="flex-none flex flex-wrap items-center justify-between gap-2">
-		<!-- Left spacer to balance layout -->
-		<div class="w-9 shrink-0"></div>
-
-		<!-- Centre cluster -->
-		<div class="flex items-center gap-2 flex-1 min-w-0 justify-center">
-			{#if sessionRun >= 2}
-				<!-- Session run chip — Subway Surfers' "5 in a row" momentum
-				     indicator. Hidden for first solve so it doesn't appear
-				     before the player has earned anything. -->
-				<div
-					class="px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 flex items-center gap-1"
-					title="Keep playing for bigger coin bonuses"
-				>
-					<span class="text-xs">🏃</span>
-					<span class="text-xs font-bold text-orange-300">
-						{sessionRun} in a row
-					</span>
-					{#if sessionRunMultiplier > 1}
-						<span class="text-[10px] text-orange-200/80"
-							>· {sessionRunMultiplier.toFixed(2)}×</span
-						>
-					{/if}
-				</div>
-			{/if}
-			{#if loginGate.showWallet && coins !== undefined && onOpenShop}
-				<CoinDisplay
-					{coins}
-					onClick={onOpenShop}
-					progress={puzzleProgress()}
-				/>
-			{/if}
-		</div>
-
-		<div class="w-9 shrink-0"></div>
-	</header>
-
+<div class="h-full w-full flex flex-col overflow-hidden">
 	<!-- Weekend Event banner — persistent across the in-game and completion
 	     screens whenever the server reports an active event. Provides the
 	     FOMO clock the game previously lacked (CoC builder timer, Subway
 	     Surfers daily challenge timer). Tapping it has no action; it's a
 	     status indicator, not a CTA. -->
 	{#if weekendEvent?.active}
-		<div class="flex-none flex justify-center px-3">
+		<section
+			class="flex-none w-full bg-amber-400 text-stone-950 shadow-[0_6px_22px_rgba(245,158,11,0.28)]"
+			aria-label="{weekendEvent.name} announcement"
+		>
 			<div
-				class="flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-fuchsia-500/15 via-orange-500/15 to-amber-500/15 border border-orange-500/40 shadow-sm"
+				class="mx-auto flex w-full max-w-xl items-start gap-3 px-4 py-3 sm:items-center sm:justify-center"
 			>
-				<span class="text-base">{weekendEvent.emoji}</span>
-				<span class="text-xs font-bold text-orange-200">
-					{weekendEvent.name} · {weekendEvent.multiplier}× coins
-				</span>
+				<Megaphone
+					class="h-7 w-7 shrink-0 text-stone-950 sm:h-6 sm:w-6"
+					aria-hidden="true"
+				/>
+				<div
+					class="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-center sm:gap-3"
+				>
+					<span class="text-lg font-black leading-tight sm:text-base">
+						{weekendEvent.name} · {weekendEvent.multiplier}× coins
+					</span>
 				{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
 					<span
-						class="text-[10px] text-orange-100/70 border-l border-orange-500/30 pl-2"
+						class="text-sm font-bold leading-tight text-stone-800 sm:border-l sm:border-stone-900/25 sm:pl-3 sm:text-xs"
 					>
-						ends in {weekendEvent.hoursLeft}h
+						Ends in {weekendEvent.hoursLeft}h
 					</span>
 				{/if}
+				</div>
 			</div>
-		</div>
+		</section>
 	{/if}
 
 	<!-- Personal challenge banner — shown when user opens a challenge link -->
@@ -473,13 +430,36 @@
 		/>
 	{/if}
 
+	<!-- Streak and coins sit above the puzzle as one centered status row. -->
+	{#if loginGate.showWallet && coins !== undefined}
+		<CoinDisplay {coins} streak={streakData.currentStreak} />
+	{/if}
+
+	{#if sessionRun >= 2}
+		<div class="flex-none flex justify-center px-3 pb-2">
+			<div
+				class="px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 flex items-center gap-1"
+				title="Keep playing for bigger coin bonuses"
+			>
+				<span class="text-xs">🏃</span>
+				<span class="text-xs font-bold text-orange-300">
+					{sessionRun} in a row
+				</span>
+				{#if sessionRunMultiplier > 1}
+					<span class="text-[10px] text-orange-200/80"
+						>· {sessionRunMultiplier.toFixed(2)}×</span
+					>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	<!-- Always-on progression strip — Subway Surfers / CoC home-screen
 	     pattern. Surfaces streak calendar and season standing so meta-progression
 	     is never hidden in modals. Only on the in-game view (hidden during
 	     completion overlay & challenge posts to avoid clutter). -->
-	{#if !isCompleted && !isChallenge && loginGate.showSeason}
+	{#if !isCompleted && !isChallenge && loginGate.showSeason && currentSeason?.isActive}
 		<SeasonStrip
-			streak={streakData}
 			{currentSeason}
 			{seasonProgress}
 			onOpenSeason={() => (showSeasonLeaderboard = true)}
@@ -491,7 +471,7 @@
 	     (save progress + unlock) per Reddit's logged-out guidance. Triggered
 	     only by the user's tap, so it's a natural conversion moment. -->
 	{#if !isCompleted && loginGate.showLoginCta}
-		<div class="flex-none flex justify-center px-3">
+		<div class="flex-none flex justify-center px-3 pb-2">
 			<button
 				onclick={handleLoginPrompt}
 				class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-urjo-blue/10 border border-urjo-blue/40 hover:bg-urjo-blue/20 active:scale-95 transition-all"
@@ -506,7 +486,7 @@
 
 	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
 	{#if !isChallenge && onGridSizeChange}
-		<div class="flex-none flex justify-center">
+		<div class="flex-none flex justify-center px-3 pb-2">
 			<GridSizeSelector
 				{gridSize}
 				onGridSizeChange={handleGridSizeSelect}
@@ -516,7 +496,7 @@
 
 	<!-- Main game area -->
 	<main
-		class="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden p-2"
+		class="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden px-3 pb-2"
 	>
 		<!-- Board wrapper: maintains square aspect ratio within available space.
 		     The outer div is measured (bind:clientWidth/Height) to get the

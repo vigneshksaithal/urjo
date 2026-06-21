@@ -1,19 +1,3 @@
-/**
- * SettingsSheet - Bottom sheet for settings and options
- * 
- * Extracted from GameView.svelte to improve maintainability.
- * Shows when settings button is tapped with:
- * - Tutorial access
- * - Analytics dashboard (mod only)
- * - Component preview (mod only)
- * 
- * Design decisions:
- * - Bottom sheet pattern (slides up from bottom)
- * - Backdrop click dismisses
- * - Escape key dismisses
- * - Fly transition for smooth appearance
- */
-
 <script lang="ts">
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
