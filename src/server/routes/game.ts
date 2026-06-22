@@ -98,6 +98,7 @@ import { getSessionRunMultiplier, getSessionRunBonusCoins } from '../../shared/s
 import { forecastNextStreak } from '../../shared/streak-rewards'
 import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
 import { buildLoggedOutGameState, buildLoggedOutCompleteResponse } from '../lib/logged-out'
+import { createStickyComment } from '../post'
 
 // ─── Result Comment Dedup Key ────────────────────────────────────────────────
 
@@ -1599,10 +1600,14 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 
 		// Find the sticky comment to reply to
 		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
-		const stickyCommentId = postMeta['stickyCommentId']
-
+		let stickyCommentId = postMeta['stickyCommentId']
 		if (!stickyCommentId) {
-			return c.json({ error: 'No sticky comment available' }, 400)
+			try {
+				stickyCommentId = await createStickyComment(postId)
+			} catch (err) {
+				console.error('[ResultComment] Failed to create sticky comment:', err)
+				return c.json({ error: 'Unable to post comment right now. Try again shortly.' }, 503)
+			}
 		}
 
 		await reddit.submitComment({

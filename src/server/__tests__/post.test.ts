@@ -12,6 +12,7 @@ const test = createDevvitTest({
 
 test('createPost creates a Reddit post and stores puzzle in Redis', async () => {
 	vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_abc123' } as never)
+	vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_sticky123' } as never)
 
 	await createPost()
 
@@ -28,6 +29,14 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 	expect(puzzle.solution).toBeDefined()
 	expect(puzzle.difficulty).toBe('easy')
 	expect(puzzle.gridSize).toBe('4')
+
+	expect(reddit.submitComment).toHaveBeenCalledWith({
+		id: 't3_abc123',
+		text: expect.stringContaining('Share your victory'),
+	})
+	const meta = await redis.hGetAll('game:t3_abc123:meta')
+	expect(meta[URJO_POST_TYPE_KEY]).toBe(URJO_PUZZLE_POST_TYPE)
+	expect(meta.stickyCommentId).toBe('t1_sticky123')
 })
 
 // ─── createPost — missing subredditName ──────────────────────────────────────

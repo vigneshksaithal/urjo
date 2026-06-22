@@ -1,16 +1,12 @@
 <script lang="ts">
-	import { navigateTo, showLoginPrompt } from "@devvit/web/client";
+	import { navigateTo, showLoginPrompt, showToast } from "@devvit/web/client";
 	import type { CellColor, Grid, StreakData } from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
-	import type {
-		CompletionContext,
-		PersonalChallengeData,
-	} from "../../shared/social-types";
+	import type { PersonalChallengeData } from "../../shared/social-types";
 	import { validateGrid } from "../lib/validation";
 	import { computeBoardSize } from "../lib/board-layout";
 	import { fireOnce } from "../stores/first-action";
-	import { getSimplifiedCompletionCtas } from "../lib/completion-ctas";
 	import { getLoginGate, LOGIN_CTA } from "../lib/login-gate";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
@@ -18,7 +14,6 @@
 	import CoinDisplay from "../components/CoinDisplay.svelte";
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
-	import MysteryBoxAnimation from "../components/MysteryBoxAnimation.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 
 	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
@@ -91,7 +86,6 @@
 	type UserProps = {
 		username?: string;
 		isLoggedIn?: boolean;
-		hasSubscribed?: boolean;
 		isMod?: boolean;
 		notifyOptIn?: boolean;
 		hintsDismissed?: {
@@ -105,9 +99,7 @@
 		onNextChallenge: () => void;
 		onRestart: () => void;
 		onChallenge: () => void;
-		onChallengeAndContinue?: () => void;
 		onOpenAnalytics?: () => void;
-		onSubscribe?: () => void;
 		onGridSizeChange?: (size: number) => void;
 		onEngagementDismissed?: () => void;
 	};
@@ -133,16 +125,13 @@
 		hasChallenged,
 		challengeUrl,
 		onChallenge,
-		onChallengeAndContinue,
 		coins,
 		onOpenAnalytics,
 		isMod = false,
 		timeTaken,
 		mistakes = 0,
 		username,
-		hasSubscribed = false,
 		isLoggedIn = true,
-		onSubscribe,
 		isChallenge = false,
 		onGridSizeChange,
 		engagement,
@@ -155,8 +144,6 @@
 		notifyOptIn = false,
 		postId,
 		challengePromptEligible = false,
-		sessionRun = 0,
-		sessionRunMultiplier = 1,
 		weekendEvent = undefined,
 		seasonProgress = undefined,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
@@ -172,9 +159,9 @@
 	let showSettings = $state(false);
 	let showModPreview = $state(false);
 	let showChallengeConfirm = $state(false);
-	let showChallengeAndContinueConfirm = $state(false);
-	let showSubscribeConfirm = $state(false);
-	let dismissedMysteryBoxKey = $state<string | null>(null);
+	let showVictoryCommentConfirm = $state(false);
+	let commentingVictory = $state(false);
+	let hasCommentedVictory = $state(false);
 	let dismissedMilestoneKey = $state<string | null>(null);
 	let showSeasonLeaderboard = $state(false);
 	let showOptInTutorial = $state(false);
@@ -219,14 +206,6 @@
 		isCompleted ? `${timeTaken ?? 0}:${puzzleColors ?? ""}` : null,
 	);
 	const showConfetti = $derived(isCompleted);
-	const mysteryBoxKey = $derived(
-		engagement?.variableReward.mysteryBox && currentCompletionKey
-			? `${currentCompletionKey}:mystery`
-			: null,
-	);
-	const showMysteryBoxOverlay = $derived(
-		mysteryBoxKey !== null && dismissedMysteryBoxKey !== mysteryBoxKey,
-	);
 	const milestoneKey = $derived(
 		engagement?.streakMilestone && currentCompletionKey
 			? `${currentCompletionKey}:milestone`
@@ -234,20 +213,6 @@
 	);
 	const showStreakMilestoneOverlay = $derived(
 		milestoneKey !== null && dismissedMilestoneKey !== milestoneKey,
-	);
-
-	// Build CompletionContext for simplified CTAs (social viral mechanics)
-	const completionContext = $derived<CompletionContext>({
-		timeTaken: timeTaken ?? 0,
-		mistakes,
-		streak: streakData.currentStreak,
-		skillLevel,
-		hasChallenged,
-		challengeUrl,
-		hasSubscribed,
-	});
-	const simplifiedCtas = $derived(
-		getSimplifiedCompletionCtas(completionContext),
 	);
 
 	// Login gate — single source of truth for which account-scoped UI shows.
@@ -278,19 +243,59 @@
 		onChallenge();
 	}
 
-	function confirmChallengeAndContinue(): void {
-		showChallengeAndContinueConfirm = false;
-		onChallengeAndContinue?.();
+	function handlePrimaryCta(): void {
+		void fireOnce(postId ?? "", "next-puzzle");
+		hasCommentedVictory = false;
+		onNextChallenge();
 	}
 
-	function handlePrimaryCta(): void {
-		// Primary CTA is now always "Next Puzzle" (the in-flow continuation).
-		// We still route through the simplifiedCtas object so the label/id
-		// remain in sync with completion-ctas.ts.
-		const id = simplifiedCtas.primary.id;
-		if (id === "next-puzzle") {
-			void fireOnce(postId ?? "", "next-puzzle");
-			onNextChallenge();
+	async function confirmVictoryComment(): Promise<void> {
+		if (commentingVictory || hasCommentedVictory) return;
+		if (!puzzleNumber) {
+			showToast("Puzzle not ready yet — try again in a moment.");
+			return;
+		}
+		void fireOnce(postId ?? "", "result-comment");
+		commentingVictory = true;
+
+		try {
+			const response = await fetch("/api/game/result-comment", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					puzzleNumber,
+					gridSize,
+					skillLevel,
+					timeTaken: Math.max(timeTaken ?? 0, 1),
+					mistakes,
+					streak: streakData.currentStreak,
+					colorGrid: buildVictoryColorGrid(
+						puzzleColors ?? "",
+						gridSize,
+					),
+				}),
+			});
+
+			if (!response.ok) {
+				const data = await response.json().catch(() => null);
+				const message =
+					data && typeof data === "object" && "error" in data
+						? String(data.error)
+						: "Failed to post victory comment";
+				throw new Error(message);
+			}
+
+			hasCommentedVictory = true;
+			showVictoryCommentConfirm = false;
+			showToast("Victory commented!");
+		} catch (error) {
+			showToast(
+				error instanceof Error
+					? error.message
+					: "Failed to post victory comment",
+			);
+		} finally {
+			commentingVictory = false;
 		}
 	}
 
@@ -299,19 +304,9 @@
 		navigateTo(challengeUrl);
 	}
 
-	function confirmSubscribe(): void {
-		showSubscribeConfirm = false;
-		void fireOnce(postId ?? "", "subscribe");
-		onSubscribe?.();
-	}
-
 	function handleGridSizeSelect(size: number): void {
 		void fireOnce(postId ?? "", "grid-size");
 		onGridSizeChange?.(size);
-	}
-
-	function dismissMysteryBox(): void {
-		dismissedMysteryBoxKey = mysteryBoxKey;
 	}
 
 	function dismissMilestone(): void {
@@ -346,6 +341,22 @@
 
 	function handleOpenOptInTutorial(): void {
 		showOptInTutorial = true;
+	}
+
+	function buildVictoryColorGrid(
+		colors: string,
+		size: number,
+	): ("red" | "blue")[][] {
+		if (colors.length < size * size) return [];
+		const rows: ("red" | "blue")[][] = [];
+		for (let row = 0; row < size; row++) {
+			const cells: ("red" | "blue")[] = [];
+			for (let col = 0; col < size; col++) {
+				cells.push(colors[row * size + col] === "r" ? "red" : "blue");
+			}
+			rows.push(cells);
+		}
+		return rows;
 	}
 
 	async function handleOptInTutorialComplete(): Promise<void> {
@@ -410,13 +421,13 @@
 					<span class="text-lg font-black leading-tight sm:text-base">
 						{weekendEvent.name} · {weekendEvent.multiplier}× coins
 					</span>
-				{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
-					<span
-						class="text-sm font-bold leading-tight text-stone-800 sm:border-l sm:border-stone-900/25 sm:pl-3 sm:text-xs"
-					>
-						Ends in {weekendEvent.hoursLeft}h
-					</span>
-				{/if}
+					{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
+						<span
+							class="text-sm font-bold leading-tight text-stone-800 sm:border-l sm:border-stone-900/25 sm:pl-3 sm:text-xs"
+						>
+							Ends in {weekendEvent.hoursLeft}h
+						</span>
+					{/if}
 				</div>
 			</div>
 		</section>
@@ -433,25 +444,6 @@
 	<!-- Streak and coins sit above the puzzle as one centered status row. -->
 	{#if loginGate.showWallet && coins !== undefined}
 		<CoinDisplay {coins} streak={streakData.currentStreak} />
-	{/if}
-
-	{#if sessionRun >= 2}
-		<div class="flex-none flex justify-center px-3 pb-2">
-			<div
-				class="px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 flex items-center gap-1"
-				title="Keep playing for bigger coin bonuses"
-			>
-				<span class="text-xs">🏃</span>
-				<span class="text-xs font-bold text-orange-300">
-					{sessionRun} in a row
-				</span>
-				{#if sessionRunMultiplier > 1}
-					<span class="text-[10px] text-orange-200/80"
-						>· {sessionRunMultiplier.toFixed(2)}×</span
-					>
-				{/if}
-			</div>
-		</div>
 	{/if}
 
 	<!-- Always-on progression strip — Subway Surfers / CoC home-screen
@@ -549,19 +541,13 @@
 <CompletionOverlay
 	{isCompleted}
 	timeTaken={timeTaken ?? 0}
-	{mistakes}
 	{coins}
-	{streakData}
 	{loginGate}
 	onContinue={handlePrimaryCta}
-	onChallengeAndContinue={onChallengeAndContinue
-		? () => (showChallengeAndContinueConfirm = true)
-		: undefined}
-	onSubscribe={onSubscribe ? () => (showSubscribeConfirm = true) : undefined}
-	{hasSubscribed}
-	{postId}
-	{gridSize}
-	{username}
+	onCommentVictory={() => (showVictoryCommentConfirm = true)}
+	{hasCommentedVictory}
+	{commentingVictory}
+	onChallenge={() => (showChallengeConfirm = true)}
 	personalChallengeBeat={personalChallengeBeat()}
 />
 
@@ -579,25 +565,16 @@
 	onCancel={() => (showChallengeConfirm = false)}
 />
 
-<!-- Challenge & Continue confirmation dialog -->
+<!-- Victory comment confirmation dialog -->
 <ConfirmDialog
-	isOpen={showChallengeAndContinueConfirm}
-	title="Challenge & Continue?"
-	message="Creates a public post in r/urjo for others to beat, then loads your next puzzle."
-	confirmLabel="Challenge & Play"
-	confirmVariant="warning"
-	onConfirm={confirmChallengeAndContinue}
-	onCancel={() => (showChallengeAndContinueConfirm = false)}
-/>
-
-<!-- Subscribe confirmation dialog -->
-<ConfirmDialog
-	isOpen={showSubscribeConfirm}
-	title="Join r/urjo?"
-	message="This will subscribe you to r/urjo so you get daily puzzle notifications in your feed."
-	confirmLabel="Join"
-	onConfirm={confirmSubscribe}
-	onCancel={() => (showSubscribeConfirm = false)}
+	isOpen={showVictoryCommentConfirm}
+	title="Comment Your Victory?"
+	message="Posts your victory publicly{username
+		? ` as u/${username}`
+		: ''} as a reply to the pinned comment on this post. Others will see it."
+	confirmLabel={commentingVictory ? "Commenting..." : "Comment"}
+	onConfirm={confirmVictoryComment}
+	onCancel={() => (showVictoryCommentConfirm = false)}
 />
 
 <!-- Leaderboard modal -->
@@ -631,14 +608,6 @@
 	<ModPreviewPanel
 		isOpen={showModPreview}
 		onClose={() => (showModPreview = false)}
-	/>
-{/if}
-
-<!-- Mystery box animation -->
-{#if showMysteryBoxOverlay && engagement?.variableReward.mysteryBox}
-	<MysteryBoxAnimation
-		reward={engagement.variableReward.mysteryBox}
-		onDismiss={dismissMysteryBox}
 	/>
 {/if}
 

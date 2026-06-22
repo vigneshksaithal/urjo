@@ -1,38 +1,7 @@
 /**
  * Social Viral Mechanics Types
- * Completion CTAs, and post previews
+ * Post previews and personal challenge sharing
  */
-
-// ─── Completion Screen ─────────────────────────────────────────────────────────
-
-export type CompletionActionId =
-    | 'challenge-friends'
-    | 'next-puzzle'
-    | 'view-challenge'
-    | 'comment-result'
-    | 'notify-toggle'
-    | 'subscribe'
-    | 'missions'
-    | 'achievements'
-    | 'profile'
-    | 'season'
-
-export type CompletionAction = {
-    id: CompletionActionId
-    label: string
-    icon?: string
-    style: 'primary' | 'secondary' | 'ghost'
-}
-
-export type CompletionContext = {
-    timeTaken: number
-    mistakes: number
-    streak: number
-    skillLevel: number
-    hasChallenged: boolean
-    challengeUrl: string | null
-    hasSubscribed: boolean
-}
 
 // ─── Post Preview ──────────────────────────────────────────────────────────────
 

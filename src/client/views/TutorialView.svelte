@@ -11,7 +11,7 @@
 		applyStep,
 		type WalkCell,
 	} from "../lib/tutorial-walkthrough";
-	import { computeBoardSize } from "../lib/board-layout";
+	import { computeTutorialLayout } from "../lib/tutorial-layout";
 	import Cell from "../components/Cell.svelte";
 	import manicule from "../assets/manicule.svg";
 
@@ -63,9 +63,12 @@
 	// Board sizing — matches GameView's dynamic approach
 	let availableWidth = $state(0);
 	let availableHeight = $state(0);
-	const boardSize = $derived(
-		computeBoardSize(availableWidth, availableHeight),
+	const tutorialLayout = $derived(
+		computeTutorialLayout(availableWidth, availableHeight),
 	);
+	const boardSize = $derived(tutorialLayout.boardSize);
+	const handWidth = $derived(tutorialLayout.handWidth);
+	const handOffset = $derived(tutorialLayout.handOffset);
 
 	const step = $derived(WALKTHROUGH_STEPS[stepIndex]!);
 	const activeIndex = $derived(phase === "playing" ? step.targetIndex : -1);
@@ -127,10 +130,10 @@
 
 	{#if phase === "playing"}
 		<!-- Playing phase: instruction above/below target cell, board centered, dots at bottom -->
-		<div class="flex-1 min-h-0 flex flex-col px-4">
+		<div class="flex-1 min-h-0 flex flex-col px-4 pt-3 sm:px-6">
 			<!-- Board container - takes remaining space -->
 			<div
-				class="flex-1 min-h-0 flex items-center justify-center"
+				class="flex-1 min-h-0 flex items-center justify-center py-2"
 				bind:clientWidth={availableWidth}
 				bind:clientHeight={availableHeight}
 			>
@@ -160,8 +163,9 @@
 								{#if isActive}
 									<!-- Instruction tooltip positioned based on cell location -->
 									<div
-										class="pointer-events-none absolute z-20 w-max max-w-[180px] left-1/2 -translate-x-1/2
+										class="pointer-events-none absolute z-20 w-max left-1/2 -translate-x-1/2
 											{tooltipPosition === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'}"
+										style="max-width: min(180px, calc(100vw - 4rem))"
 									>
 										{#key stepIndex}
 											<p
@@ -181,13 +185,14 @@
 									</div>
 									<!-- Pointing hand -->
 									<span
-										class="pointer-events-none absolute left-full top-1/2 -ml-2 z-20"
-										style="transform: translateY(-8px)"
+										class="pointer-events-none absolute left-full top-1/2 z-20"
+										style="transform: translate(-{handOffset}px, calc(-50% - 8px))"
 									>
 										<img
 											src={manicule}
 											alt=""
-											class="w-24 max-w-none animate-point drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+											class="max-w-none animate-point drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+											style="width: {handWidth}px"
 										/>
 									</span>
 								{/if}

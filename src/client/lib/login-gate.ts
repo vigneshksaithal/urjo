@@ -11,7 +11,6 @@
 /** Visibility flags for account-scoped UI. */
 export type LoginGate = {
     showWallet: boolean
-    showStreak: boolean
     showSeason: boolean
     showLeaderboard: boolean
     showSocialActions: boolean
@@ -28,7 +27,6 @@ export const getLoginGate = (isLoggedIn: boolean | undefined): LoginGate => {
     const loggedIn = isLoggedIn !== false
     return {
         showWallet: loggedIn,
-        showStreak: loggedIn,
         showSeason: loggedIn,
         showLeaderboard: loggedIn,
         showSocialActions: loggedIn,

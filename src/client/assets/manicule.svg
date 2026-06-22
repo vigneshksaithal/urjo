@@ -5,10 +5,10 @@
     </filter>
   </defs>
   <g transform="translate(61.013731,-100.11661)">
-    <!-- Main hand shape with white fill and dark stroke for visibility -->
+    <!-- Main hand shape with achievement amber-gold fill for the dark tutorial surface -->
     <path 
-      fill="#ffffff" 
-      stroke="#2a2a2a" 
+      fill="#FCD34D" 
+      stroke="#C4861C" 
       stroke-width="1.5" 
       stroke-linejoin="round"
       filter="url(#hand-shadow)"

@@ -328,13 +328,6 @@ export const trackNotifyOptIn = async (date: string, userId: string): Promise<vo
     ])
 }
 
-export const trackSubscribeTap = async (date: string, userId: string): Promise<void> => {
-    await Promise.all([
-        redis.incrBy(subscribeTapCounterKey(date), 1),
-        trackDailyActiveEngager(date, userId),
-    ])
-}
-
 /**
  * Track a help-icon tap event (deduplicated per user per post per day).
  * Uses SET NX on analytics:helped:{date}:{postId}:{userId} with 24h TTL.

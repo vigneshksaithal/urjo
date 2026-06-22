@@ -25,6 +25,7 @@ const installRequest = async (): Promise<Response> =>
 
 const mockRedditApis = (postId = 't3_install1') => {
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: postId } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_install_sticky' } as never)
 }
 
 const test = createDevvitTest({
@@ -68,6 +69,7 @@ test('onAppInstall records installation in sorted set and metadata hash', async 
 
 test('onAppInstall creates first puzzle post automatically', async () => {
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_firstpost' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_first_sticky' } as never)
 
     const res = await withCtx(() => installRequest())
 
@@ -77,6 +79,9 @@ test('onAppInstall creates first puzzle post automatically', async () => {
     const body = await res.json()
     expect(body).toHaveProperty('navigateTo')
     expect(body.navigateTo).toContain('t3_firstpost')
+
+    const meta = await withCtx(() => redis.hGetAll('game:t3_firstpost:meta'))
+    expect(meta['stickyCommentId']).toBe('t1_first_sticky')
 })
 
 test('onAppInstall sets roadmap:startDate if not already set', async () => {

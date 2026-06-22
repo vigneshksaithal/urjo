@@ -6,7 +6,6 @@ describe('getLoginGate', () => {
         const gate = getLoginGate(true)
 
         expect(gate.showWallet).toBe(true)
-        expect(gate.showStreak).toBe(true)
         expect(gate.showSeason).toBe(true)
         expect(gate.showLeaderboard).toBe(true)
         expect(gate.showSocialActions).toBe(true)
@@ -17,7 +16,6 @@ describe('getLoginGate', () => {
         const gate = getLoginGate(false)
 
         expect(gate.showWallet).toBe(false)
-        expect(gate.showStreak).toBe(false)
         expect(gate.showSeason).toBe(false)
         expect(gate.showLeaderboard).toBe(false)
         expect(gate.showSocialActions).toBe(false)

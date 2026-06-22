@@ -22,7 +22,6 @@ import {
     trackChallengeOpen,
     trackChallengeCompletion,
     trackNotifyOptIn,
-    trackSubscribeTap,
     getDailyMetrics,
     computeD1ReturnRatePure,
     computeReturnRateForDate,
@@ -173,7 +172,6 @@ testGrowthEvents('growth tracking records DAE and K-factor inputs', async () => 
     await trackChallengeOpen('2025-01-15', 't3_challenge', 't2_newbie')
     await trackChallengeCompletion('2025-01-15', 't3_challenge', 't2_newbie', true)
     await trackNotifyOptIn('2025-01-15', 't2_solver')
-    await trackSubscribeTap('2025-01-15', 't2_solver')
 
     const metrics = await getDailyMetrics('2025-01-15')
 
@@ -184,7 +182,7 @@ testGrowthEvents('growth tracking records DAE and K-factor inputs', async () => 
     expect(metrics.growth?.challengeCompletions).toBe(1)
     expect(metrics.growth?.newPlayerChallengeCompletions).toBe(1)
     expect(metrics.growth?.notifyOptIns).toBe(1)
-    expect(metrics.growth?.subscribeTaps).toBe(1)
+    expect(metrics.growth?.subscribeTaps).toBe(0)
     expect(metrics.growth?.challengePostsPerCompleter).toBe(1)
     expect(metrics.growth?.newCompletersPerChallenge).toBe(1)
 })

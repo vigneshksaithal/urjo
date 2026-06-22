@@ -23,8 +23,7 @@ import {
 	getUserDisplay,
 	getUserStreakData,
 } from '../lib/economy'
-import { getSkillLevel, getTodayUTC } from '../lib/helpers'
-import { trackSubscribeTap } from '../lib/analytics'
+import { getSkillLevel } from '../lib/helpers'
 
 export const economyRouter = new Hono()
 
@@ -325,29 +324,3 @@ const checkCondition = async (
 	}
 }
 
-// ─── GET /api/subscribe/status ──────────────────────────────────────────────
-
-economyRouter.get('/api/subscribe/status', async (c) => {
-	const { userId } = context
-	if (!userId) return c.json({ subscribed: false })
-	const subscribed = await redis.get(`user:${userId}:subscribed`)
-	return c.json({ subscribed: subscribed === 'true' })
-})
-
-// ─── POST /api/subscribe ────────────────────────────────────────────────────
-
-economyRouter.post('/api/subscribe', async (c) => {
-	const { userId } = context
-	if (!userId) return c.json({ error: 'User ID required' }, 400)
-
-	try {
-		await reddit.subscribeToCurrentSubreddit()
-		// Track subscription in Redis so we don't show the prompt again
-		await redis.set(`user:${userId}:subscribed`, 'true')
-		await trackSubscribeTap(getTodayUTC(), userId)
-		return c.json({ success: true })
-	} catch (error) {
-		console.error('Subscribe error:', error)
-		return c.json({ error: 'Failed to subscribe' }, 500)
-	}
-})

@@ -287,6 +287,41 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
     vi.restoreAllMocks()
 })
 
+testResultComment('POST /api/game/result-comment creates missing sticky comment before replying', async () => {
+    vi.spyOn(webReddit, 'submitComment')
+        .mockResolvedValueOnce({ id: 't1_created_sticky' } as never)
+        .mockResolvedValueOnce({ id: 't1_result_comment' } as never)
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/result-comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(RESULT_BODY),
+        }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(webReddit.submitComment).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+            id: 't3_testpost',
+            text: expect.stringContaining('Share your victory'),
+        }),
+    )
+    expect(webReddit.submitComment).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+            id: 't1_created_sticky',
+            runAs: 'USER',
+        }),
+    )
+
+    const meta = await withCtx(CTX, () => redis.hGetAll('game:t3_testpost:meta'))
+    expect(meta['stickyCommentId']).toBe('t1_created_sticky')
+
+    vi.restoreAllMocks()
+})
+
 testResultComment('POST /api/game/result-comment returns 400 on duplicate', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 

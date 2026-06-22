@@ -4,7 +4,35 @@ import { generatePuzzle } from './lib/generator'
 export const URJO_POST_TYPE_KEY = 'postType'
 export const URJO_PUZZLE_POST_TYPE = 'urjo-puzzle'
 
-export const createPost = async (customTitle?: string, ctxOverride?: any): Promise<{ id: string }> => {
+export const DEFAULT_STICKY_COMMENT = `Share your victory here.
+
+When you finish the puzzle, use **Comment Your Victory** in the game to reply with your score.`
+
+type CreatePostOptions = {
+	stickyCommentText?: string
+}
+
+export const createStickyComment = async (
+	postId: string,
+	text = DEFAULT_STICKY_COMMENT,
+): Promise<string> => {
+	const stickyComment = await reddit.submitComment({
+		id: postId as `t3_${string}`,
+		text,
+	})
+
+	await redis.hSet(`game:${postId}:meta`, {
+		stickyCommentId: stickyComment.id,
+	})
+
+	return stickyComment.id
+}
+
+export const createPost = async (
+	customTitle?: string,
+	ctxOverride?: any,
+	options: CreatePostOptions = {},
+): Promise<{ id: string }> => {
 	const currentContext = ctxOverride || context
 	const { subredditName } = currentContext
 	if (!subredditName) {
@@ -38,6 +66,8 @@ export const createPost = async (customTitle?: string, ctxOverride?: any): Promi
 	await redis.hSet(`game:${post.id}:meta`, {
 		[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
 	})
+
+	await createStickyComment(post.id, options.stickyCommentText)
 
 	// Increment global stats
 	await redis.incrBy('stats:totalGames', 1)

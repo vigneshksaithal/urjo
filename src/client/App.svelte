@@ -85,7 +85,6 @@
 	let coinReward: CoinReward | undefined = $state(undefined);
 	let username = $state<string | undefined>(undefined);
 	let isLoggedIn = $state(true);
-	let hasSubscribed = $state(false);
 	// Run-again loop state — persisted via sessionStorage in session-run store.
 	let sessionRun = $state(getSessionRun());
 	let sessionRunMultiplier = $state(1);
@@ -274,8 +273,6 @@
 			// Load economy data (logged-in only — no wallet for anon users)
 			if (isLoggedIn) {
 				loadEconomy();
-				// Check subscription status
-				checkSubscription();
 				// Migrate any logged-out score stashed before the user signed
 				// in, so the freshly-authenticated account gets credit.
 				void migrateLoggedOutScore();
@@ -296,18 +293,6 @@
 			}
 		} catch {
 			// Non-critical, use defaults
-		}
-	}
-
-	async function checkSubscription() {
-		try {
-			const response = await fetch("/api/subscribe/status");
-			if (response.ok) {
-				const data = await response.json();
-				hasSubscribed = data.subscribed;
-			}
-		} catch {
-			// Non-critical
 		}
 	}
 
@@ -337,25 +322,6 @@
 			}
 		} catch {
 			// Non-critical — score stays stashed for a later retry.
-		}
-	}
-
-	async function handleSubscribe() {
-		// Logged-out users: trigger Reddit's login flow instead of subscribing.
-		// Subscribing requires an account; this is a natural conversion moment.
-		if (!isLoggedIn) {
-			showLoginPrompt();
-			return;
-		}
-		if (hasSubscribed) return;
-		void fireOnce(postId ?? "", "subscribe");
-		try {
-			const response = await fetch("/api/subscribe", { method: "POST" });
-			if (response.ok) {
-				hasSubscribed = true;
-			}
-		} catch {
-			// Non-critical
 		}
 	}
 
@@ -564,16 +530,6 @@
 	}
 
 	/**
-	 * Handle "Challenge & Continue" button — creates the challenge post then
-	 * immediately moves to the next puzzle without waiting for the post result.
-	 */
-	async function handleChallengeAndContinue() {
-		// Fire challenge in the background — don't block the next puzzle load
-		void handleChallenge();
-		await handleNextChallenge();
-	}
-
-	/**
 	 * Handle "Next Challenge" button.
 	 */
 	async function handleNextChallenge() {
@@ -761,7 +717,6 @@
 			coins,
 			timeTaken,
 			mistakes: $mistakeCount,
-			hasSubscribed,
 			isLoggedIn,
 			isChallenge,
 			postId,
@@ -769,13 +724,9 @@
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
 			onChallenge: handleChallenge,
-			onChallengeAndContinue: isLoggedIn
-				? handleChallengeAndContinue
-				: undefined,
 			solution: puzzleSolution,
 			onOpenAnalytics: () => (showAnalytics = true),
 			isMod,
-			onSubscribe: handleSubscribe,
 			onGridSizeChange: handleGridSizeChange,
 			puzzleColors,
 			skillLevel,

@@ -341,10 +341,16 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
 
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
     const title = buildGrowthPostTitle(slot, puzzleNumber, brandingEmoji)
+    let stickyCommentText: string | undefined
+    try {
+      stickyCommentText = await buildStatsComment(puzzleNumber)
+    } catch (commentErr) {
+      console.error('[Scheduler] Stats comment build failed (non-critical):', commentErr)
+    }
 
     console.log(`[Scheduler] Creating post: ${title}`)
 
-    const post = await createPost(title)
+    const post = await createPost(title, undefined, stickyCommentText ? { stickyCommentText } : undefined)
 
     // ─── Custom post preview for feed engagement (non-blocking) ────────────
     try {
@@ -365,22 +371,6 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       })
     } catch (previewErr) {
       console.error('[Preview] Daily preview failed (non-critical):', previewErr)
-    }
-
-    // Build a stats comment from yesterday's data
-    try {
-      const statsComment = await buildStatsComment(puzzleNumber)
-      if (statsComment) {
-        const stickyComment = await reddit.submitComment({ id: post.id as `t3_${string}`, text: statsComment })
-        // Store sticky comment ID so score shares can reply under it
-        if (stickyComment?.id) {
-          await redis.hSet(`game:${post.id}:meta`, {
-            stickyCommentId: stickyComment.id,
-          })
-        }
-      }
-    } catch (commentErr) {
-      console.error('[Scheduler] Stats comment failed (non-critical):', commentErr)
     }
 
     // On Mondays: generate season recap and award season rewards
