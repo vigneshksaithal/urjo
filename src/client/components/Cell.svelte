@@ -90,14 +90,14 @@
 	role={locked ? undefined : "button"}
 	tabindex={locked ? undefined : 0}
 	class="
-		relative w-full aspect-square rounded-full
+		cell-shell relative w-full aspect-square rounded-full
 		flex items-center justify-center
 		touch-none select-none
-		transition-[transform,filter] duration-300 ease-[cubic-bezier(0.2,0.9,0.2,1.25)]
+		transition-[transform,scale,filter,box-shadow]
 		{locked ? 'cursor-default' : 'cursor-pointer hover:scale-[1.018]'}
-		{isPressed ? 'scale-[0.91] saturate-125' : ''}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
+	class:cell-shell-pressed={isPressed}
 >
 	{#key releaseToken}
 		{#if releaseToken > 0}
@@ -127,7 +127,7 @@
 	     it's the tutorial target to draw attention to the cell to tap. -->
 	{#if !isLoading && color === null}
 		<div
-			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
+			class="cell-face absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
 				{isTutorialTarget ? 'animate-tutorial-float' : 'animate-empty-breathe'}"
 		></div>
 	{/if}
@@ -145,7 +145,7 @@
 	<!-- Loading state: animated red cell -->
 	{#if isLoading && (color === "red" || color === null)}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
+			class="cell-face absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
@@ -153,7 +153,7 @@
 	<!-- Loading state: animated blue cell -->
 	{#if isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
+			class="cell-face absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
@@ -161,9 +161,9 @@
 	<!-- Non-loading: filled red -->
 	{#if !isLoading && color === "red"}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
+			class="cell-face absolute inset-0 bg-[#E54E3E] rounded-full transition-[opacity,transform,scale,filter] pointer-events-none {isPressed
+				? 'scale-[1.035]'
+				: 'scale-100'}"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -171,9 +171,9 @@
 	<!-- Non-loading: filled blue -->
 	{#if !isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
+			class="cell-face absolute inset-0 bg-[#3997D7] rounded-full transition-[opacity,transform,scale,filter] pointer-events-none {isPressed
+				? 'scale-[1.035]'
+				: 'scale-100'}"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -195,6 +195,88 @@
 </div>
 
 <style>
+	.cell-shell {
+		box-shadow:
+			inset 0 1px 1px rgba(255, 255, 255, 0.32),
+			inset 0 -3px 5px rgba(0, 0, 0, 0.28),
+			0 5px 9px rgba(0, 0, 0, 0.22),
+			0 1px 1px rgba(0, 0, 0, 0.22);
+		transition-duration: 210ms, 210ms, 210ms, 240ms;
+		transition-timing-function:
+			cubic-bezier(0.16, 1, 0.3, 1),
+			cubic-bezier(0.16, 1, 0.3, 1),
+			cubic-bezier(0.16, 1, 0.3, 1),
+			cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.cell-shell::before,
+	.cell-shell::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		z-index: 8;
+		border-radius: inherit;
+		pointer-events: none;
+		transition:
+			opacity 210ms cubic-bezier(0.16, 1, 0.3, 1),
+			transform 210ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.cell-shell::before {
+		border: 1px solid rgba(255, 255, 255, 0.3);
+		box-shadow:
+			inset 0 1.5px 2px rgba(255, 255, 255, 0.36),
+			inset 0 -1px 2px rgba(0, 0, 0, 0.18);
+	}
+
+	.cell-shell::after {
+		background:
+			linear-gradient(
+				180deg,
+				rgba(255, 255, 255, 0.22) 0%,
+				rgba(255, 255, 255, 0.08) 33%,
+				rgba(255, 255, 255, 0) 62%
+			);
+		opacity: 0.72;
+	}
+
+	.cell-shell-pressed {
+		transform: scale(0.94) translateY(1px);
+		filter: saturate(1.06);
+		box-shadow:
+			inset 0 2px 4px rgba(255, 255, 255, 0.24),
+			inset 0 -1px 2px rgba(0, 0, 0, 0.2),
+			0 2px 4px rgba(0, 0, 0, 0.2);
+		transition-duration: 80ms, 80ms, 80ms, 80ms;
+		transition-timing-function:
+			cubic-bezier(0.2, 0, 0, 1),
+			cubic-bezier(0.2, 0, 0, 1),
+			cubic-bezier(0.2, 0, 0, 1),
+			cubic-bezier(0.2, 0, 0, 1);
+	}
+
+	.cell-shell-pressed::before,
+	.cell-shell-pressed::after {
+		opacity: 1;
+		transform: scale(0.985);
+		transition-duration: 80ms;
+	}
+
+	.cell-shell-pressed::after {
+		background:
+			linear-gradient(
+				180deg,
+				rgba(255, 255, 255, 0.4) 0%,
+				rgba(255, 255, 255, 0.2) 38%,
+				rgba(255, 255, 255, 0.04) 70%
+			);
+	}
+
+	.cell-face {
+		transition-duration: 210ms;
+		transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
 	@keyframes loadingRedBlue {
 		0%,
 		100% {
