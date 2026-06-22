@@ -25,7 +25,10 @@
 	);
 </script>
 
-<div class="grid gap-0.5 w-full h-full" style={gridStyle}>
+<div
+	class="grid gap-[clamp(4px,1.4vw,10px)] p-[clamp(2px,0.7vw,6px)] w-full h-full overflow-visible"
+	style={gridStyle}
+>
 	{#each grid as row, rowIndex}
 		{#each row as cell, colIndex}
 			<Cell

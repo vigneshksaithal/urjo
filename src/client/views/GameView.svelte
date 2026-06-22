@@ -410,13 +410,13 @@
 					<span class="text-lg font-black leading-tight sm:text-base">
 						{weekendEvent.name} · {weekendEvent.multiplier}× coins
 					</span>
-				{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
-					<span
-						class="text-sm font-bold leading-tight text-stone-800 sm:border-l sm:border-stone-900/25 sm:pl-3 sm:text-xs"
-					>
-						Ends in {weekendEvent.hoursLeft}h
-					</span>
-				{/if}
+					{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
+						<span
+							class="text-sm font-bold leading-tight text-stone-800 sm:border-l sm:border-stone-900/25 sm:pl-3 sm:text-xs"
+						>
+							Ends in {weekendEvent.hoursLeft}h
+						</span>
+					{/if}
 				</div>
 			</div>
 		</section>
@@ -584,7 +584,7 @@
 	isOpen={showChallengeAndContinueConfirm}
 	title="Challenge & Continue?"
 	message="Creates a public post in r/urjo for others to beat, then loads your next puzzle."
-	confirmLabel="Challenge & Play"
+	confirmLabel="Challenge"
 	confirmVariant="warning"
 	onConfirm={confirmChallengeAndContinue}
 	onCancel={() => (showChallengeAndContinueConfirm = false)}

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { fade } from "svelte/transition";
-  import Coins from "lucide-svelte/icons/coins";
-  import Flame from "lucide-svelte/icons/flame";
+  import BadgeDollarSign from "lucide-svelte/icons/badge-dollar-sign";
   import Share2 from "lucide-svelte/icons/share-2";
+  import Trophy from "lucide-svelte/icons/trophy";
   import { showShareSheet } from "@devvit/web/client";
   import type { StreakData } from "../../shared/types";
   import type { PersonalChallengeData } from "../../shared/social-types";
@@ -119,84 +119,35 @@
 
     <!-- Hero -->
     <div class="flex flex-col items-center gap-5">
-      <div class="text-8xl leading-none select-none" aria-hidden="true">🏆</div>
+      <Trophy class="size-20 text-yellow-400" aria-hidden="true" />
       {#if personalChallengeBeat}
-        <div class="flex flex-col items-center gap-1">
-          <p class="text-3xl font-bold text-yellow-400 text-center">
+        <div class="flex flex-col items-center gap-2">
+          <p class="text-3xl font-bold text-yellow-400 text-center mb-1">
             Solved in {timeTaken}s!
           </p>
           <p class="text-sm font-semibold text-green-400 text-center">
             🎉 You beat {personalChallengeBeat.challengerUsername}'s {personalChallengeBeat.challengerTime}s!
           </p>
+          {#if loginGate.showWallet && coins !== undefined}
+            <p class="flex items-center gap-2 text-lg text-theme-text-muted">
+              <BadgeDollarSign class="size-5 text-yellow-400 shrink-0" />
+              <span class="text-yellow-400 font-semibold">{coins}</span>
+              <span>coins earned</span>
+            </p>
+          {/if}
         </div>
       {:else}
-        <p class="text-3xl font-bold text-yellow-400 text-center">
-          Solved in {timeTaken}s!
-        </p>
-      {/if}
-    </div>
-
-    <!-- Stats row: coins | streak -->
-    <div class="grid grid-cols-2 gap-3 w-full mt-10 max-w-xs">
-      <!-- Coins -->
-      {#if loginGate.showWallet && coins !== undefined}
-        <div
-          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-yellow-500/40 bg-yellow-500/10"
-        >
-          <Coins class="w-6 h-6 text-yellow-400" />
-          <span class="text-xl font-bold text-yellow-300 leading-none">
-            {coins}
-          </span>
-          <span
-            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-          >
-            Coins
-          </span>
-        </div>
-      {:else}
-        <div
-          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
-        >
-          <Coins class="w-6 h-6 text-theme-text-muted" />
-          <span class="text-xl font-bold text-theme-text-muted leading-none">
-            —
-          </span>
-          <span
-            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-          >
-            Coins
-          </span>
-        </div>
-      {/if}
-
-      <!-- Streak -->
-      {#if loginGate.showStreak}
-        <div
-          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-orange-500/40 bg-orange-500/10"
-        >
-          <Flame class="w-6 h-6 text-orange-400" />
-          <span class="text-xl font-bold text-orange-300 leading-none">
-            {streakData.currentStreak}
-          </span>
-          <span
-            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-          >
-            Streak
-          </span>
-        </div>
-      {:else}
-        <div
-          class="flex flex-col items-center gap-1 px-3 py-4 rounded-2xl border border-theme-border bg-theme-hover"
-        >
-          <Flame class="w-6 h-6 text-theme-text-muted" />
-          <span class="text-xl font-bold text-theme-text-muted leading-none">
-            —
-          </span>
-          <span
-            class="text-[10px] font-semibold text-theme-text-muted uppercase tracking-wide"
-          >
-            Streak
-          </span>
+        <div class="flex flex-col items-center gap-2">
+          <p class="text-3xl font-bold text-yellow-400 text-center mb-1">
+            Solved in {timeTaken}s!
+          </p>
+          {#if loginGate.showWallet && coins !== undefined}
+            <p class="flex items-center gap-2 text-lg text-theme-text-muted">
+              <BadgeDollarSign class="size-5 text-yellow-400 shrink-0" />
+              <span class="text-yellow-400 font-semibold">{coins}</span>
+              <span>coins earned</span>
+            </p>
+          {/if}
         </div>
       {/if}
     </div>
@@ -205,11 +156,11 @@
     <div class="flex-1"></div>
 
     <!-- Action buttons -->
-    <div class="flex flex-col gap-3 w-full">
+    <div class="flex flex-col gap-3 w-full mt-8">
       {#if onChallengeAndContinue && loginGate.showSocialActions}
         <button
           onclick={onChallengeAndContinue}
-          class="w-full px-4 py-4 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-base hover:bg-yellow-400 active:scale-95 transition-all uppercase tracking-wide"
+          class="w-full px-4 py-4 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-base hover:bg-yellow-400 active:scale-95 transition-all"
         >
           Challenge &amp; Continue
         </button>
@@ -220,7 +171,7 @@
           onclick={handleShareTime}
           class="w-full px-4 py-3.5 bg-urjo-blue text-white font-semibold rounded-2xl text-sm hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2"
         >
-          <Share2 class="w-4 h-4" />
+          <Share2 class="size-4" />
           Comment Time
         </button>
       {/if}

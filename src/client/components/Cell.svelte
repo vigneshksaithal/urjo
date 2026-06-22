@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from "svelte";
 	import type { CellColor } from "../../shared/types";
 
 	type Props = {
@@ -31,81 +32,248 @@
 		onChange,
 	}: Props = $props();
 
+	type InteractionState = "idle" | "pressing" | "releasing";
+
 	let pointerStartY = $state(0);
-	let isPressed = $state(false);
+	let interactionState = $state<InteractionState>("idle");
 	let releaseToken = $state(0);
+	let pressX = $state(50);
+	let pressY = $state(50);
+	let pressStartedAt = 0;
+	let pointerActive = false;
+	let pressure = $state(0);
+	let targetPressure = 0;
+	let pressureVelocity = 0;
+	let lastSpringAt = 0;
+	let queuedColor: CellColor | undefined;
+	let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+	let springFrame: ReturnType<typeof requestAnimationFrame> | undefined;
 	const SWIPE_THRESHOLD = 20;
+	const MIN_PRESS_MS = 260;
+	const RELEASE_SETTLE_MS = 680;
+	const SPRING_STIFFNESS = 38;
+	const SPRING_DAMPING = 8.7;
+	const PRESS_IMPULSE = 2.25;
+	const RELEASE_IMPULSE = -1.15;
 
 	const animationDelay = $derived(
 		rowIndex !== undefined && colIndex !== undefined
 			? `${(rowIndex + colIndex) * 50}ms`
 			: "0ms",
 	);
+	const pressScale = $derived(
+		gridSize === 8 ? 1.075 : gridSize === 6 ? 1.1 : 1.145,
+	);
+	const driftX = $derived((pressX - 50) * 0.035);
+	const driftY = $derived((pressY - 50) * 0.035);
+	const isActive = $derived(interactionState !== "idle");
+	const visualPressure = $derived(Math.max(-0.08, Math.min(1.08, pressure)));
+	const positivePressure = $derived(Math.max(0, visualPressure));
+	const scale = $derived(1 + (pressScale - 1) * visualPressure);
+	const lift = $derived(-1.45 * visualPressure);
+	const shadowY = $derived(3 + 9 * positivePressure);
+	const shadowBlur = $derived(4 + 14 * positivePressure);
+	const shadowAlpha = $derived(0.12 + 0.1 * positivePressure);
+	const surfaceScaleX = $derived(1 + 0.018 * visualPressure);
+	const surfaceScaleY = $derived(1 - 0.012 * visualPressure);
+	const glassOpacity = $derived(0.46 + 0.28 * positivePressure);
+	const glassScale = $derived(1 - 0.026 * visualPressure);
+	const glassLift = $derived(-1.05 * visualPressure);
+	const fillBlur = $derived(0.2 * positivePressure);
+	const rimAlpha = $derived(0.13 + 0.05 * positivePressure);
+	const rimHighlight = $derived(0.14 + 0.06 * positivePressure);
+	const rimShadow = $derived(0.12 + 0.01 * positivePressure);
+	const fillColor = $derived(
+		color === "red"
+			? "#E54E3E"
+			: color === "blue"
+				? "#3997D7"
+				: "var(--color-theme-empty-cell)",
+	);
+	const cellStyle = $derived(
+		`--cell-scale: ${scale}; --cell-lift: ${lift}%; --cell-shadow-y: ${shadowY}px; --cell-shadow-blur: ${shadowBlur}px; --cell-shadow-alpha: ${shadowAlpha}; --cell-press-x: ${pressX}%; --cell-press-y: ${pressY}%; --cell-drift-x: ${driftX}%; --cell-drift-y: ${driftY}%; --cell-surface-scale-x: ${surfaceScaleX}; --cell-surface-scale-y: ${surfaceScaleY}; --cell-glass-opacity: ${glassOpacity}; --cell-glass-scale: ${glassScale}; --cell-glass-lift: ${glassLift}%; --cell-fill-blur: ${fillBlur}px; --cell-rim-alpha: ${rimAlpha}; --cell-rim-highlight: ${rimHighlight}; --cell-rim-shadow: ${rimShadow}; --cell-fill: ${fillColor}`,
+	);
+
+	function updatePressPoint(e: PointerEvent): void {
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		pressX = ((e.clientX - rect.left) / rect.width) * 100;
+		pressY = ((e.clientY - rect.top) / rect.height) * 100;
+	}
 
 	function handlePointerDown(e: PointerEvent) {
 		if (locked) return;
+		clearMotionTimers();
 		pointerStartY = e.clientY;
-		isPressed = true;
+		updatePressPoint(e);
+		pressStartedAt = performance.now();
+		pointerActive = true;
+		interactionState = "pressing";
+		setPressureTarget(1, PRESS_IMPULSE);
 		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 	}
 
+	function handlePointerMove(e: PointerEvent): void {
+		if (interactionState === "idle" || locked) return;
+		updatePressPoint(e);
+	}
+
 	function handlePointerUp(e: PointerEvent) {
+		pointerActive = false;
 		if (locked) {
-			isPressed = false;
+			scheduleRelease();
 			return;
 		}
 		const deltaY = pointerStartY - e.clientY;
+		const nextColor =
+			Math.abs(deltaY) > SWIPE_THRESHOLD
+				? deltaY > 0
+					? "blue"
+					: "red"
+				: getNextColor();
 
-		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
-			onChange(deltaY > 0 ? "blue" : "red");
-		} else {
-			cycleColor();
-		}
-		isPressed = false;
-		releaseToken += 1;
+		queuedColor = nextColor;
+		scheduleRelease();
 	}
 
 	function handlePointerCancel(): void {
-		isPressed = false;
+		pointerActive = false;
+		queuedColor = undefined;
+		scheduleRelease();
 	}
 
-	function cycleColor() {
-		if (color === null) {
-			onChange("blue");
-		} else if (color === "blue") {
-			onChange("red");
-		} else {
-			onChange(null);
-		}
+	function handleLostPointerCapture(): void {
+		if (!pointerActive) return;
+		handlePointerCancel();
 	}
+
+	function getNextColor(): CellColor {
+		if (color === null) {
+			return "blue";
+		}
+		return color === "blue" ? "red" : null;
+	}
+
+	function scheduleRelease(): void {
+		clearReleaseTimer();
+		const elapsed = performance.now() - pressStartedAt;
+		const delay = Math.max(MIN_PRESS_MS - elapsed, 90);
+		releaseTimer = setTimeout(() => {
+			if (queuedColor !== undefined) {
+				onChange(queuedColor);
+				queuedColor = undefined;
+			}
+			interactionState = "releasing";
+			setPressureTarget(0, RELEASE_IMPULSE);
+			releaseToken += 1;
+			releaseTimer = undefined;
+			idleTimer = setTimeout(() => {
+				interactionState = "idle";
+				idleTimer = undefined;
+			}, RELEASE_SETTLE_MS);
+		}, delay);
+	}
+
+	function clearReleaseTimer(): void {
+		if (releaseTimer === undefined) return;
+		clearTimeout(releaseTimer);
+		releaseTimer = undefined;
+	}
+
+	function clearIdleTimer(): void {
+		if (idleTimer === undefined) return;
+		clearTimeout(idleTimer);
+		idleTimer = undefined;
+	}
+
+	function clearMotionTimers(): void {
+		clearReleaseTimer();
+		clearIdleTimer();
+		queuedColor = undefined;
+	}
+
+	function setPressureTarget(nextTarget: number, impulse = 0): void {
+		targetPressure = nextTarget;
+		if (impulse > 0) {
+			pressureVelocity = Math.max(pressureVelocity, impulse);
+		} else if (impulse < 0) {
+			pressureVelocity = Math.min(pressureVelocity, impulse);
+		}
+		startSpring();
+	}
+
+	function startSpring(): void {
+		if (springFrame !== undefined) return;
+		lastSpringAt = performance.now();
+		springFrame = requestAnimationFrame(stepSpring);
+	}
+
+	function stepSpring(now: number): void {
+		const dt = Math.min((now - lastSpringAt) / 1000, 0.032);
+		lastSpringAt = now;
+
+		const acceleration =
+			(targetPressure - pressure) * SPRING_STIFFNESS -
+			pressureVelocity * SPRING_DAMPING;
+		pressureVelocity += acceleration * dt;
+		pressure += pressureVelocity * dt;
+
+		if (
+			Math.abs(targetPressure - pressure) < 0.001 &&
+			Math.abs(pressureVelocity) < 0.001
+		) {
+			pressure = targetPressure;
+			pressureVelocity = 0;
+			springFrame = undefined;
+			return;
+		}
+
+		springFrame = requestAnimationFrame(stepSpring);
+	}
+
+	function stopSpring(): void {
+		if (springFrame === undefined) return;
+		cancelAnimationFrame(springFrame);
+		springFrame = undefined;
+	}
+
+	onDestroy(() => {
+		clearMotionTimers();
+		stopSpring();
+	});
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	onpointerdown={handlePointerDown}
+	onpointermove={handlePointerMove}
 	onpointerup={handlePointerUp}
 	onpointercancel={handlePointerCancel}
-	onlostpointercapture={handlePointerCancel}
+	onlostpointercapture={handleLostPointerCapture}
 	role={locked ? undefined : "button"}
 	tabindex={locked ? undefined : 0}
+	style={cellStyle}
 	class="
-		relative w-full aspect-square rounded-full
+		cell-button relative w-full aspect-square rounded-full
 		flex items-center justify-center
 		touch-none select-none
-		transition-[transform,filter] duration-300 ease-[cubic-bezier(0.2,0.9,0.2,1.25)]
-		{locked ? 'cursor-default' : 'cursor-pointer hover:scale-[1.018]'}
-		{isPressed ? 'scale-[0.91] saturate-125' : ''}
+		{locked ? 'cursor-default' : 'cursor-pointer'}
+		{interactionState === 'pressing' ? 'is-pressing' : ''}
+		{interactionState === 'releasing' ? 'is-releasing' : ''}
+		{isActive ? 'is-active' : ''}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
 >
 	{#key releaseToken}
 		{#if releaseToken > 0}
 			<div
-				class="absolute inset-[-12%] rounded-full pointer-events-none animate-liquid-release"
+				class="absolute inset-[-16%] rounded-full pointer-events-none animate-liquid-release"
 			></div>
 		{/if}
 	{/key}
+
+	<div class="absolute inset-0 rounded-full pointer-events-none cell-depth"></div>
 
 	<!-- Loading state: animated empty cell with diagonal split -->
 	{#if isLoading && color === null}
@@ -123,12 +291,16 @@
 		</div>
 	{/if}
 
-	<!-- Empty cell: single neutral tone. Animated with a floating effect when
-	     it's the tutorial target to draw attention to the cell to tap. -->
-	{#if !isLoading && color === null}
+	<!-- Stable non-loading surface: keep one layer mounted so fill changes can
+	     animate instead of swapping whole colored circles. -->
+	{#if !isLoading}
 		<div
-			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
-				{isTutorialTarget ? 'animate-tutorial-float' : 'animate-empty-breathe'}"
+			class="absolute inset-0 rounded-full pointer-events-none cell-surface cell-fill
+				{color === null
+				? isTutorialTarget
+					? 'animate-tutorial-float'
+					: 'animate-empty-breathe'
+				: ''}"
 		></div>
 	{/if}
 
@@ -145,7 +317,7 @@
 	<!-- Loading state: animated red cell -->
 	{#if isLoading && (color === "red" || color === null)}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
+			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none cell-surface"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
@@ -153,30 +325,13 @@
 	<!-- Loading state: animated blue cell -->
 	{#if isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
+			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none cell-surface"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
 
-	<!-- Non-loading: filled red -->
-	{#if !isLoading && color === "red"}
-		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
-			class:opacity-0={isLoading}
-		></div>
-	{/if}
-
-	<!-- Non-loading: filled blue -->
-	{#if !isLoading && color === "blue"}
-		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
-			class:opacity-0={isLoading}
-		></div>
-	{/if}
+	<div class="absolute inset-0 rounded-full pointer-events-none cell-glass"></div>
+	<div class="absolute inset-0 rounded-full pointer-events-none cell-rim"></div>
 
 	<!-- Number overlay -->
 	{#if number !== null}
@@ -195,6 +350,93 @@
 </div>
 
 <style>
+	.cell-button {
+		isolation: isolate;
+		overflow: visible;
+		transform: translateY(var(--cell-lift)) scale(var(--cell-scale))
+			translateZ(0);
+		transform-origin: center;
+		will-change: transform, filter;
+		filter: drop-shadow(
+			0 var(--cell-shadow-y) var(--cell-shadow-blur)
+				rgba(0, 0, 0, var(--cell-shadow-alpha))
+		);
+	}
+
+	.cell-button.is-pressing {
+		z-index: 20;
+	}
+
+	.cell-button.is-releasing {
+		z-index: 20;
+	}
+
+	.cell-depth {
+		z-index: 0;
+		box-shadow:
+			0 5px 7px rgba(0, 0, 0, 0.2),
+			0 1px 1px rgba(255, 255, 255, 0.08),
+			inset 0 1px 1px rgba(255, 255, 255, 0.18),
+			inset 0 -2px 3px rgba(0, 0, 0, 0.16);
+	}
+
+	.cell-button.is-active .cell-depth {
+		box-shadow:
+			0 15px 24px rgba(0, 0, 0, 0.32),
+			0 4px 7px rgba(255, 255, 255, 0.1),
+			inset 0 1px 2px rgba(255, 255, 255, 0.22),
+			inset 0 -3px 6px rgba(0, 0, 0, 0.18);
+	}
+
+	.cell-surface {
+		z-index: 1;
+		box-shadow:
+			inset 0 1px 1.5px rgba(255, 255, 255, 0.12),
+			inset 0 -2px 3px rgba(0, 0, 0, 0.12);
+		transform: scaleX(var(--cell-surface-scale-x))
+			scaleY(var(--cell-surface-scale-y))
+			translate(var(--cell-drift-x), var(--cell-drift-y));
+		transform-origin: center;
+		will-change: transform, filter;
+	}
+
+	.cell-fill {
+		background-color: var(--cell-fill);
+		filter: blur(var(--cell-fill-blur));
+		transition:
+			background-color 360ms cubic-bezier(0.2, 0.8, 0.2, 1),
+			filter 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+
+	.cell-glass {
+		z-index: 3;
+		opacity: var(--cell-glass-opacity);
+		background:
+			radial-gradient(
+				circle at var(--cell-press-x) var(--cell-press-y),
+				rgba(255, 255, 255, 0.2),
+				rgba(255, 255, 255, 0.06) 21%,
+				transparent 42%
+			),
+			linear-gradient(
+				150deg,
+				rgba(255, 255, 255, 0.12) 0%,
+				rgba(255, 255, 255, 0.04) 26%,
+				transparent 52%,
+				rgba(0, 0, 0, 0.08) 100%
+			);
+		transform: translateY(var(--cell-glass-lift))
+			scale(var(--cell-glass-scale));
+	}
+
+	.cell-rim {
+		z-index: 4;
+		box-shadow:
+			inset 0 0 0 0.75px rgba(255, 255, 255, var(--cell-rim-alpha)),
+			inset 0 1px 0.5px rgba(255, 255, 255, var(--cell-rim-highlight)),
+			inset 0 -1px 0.5px rgba(0, 0, 0, var(--cell-rim-shadow));
+	}
+
 	@keyframes loadingRedBlue {
 		0%,
 		100% {
@@ -241,33 +483,40 @@
 
 	@keyframes liquidRelease {
 		0% {
-			opacity: 0.45;
-			transform: scale(0.72);
+			opacity: 0.28;
+			transform: scale(0.82);
 			box-shadow:
-				inset 0 0 0 8px rgba(255, 255, 255, 0.28),
-				0 0 0 0 rgba(255, 255, 255, 0.16);
-			filter: blur(2px);
+				inset 0 0 0 3px rgba(255, 255, 255, 0.16),
+				0 0 0 0 rgba(255, 255, 255, 0.08);
+			filter: blur(1px);
 		}
-		55% {
-			opacity: 0.25;
-			transform: scale(1.08);
+		48% {
+			opacity: 0.2;
+			transform: scale(1.03);
 			box-shadow:
-				inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-				0 8px 26px rgba(255, 255, 255, 0.12);
-			filter: blur(5px);
+				inset 0 0 0 0.75px rgba(255, 255, 255, 0.14),
+				0 6px 18px rgba(255, 255, 255, 0.07);
+			filter: blur(4px);
 		}
 		100% {
 			opacity: 0;
-			transform: scale(1.28);
+			transform: scale(1.16);
 			box-shadow:
 				inset 0 0 0 0 rgba(255, 255, 255, 0),
 				0 0 0 0 rgba(255, 255, 255, 0);
-			filter: blur(8px);
+			filter: blur(7px);
 		}
 	}
 
 	.animate-liquid-release {
-		animation: liquidRelease 520ms cubic-bezier(0.2, 0.9, 0.2, 1);
+		z-index: 5;
+		animation: liquidRelease 620ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.animate-liquid-release {
+			animation: none;
+		}
 	}
 
 	/* Floating water-like animation for tutorial target cell.
