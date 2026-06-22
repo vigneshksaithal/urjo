@@ -11,7 +11,7 @@
 		hasError?: boolean;
 		gridSize?: number;
 		isHint?: boolean;
-		hintColor?: "blue" | "red";
+		hintColor?: "blue" | "red" | undefined;
 		isTutorialTarget?: boolean;
 		onChange: (color: CellColor) => void;
 	};
@@ -90,12 +90,11 @@
 	role={locked ? undefined : "button"}
 	tabindex={locked ? undefined : 0}
 	class="
-		relative w-full aspect-square rounded-full
+		cell-button relative w-full aspect-square rounded-full
 		flex items-center justify-center
-		touch-none select-none
-		transition-[transform,filter] duration-300 ease-[cubic-bezier(0.2,0.9,0.2,1.25)]
-		{locked ? 'cursor-default' : 'cursor-pointer hover:scale-[1.018]'}
-		{isPressed ? 'scale-[0.91] saturate-125' : ''}
+		touch-none select-none isolate
+		{locked ? 'cell-button-locked cursor-default' : 'cursor-pointer'}
+		{isPressed ? 'cell-button-pressed z-20' : ''}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
 >
@@ -110,7 +109,7 @@
 	<!-- Loading state: animated empty cell with diagonal split -->
 	{#if isLoading && color === null}
 		<div
-			class="absolute inset-0 overflow-hidden rounded-full pointer-events-none"
+			class="cell-surface absolute inset-0 overflow-hidden rounded-full pointer-events-none"
 		>
 			<div
 				class="absolute inset-0 bg-[#E54E3E] animate-loading-red"
@@ -127,7 +126,7 @@
 	     it's the tutorial target to draw attention to the cell to tap. -->
 	{#if !isLoading && color === null}
 		<div
-			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
+			class="cell-surface absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
 				{isTutorialTarget ? 'animate-tutorial-float' : 'animate-empty-breathe'}"
 		></div>
 	{/if}
@@ -135,7 +134,7 @@
 	<!-- Idle hint: bright pulsating hint color overlay on one correct empty cell -->
 	{#if !isLoading && color === null && isHint && hintColor}
 		<div
-			class="absolute inset-0 rounded-full pointer-events-none animate-hint-pulse
+			class="cell-surface absolute inset-0 rounded-full pointer-events-none animate-hint-pulse
 				{hintColor === 'blue'
 				? 'bg-urjo-blue ring-4 ring-urjo-blue/60'
 				: 'bg-urjo-coral ring-4 ring-urjo-coral/60'}"
@@ -145,7 +144,7 @@
 	<!-- Loading state: animated red cell -->
 	{#if isLoading && (color === "red" || color === null)}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
+			class="cell-surface absolute inset-0 bg-[#E54E3E] rounded-full animate-loading-blue pointer-events-none"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
@@ -153,7 +152,7 @@
 	<!-- Loading state: animated blue cell -->
 	{#if isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
+			class="cell-surface absolute inset-0 bg-[#3997D7] rounded-full animate-loading-red pointer-events-none"
 			style="animation-delay: {animationDelay}"
 		></div>
 	{/if}
@@ -161,9 +160,7 @@
 	<!-- Non-loading: filled red -->
 	{#if !isLoading && color === "red"}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
+			class="cell-surface absolute inset-0 bg-[#E54E3E] rounded-full pointer-events-none"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -171,9 +168,7 @@
 	<!-- Non-loading: filled blue -->
 	{#if !isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
+			class="cell-surface absolute inset-0 bg-[#3997D7] rounded-full pointer-events-none"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -193,118 +188,3 @@
 		</span>
 	{/if}
 </div>
-
-<style>
-	@keyframes loadingRedBlue {
-		0%,
-		100% {
-			background-color: #e54e3e;
-		}
-		50% {
-			background-color: #3997d7;
-		}
-	}
-
-	@keyframes loadingBlueRed {
-		0%,
-		100% {
-			background-color: #3997d7;
-		}
-		50% {
-			background-color: #e54e3e;
-		}
-	}
-
-	.animate-loading-red {
-		animation: loadingRedBlue 600ms ease-in-out infinite;
-	}
-
-	.animate-loading-blue {
-		animation: loadingBlueRed 600ms ease-in-out infinite;
-	}
-
-	@keyframes hintPulse {
-		0%,
-		100% {
-			opacity: 0.5;
-			transform: scale(0.88);
-		}
-		50% {
-			opacity: 1;
-			transform: scale(1.05);
-		}
-	}
-
-	.animate-hint-pulse {
-		animation: hintPulse 1s ease-in-out infinite;
-	}
-
-	@keyframes liquidRelease {
-		0% {
-			opacity: 0.45;
-			transform: scale(0.72);
-			box-shadow:
-				inset 0 0 0 8px rgba(255, 255, 255, 0.28),
-				0 0 0 0 rgba(255, 255, 255, 0.16);
-			filter: blur(2px);
-		}
-		55% {
-			opacity: 0.25;
-			transform: scale(1.08);
-			box-shadow:
-				inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-				0 8px 26px rgba(255, 255, 255, 0.12);
-			filter: blur(5px);
-		}
-		100% {
-			opacity: 0;
-			transform: scale(1.28);
-			box-shadow:
-				inset 0 0 0 0 rgba(255, 255, 255, 0),
-				0 0 0 0 rgba(255, 255, 255, 0);
-			filter: blur(8px);
-		}
-	}
-
-	.animate-liquid-release {
-		animation: liquidRelease 520ms cubic-bezier(0.2, 0.9, 0.2, 1);
-	}
-
-	/* Floating water-like animation for tutorial target cell.
-	   Uses --color-urjo-blue for the tint to stay consistent with theme. */
-	@keyframes tutorialFloat {
-		0%,
-		100% {
-			transform: translateY(0) scale(1);
-			background-color: var(--color-theme-empty-cell);
-		}
-		25% {
-			transform: translateY(-3px) scale(1.03);
-			background-color: color-mix(
-				in srgb,
-				var(--color-theme-empty-cell) 90%,
-				var(--color-urjo-blue) 10%
-			);
-		}
-		50% {
-			transform: translateY(0) scale(1);
-			background-color: color-mix(
-				in srgb,
-				var(--color-theme-empty-cell) 80%,
-				var(--color-urjo-blue) 20%
-			);
-		}
-		75% {
-			transform: translateY(3px) scale(1.03);
-			background-color: color-mix(
-				in srgb,
-				var(--color-theme-empty-cell) 90%,
-				var(--color-urjo-blue) 10%
-			);
-		}
-	}
-
-	.animate-tutorial-float {
-		animation: tutorialFloat 2s ease-in-out infinite;
-	}
-</style>
