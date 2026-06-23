@@ -29,14 +29,14 @@ const testDefaults = createDevvitTest({ subredditId: 't5_newsub' })
 testDefaults('getSubredditConfig creates defaults for new subreddit', async () => {
     const config = await withCtx(() => getSubredditConfig('t5_newsub'))
 
-    expect(config.postFrequency).toBe('twice_daily')
+    expect(config.postFrequency).toBe('once_daily')
     expect(config.defaultGridSize).toBe(4)
     expect(config.brandingEmoji).toBe('🧩')
     expect(config.welcomeMessage).toBe('Welcome to Urjo!')
 
     // Verify defaults were persisted to Redis
     const stored = await redis.hGetAll('subreddit:t5_newsub:config')
-    expect(stored['postFrequency']).toBe('twice_daily')
+    expect(stored['postFrequency']).toBe('once_daily')
     expect(stored['defaultGridSize']).toBe('4')
 })
 
@@ -100,7 +100,7 @@ testInvalidFreq('updateSubredditConfig ignores invalid postFrequency', async () 
     }))
 
     // Should keep the default since the update value is invalid
-    expect(updated.postFrequency).toBe('twice_daily')
+    expect(updated.postFrequency).toBe('once_daily')
 })
 
 // ─── updateSubredditConfig: validates invalid grid size ───────────────────────

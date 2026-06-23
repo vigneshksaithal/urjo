@@ -41,7 +41,7 @@ test('onAppInstall creates default subreddit config', async () => {
 
     const config = await withCtx(() => redis.hGetAll('subreddit:t5_puzzlefans:config'))
     expect(config).toBeDefined()
-    expect(config['postFrequency']).toBe('twice_daily')
+    expect(config['postFrequency']).toBe('once_daily')
     expect(config['defaultGridSize']).toBe('4')
     expect(config['brandingEmoji']).toBe('🧩')
     expect(config['welcomeMessage']).toBe('Welcome to Urjo!')

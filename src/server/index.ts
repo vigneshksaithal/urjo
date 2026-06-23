@@ -160,9 +160,6 @@ const buildGrowthPostTitle = (
   puzzleNumber: number,
   brandingEmoji: string
 ): string => {
-  if (slot === 'speed_window') {
-    return `${brandingEmoji} Urjo Speed Window #${puzzleNumber} - set the fastest solve`
-  }
   if (slot === 'evening_puzzle') {
     return `${brandingEmoji} Urjo Evening Puzzle #${puzzleNumber} - unwind with a board`
   }

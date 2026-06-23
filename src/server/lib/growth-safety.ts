@@ -9,13 +9,12 @@ import { redis } from '@devvit/web/server'
 
 import type { PostFrequency } from '../../shared/growth-types'
 
-export type GrowthPostSlot = 'speed_window' | 'daily_puzzle' | 'evening_puzzle'
+export type GrowthPostSlot = 'daily_puzzle' | 'evening_puzzle'
 
 const DAILY_SLOT_TTL_SECONDS = 48 * 3600
 
 export const getGrowthPostSlot = (date: Date): GrowthPostSlot => {
     const hour = date.getUTCHours()
-    if (hour === 8) return 'speed_window'
     if (hour === 23) return 'evening_puzzle'
     return 'daily_puzzle'
 }
@@ -26,7 +25,7 @@ export const isGrowthPostSlotEnabled = (
 ): boolean => {
     if (slot === 'daily_puzzle') return true
     if (frequency === 'thrice_daily') return true
-    return frequency === 'twice_daily' && slot === 'speed_window'
+    return false
 }
 
 export const claimGrowthPostSlot = async (

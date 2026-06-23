@@ -9,16 +9,14 @@ import {
 
 describe('growth post slots', () => {
     it('maps UTC hours to deterministic r/urjo growth slots', () => {
-        expect(getGrowthPostSlot(new Date('2026-06-02T08:00:00Z'))).toBe('speed_window')
+        expect(getGrowthPostSlot(new Date('2026-06-02T08:00:00Z'))).toBe('daily_puzzle')
         expect(getGrowthPostSlot(new Date('2026-06-02T16:00:00Z'))).toBe('daily_puzzle')
         expect(getGrowthPostSlot(new Date('2026-06-02T23:00:00Z'))).toBe('evening_puzzle')
     })
 
     it('enables slots according to configured post frequency', () => {
         expect(isGrowthPostSlotEnabled('once_daily', 'daily_puzzle')).toBe(true)
-        expect(isGrowthPostSlotEnabled('once_daily', 'speed_window')).toBe(false)
-        expect(isGrowthPostSlotEnabled('twice_daily', 'speed_window')).toBe(true)
-        expect(isGrowthPostSlotEnabled('twice_daily', 'evening_puzzle')).toBe(false)
+        expect(isGrowthPostSlotEnabled('once_daily', 'evening_puzzle')).toBe(false)
         expect(isGrowthPostSlotEnabled('thrice_daily', 'evening_puzzle')).toBe(true)
     })
 })

@@ -45,7 +45,7 @@
     "tasks": {
       "daily-puzzle": {
         "endpoint": "/internal/scheduler/daily-puzzle",
-        "cron": "0 8,16,23 * * *"
+        "cron": "0 16,23 * * *"
       },
       "drift-check": {
         "endpoint": "/internal/scheduler/drift-check",

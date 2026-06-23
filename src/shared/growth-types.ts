@@ -212,8 +212,13 @@ export type SeasonRecap = {
 
 // ─── Subreddit Config ──────────────────────────────────────────────────────────
 
-/** How often puzzle posts are created */
-export type PostFrequency = 'once_daily' | 'twice_daily' | 'thrice_daily'
+/**
+ * How often puzzle posts are created.
+ * Note: 'twice_daily' was intentionally removed — it mapped to the speed_window
+ * slot (08:00 UTC) which no longer exists. The gap from once → thrice is deliberate.
+ * Do not re-add 'twice_daily' without re-introducing a matching scheduler slot.
+ */
+export type PostFrequency = 'once_daily' | 'thrice_daily'
 
 /** Per-subreddit configuration stored in Redis */
 export type SubredditConfig = {

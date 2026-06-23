@@ -14,12 +14,12 @@ const INSTALLATION_KEY = (subredditId: string): string =>
 
 const INSTALLATIONS_SET = 'installations:all'
 
-const VALID_FREQUENCIES: readonly PostFrequency[] = ['once_daily', 'twice_daily', 'thrice_daily'] as const
+const VALID_FREQUENCIES: readonly PostFrequency[] = ['once_daily', 'thrice_daily'] as const
 const VALID_GRID_SIZES = [4, 6, 8] as const
 
 /** Default config for new subreddits */
 const DEFAULT_CONFIG: SubredditConfig = {
-    postFrequency: 'twice_daily',
+    postFrequency: 'once_daily',
     defaultGridSize: 4,
     brandingEmoji: '🧩',
     welcomeMessage: 'Welcome to Urjo!',
@@ -38,16 +38,27 @@ const serializeConfig = (config: SubredditConfig): Record<string, string> => ({
 /**
  * Parse a Redis hash record into a SubredditConfig.
  * Falls back to defaults for missing or invalid fields.
+ * Coerces the legacy 'twice_daily' value to 'once_daily' in-place.
  */
 const parseConfig = (data: Record<string, string>): SubredditConfig => {
     const frequency = data['postFrequency']
     const gridSizeStr = data['defaultGridSize']
     const gridSize = gridSizeStr !== undefined ? parseInt(gridSizeStr, 10) : NaN
 
+    let resolvedFrequency: PostFrequency
+    if (frequency !== undefined && (VALID_FREQUENCIES as readonly string[]).includes(frequency)) {
+        resolvedFrequency = frequency as PostFrequency
+    } else {
+        if (frequency !== undefined) {
+            // Legacy value in Redis (e.g. 'twice_daily') — coerce to default.
+            // getSubredditConfig will write the corrected value back on next read.
+            console.warn(`[subreddit-config] unrecognized postFrequency "${frequency}", coercing to "${DEFAULT_CONFIG.postFrequency}"`)
+        }
+        resolvedFrequency = DEFAULT_CONFIG.postFrequency
+    }
+
     return {
-        postFrequency: frequency !== undefined && (VALID_FREQUENCIES as readonly string[]).includes(frequency)
-            ? frequency as PostFrequency
-            : DEFAULT_CONFIG.postFrequency,
+        postFrequency: resolvedFrequency,
         defaultGridSize: VALID_GRID_SIZES.includes(gridSize as 4 | 6 | 8)
             ? (gridSize as 4 | 6 | 8)
             : DEFAULT_CONFIG.defaultGridSize,
@@ -58,6 +69,7 @@ const parseConfig = (data: Record<string, string>): SubredditConfig => {
 
 /**
  * Get subreddit config, creating defaults if none exists.
+ * Writes back the config if a legacy value was coerced during parsing.
  */
 export const getSubredditConfig = async (subredditId: string): Promise<SubredditConfig> => {
     const data = await redis.hGetAll(CONFIG_KEY(subredditId))
@@ -68,7 +80,14 @@ export const getSubredditConfig = async (subredditId: string): Promise<Subreddit
         return { ...DEFAULT_CONFIG }
     }
 
-    return parseConfig(data)
+    const config = parseConfig(data)
+
+    // Write back if a legacy frequency was coerced (e.g. 'twice_daily' → 'once_daily')
+    if (data['postFrequency'] !== config.postFrequency) {
+        await redis.hSet(CONFIG_KEY(subredditId), { postFrequency: config.postFrequency })
+    }
+
+    return config
 }
 
 /**
