@@ -16,8 +16,6 @@
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 
-	import SeasonLeaderboard from "../components/SeasonLeaderboard.svelte";
-	import SeasonStrip from "../components/SeasonStrip.svelte";
 	import TutorialView from "../views/TutorialView.svelte";
 	import ModPreviewPanel from "../components/ModPreviewPanel.svelte";
 	import ConfirmDialog from "../components/ConfirmDialog.svelte";
@@ -138,14 +136,10 @@
 		puzzleColors,
 		skillLevel = 1,
 		puzzleNumber = 0,
-		seasonRank = null,
-		seasonPoints = 0,
-		currentSeason,
 		notifyOptIn = false,
 		postId,
 		challengePromptEligible = false,
 		weekendEvent = undefined,
-		seasonProgress = undefined,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
 		hintsDismissed: _hintsDismissed = {
 			numberConstraint: false,
@@ -163,7 +157,6 @@
 	let commentingVictory = $state(false);
 	let hasCommentedVictory = $state(false);
 	let dismissedMilestoneKey = $state<string | null>(null);
-	let showSeasonLeaderboard = $state(false);
 	let showOptInTutorial = $state(false);
 	let showAchievements = $state(false);
 	// Personal challenge banner - dismissed when user clicks X
@@ -446,18 +439,6 @@
 		<CoinDisplay {coins} streak={streakData.currentStreak} />
 	{/if}
 
-	<!-- Always-on progression strip — Subway Surfers / CoC home-screen
-	     pattern. Surfaces streak calendar and season standing so meta-progression
-	     is never hidden in modals. Only on the in-game view (hidden during
-	     completion overlay & challenge posts to avoid clutter). -->
-	{#if !isCompleted && !isChallenge && loginGate.showSeason && currentSeason?.isActive}
-		<SeasonStrip
-			{currentSeason}
-			{seasonProgress}
-			onOpenSeason={() => (showSeasonLeaderboard = true)}
-		/>
-	{/if}
-
 	<!-- Logged-out sign-in banner — sits where the progression strip would be
 	     for signed-in users. Pairs the prompt with a clear value proposition
 	     (save progress + unlock) per Reddit's logged-out guidance. Triggered
@@ -619,12 +600,6 @@
 		onDismiss={dismissMilestone}
 	/>
 {/if}
-
-<!-- Season leaderboard modal -->
-<SeasonLeaderboard
-	isOpen={showSeasonLeaderboard}
-	onClose={() => (showSeasonLeaderboard = false)}
-/>
 
 <!-- Opt-in tutorial overlay -->
 {#if showOptInTutorial}

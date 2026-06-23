@@ -55,7 +55,6 @@ describe("GameView.svelte - Bug Condition: showAchievements state variable", () 
 			"showLeaderboard",
 			"showSettings",
 			"showModPreview",
-			"showSeasonLeaderboard",
 		];
 
 		for (const varName of otherModalStates) {
@@ -96,11 +95,6 @@ describe("GameView.svelte - Preservation: Existing modal state behavior", () => 
 		expect(pattern.test(gameViewSource)).toBe(true);
 	});
 
-	it("declares showSeasonLeaderboard state variable with correct pattern", () => {
-		const pattern = /let\s+showSeasonLeaderboard\s*=\s*\$state\s*\(\s*false\s*\)/;
-		expect(pattern.test(gameViewSource)).toBe(true);
-	});
-
 	it("uses showLeaderboard in LeaderboardModal component", () => {
 		const pattern = /isOpen=\{showLeaderboard\}/;
 		expect(pattern.test(gameViewSource)).toBe(true);
@@ -117,9 +111,9 @@ describe("GameView.svelte - Preservation: Existing modal state behavior", () => 
 		expect(pattern.test(gameViewSource)).toBe(true);
 	});
 
-	it("uses showSeasonLeaderboard in SeasonLeaderboard component", () => {
-		const pattern = /isOpen=\{showSeasonLeaderboard\}/;
-		expect(pattern.test(gameViewSource)).toBe(true);
+	it("does not render the season strip banner", () => {
+		expect(gameViewSource).not.toContain("SeasonStrip");
+		expect(gameViewSource).not.toContain("showSeasonLeaderboard");
 	});
 
 	it("has close handler for showLeaderboard that sets it to false", () => {
@@ -132,8 +126,4 @@ describe("GameView.svelte - Preservation: Existing modal state behavior", () => 
 		expect(pattern.test(gameViewSource)).toBe(true);
 	});
 
-	it("has close handler for showSeasonLeaderboard that sets it to false", () => {
-		const pattern = /onClose=\{\(\)\s*=>\s*\(showSeasonLeaderboard\s*=\s*false\)\}/;
-		expect(pattern.test(gameViewSource)).toBe(true);
-	});
 });
