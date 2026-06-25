@@ -9,6 +9,37 @@ import type { GridSize } from '../../shared/constants'
 import type { GameRecord } from '../../shared/types'
 
 /**
+ * Parse a value read from Redis into an integer, returning a fallback when the
+ * value is missing or not a valid number. Avoids leaking NaN into responses
+ * when a cached counter is absent or malformed.
+ */
+export const safeParseInt = (value: string | null | undefined, fallback: number): number => {
+	if (value === null || value === undefined) return fallback
+	const parsed = parseInt(value, 10)
+	return Number.isNaN(parsed) ? fallback : parsed
+}
+
+/**
+ * Count how many members of a sorted set have a score strictly greater than
+ * `playerScore`. Used to derive a "higher is better" rank without assuming
+ * integer scores: it fetches the [playerScore, +∞] slice and filters out ties
+ * and the player themselves, so it stays correct even if scores become
+ * fractional.
+ */
+export const countPlayersAbove = async (key: string, playerScore: number): Promise<number> => {
+	const atOrAbove = await redis.zRange(key, playerScore, Number.MAX_SAFE_INTEGER, { by: 'score' })
+	return atOrAbove.filter((entry) => entry.score > playerScore).length
+}
+
+/**
+ * Generate an opaque, single-use identifier for a freshly issued puzzle. Stored
+ * with the per-user puzzle so completion can be credited exactly once per
+ * issued puzzle (a "run again" puzzle gets a new id and is credited again).
+ */
+export const makeInstanceId = (): string =>
+	`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+
+/**
  * Get today's date in UTC as YYYY-MM-DD.
  */
 export const getTodayUTC = (): string =>

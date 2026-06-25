@@ -265,7 +265,7 @@ test('mention step only runs at 16:00 UTC — skipped at other hours', async () 
     vi.useRealTimers()
 })
 
-test('mention step posts comment for opted-in user who completed yesterday at 16:00 UTC', async () => {
+test('mention step does not post public mention comments at 16:00 UTC', async () => {
     // Mock time to 16:00 UTC
     const mentionHour = new Date('2025-06-02T16:00:00Z')
     vi.useFakeTimers()
@@ -290,17 +290,12 @@ test('mention step posts comment for opted-in user who completed yesterday at 16
 
     await withCtx(() => schedulerRequest())
 
-    // Find the mention comment call
     const mentionCall = vi.mocked(reddit.submitComment).mock.calls.find((call) => {
         const arg = call[0] as { text: string }
         return arg.text.includes('u/mentionuser2') && arg.text.includes('streak')
     })
 
-    expect(mentionCall).toBeDefined()
-    const text = (mentionCall![0] as { text: string }).text
-    expect(text).toContain('u/mentionuser2')
-    expect(text).toContain('streak')
-    expect(text).toContain('https://reddit.com/comments/')
+    expect(mentionCall).toBeUndefined()
 
     vi.useRealTimers()
 })
@@ -399,12 +394,12 @@ test('user not in yesterday completers is not mentioned', async () => {
     vi.useRealTimers()
 })
 
-test('comment failure for one user does not block remaining users', async () => {
+test('scheduler ignores opted-in mention batches without posting public user mentions', async () => {
     const mentionHour = new Date('2025-06-06T16:00:00Z')
     vi.useFakeTimers()
     vi.setSystemTime(mentionHour)
 
-    vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_mention_fail1' } as never)
+    mockRedditApis('t3_mention_disabled1')
 
     await withCtx(async () => {
         // Two opted-in users who both completed yesterday
@@ -423,17 +418,6 @@ test('comment failure for one user does not block remaining users', async () => 
         await redis.set('user:t2_failuser2:streak:current', '6')
     })
 
-    let callCount = 0
-    vi.spyOn(reddit, 'submitComment').mockImplementation(async (args) => {
-        const arg = args as { text?: string; id: string }
-        // Fail for failuser1's mention comment, succeed for everything else
-        if (arg.text?.includes('u/failuser1') && arg.text?.includes('streak')) {
-            throw new Error('Comment submission failed')
-        }
-        callCount++
-        return { id: `t1_comment${callCount}` } as never
-    })
-
     vi.spyOn(reddit, 'getUserById').mockImplementation(async (id: string) => {
         const names: Record<string, string> = {
             't2_failuser1': 'failuser1',
@@ -442,16 +426,15 @@ test('comment failure for one user does not block remaining users', async () => 
         return { username: names[id] ?? 'Unknown' } as never
     })
 
-    // Scheduler should still return 200 — mention failures are non-blocking
     const res = await withCtx(() => schedulerRequest())
     expect(res.status).toBe(200)
 
-    // failuser2 should still get a mention comment despite failuser1 failing
     const mentionCalls = vi.mocked(reddit.submitComment).mock.calls.filter((call) => {
         const arg = call[0] as { text: string }
-        return arg.text.includes('u/failuser2') && arg.text.includes('streak')
+        return (arg.text.includes('u/failuser1') || arg.text.includes('u/failuser2')) &&
+            arg.text.includes('streak')
     })
-    expect(mentionCalls).toHaveLength(1)
+    expect(mentionCalls).toHaveLength(0)
 
     vi.useRealTimers()
 })
@@ -526,14 +509,11 @@ const testProperty11SchedulerRuns = createDevvitTest({
 })
 
 testProperty11SchedulerRuns(
-    'Property 11 — scheduler running twice at 16:00 UTC posts exactly 1 mention comment per user in batch',
+    'Property 11 — scheduler running twice at 16:00 UTC posts zero public mention comments',
     async () => {
         /**
          * Integration-level verification: seed a fixed batch of opted-in completers,
-         * run the scheduler twice, and assert each user receives exactly 1 mention.
-         *
-         * The dedup invariant is enforced by tryMarkUserMentioned (SET NX): the
-         * second scheduler run finds the dedup key already set and skips posting.
+         * run the scheduler twice, and assert public mention comments are disabled.
          */
         const mentionHour = new Date('2025-07-10T16:00:00Z')
         vi.useFakeTimers()
@@ -578,17 +558,14 @@ testProperty11SchedulerRuns(
             return { id: 't1_prop11comment' } as never
         })
 
-        // First scheduler run — all users in batch should receive a mention
         const res1 = await withCtx(() => schedulerRequest())
         expect(res1.status).toBe(200)
 
-        // Second scheduler run — dedup keys are set; no new mentions should be posted
         const res2 = await withCtx(() => schedulerRequest())
         expect(res2.status).toBe(200)
 
-        // Each user must have received exactly 1 mention comment across both runs
         for (const userId of userIds) {
-            expect(mentionCommentCounts[userId]).toBe(1)
+            expect(mentionCommentCounts[userId]).toBe(0)
         }
 
         vi.useRealTimers()

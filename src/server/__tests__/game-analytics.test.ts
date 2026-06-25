@@ -115,7 +115,7 @@ const testFirstScreen = createDevvitTest({
     postId: 't3_testpost',
 })
 
-testFirstScreen('GET /api/game/state returns firstScreen for new users', async () => {
+testFirstScreen('GET /api/game/state sets isFirstTimeUser for new users', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'new_user' } as never)
 
     const newCtx = { ...CTX, userId: 't2_newuser' }
@@ -125,9 +125,39 @@ testFirstScreen('GET /api/game/state returns firstScreen for new users', async (
     expect(res.status).toBe(200)
 
     const body = await res.json() as Record<string, unknown>
-    expect(body).toHaveProperty('firstScreen')
-    // isFirstTimeUser is still present for client-side awareness
+    // firstScreen was removed — the client uses isFirstTimeUser to decide the view
+    expect(body).not.toHaveProperty('firstScreen')
     expect(body).toHaveProperty('isFirstTimeUser', true)
+
+    vi.restoreAllMocks()
+})
+
+testFirstScreen('GET /api/game/state returns challengerInfo for challenge posts', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'new_user' } as never)
+
+    const newCtx = { ...CTX, userId: 't2_newuser' }
+    await withCtx(newCtx, () => seedPuzzle('t3_testpost'))
+    await withCtx(newCtx, () =>
+        redis.hSet('game:t3_testpost:puzzle', {
+            challengeBy: 't2_challenger',
+            challengeScore: '45',
+            challengeByUsername: 'TipsyBlueWhale',
+            challengeByAvatar: 'https://img/challenger.png',
+        }),
+    )
+
+    const res = await withCtx(newCtx, () => app.request('/api/game/state'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as {
+        challengerInfo?: { username: string; avatarUrl?: string; targetSeconds: number }
+    }
+
+    expect(body.challengerInfo).toStrictEqual({
+        username: 'TipsyBlueWhale',
+        avatarUrl: 'https://img/challenger.png',
+        targetSeconds: 45,
+    })
 
     vi.restoreAllMocks()
 })
@@ -195,7 +225,7 @@ testComplete('POST /api/game/complete increments completion counter and records 
         app.request('/api/game/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeTaken: 30, mistakes: 0 }),
+            body: JSON.stringify({ timeTaken: 30, mistakes: 0, board: 'rrbbrrbbrrbbrrbb' }),
         }),
     )
     expect(res.status).toBe(200)
@@ -540,7 +570,7 @@ testGameStateFields('GET /api/game/state reflects persisted hint dismissal flags
     vi.restoreAllMocks()
 })
 
-testGameStateFields('GET /api/game/state includes firstScreen for new users', async () => {
+testGameStateFields('GET /api/game/state sets isFirstTimeUser for new users', async () => {
     vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'stateuser' } as never)
     await withCtx(STATE_CTX, seedStatePuzzle)
 
@@ -549,7 +579,9 @@ testGameStateFields('GET /api/game/state includes firstScreen for new users', as
     expect(res.status).toBe(200)
 
     const body = await res.json() as Record<string, unknown>
-    expect(body).toHaveProperty('firstScreen')
+    // firstScreen was removed from the response — isFirstTimeUser carries the signal
+    expect(body).not.toHaveProperty('firstScreen')
+    expect(body).toHaveProperty('isFirstTimeUser', true)
 
     vi.restoreAllMocks()
 })

@@ -21,6 +21,9 @@ export type LoggedOutScore = {
     postId: string
     timeTaken: number
     mistakes: number
+    /** Serialized solved board (colors string). Replayed to the server after
+     *  login so it can verify the solve before crediting. */
+    board: string
 }
 
 /** Build the namespaced storage key for a post's logged-out score. */
@@ -86,6 +89,7 @@ const isLoggedOutScore = (value: unknown): value is LoggedOutScore => {
     return (
         typeof obj.postId === 'string' &&
         typeof obj.timeTaken === 'number' &&
-        typeof obj.mistakes === 'number'
+        typeof obj.mistakes === 'number' &&
+        typeof obj.board === 'string'
     )
 }

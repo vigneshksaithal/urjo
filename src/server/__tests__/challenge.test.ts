@@ -24,11 +24,14 @@ const withContext = <T>(postId: string, userId: string, fn: () => Promise<T>): P
         fn
     )
 
-const completeRequest = (body: object = { mistakes: 0 }) =>
+const completeRequest = (body: object = {}) =>
     app.request('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        // All challenge-test puzzles are seeded with solution 'rbrb'. The
+        // server now verifies the submitted board equals the solution, so we
+        // send it here. mistakes defaults to 0 unless a test overrides it.
+        body: JSON.stringify({ mistakes: 0, board: 'rbrb', ...body }),
     })
 
 const challengeRequest = (body: object) =>
@@ -85,6 +88,7 @@ test('updateLeaderboardComment: edits the pinned comment with current stats', as
     expect(editSpy).toHaveBeenCalled()
 
     const editArg: string = (editSpy.mock.calls[0] as [{ text: string }])[0]?.text ?? ''
+    expect(editArg).toContain('Score to beat: 60s')
     expect(editArg).toContain('Attempts:')
     expect(editArg).toContain('Beaten:')
 })
@@ -391,6 +395,29 @@ challengeTest('challenge route: stores postType and leaderboardCommentId in a si
     )
 })
 
+challengeTest('challenge route: puts generic score details in the pinned thread only', async () => {
+    const sourcePostId = 't3_sourcepost_score_thread'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+
+    vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_scorethread' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_score_thread' } as never)
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
+    )
+    expect(res.status).toBe(200)
+
+    expect(reddit.submitComment).toHaveBeenCalledTimes(1)
+    expect(reddit.submitComment).toHaveBeenCalledWith({
+        id: 't3_scorethread',
+        text: expect.stringContaining('Score to beat: 45s with zero mistakes'),
+    })
+})
+
 challengeTest('challenge route: returns comments URL and increments challengesCreated', async () => {
     const sourcePostId = 't3_sourcepost_url'
     await redis.hSet(`game:${sourcePostId}:puzzle`, {
@@ -416,6 +443,68 @@ challengeTest('challenge route: returns comments URL and increments challengesCr
     expect(body.postUrl).toBe('https://reddit.com/comments/newposturl')
     expect(social['challengesCreated']).toBe('1')
     expect(challengePosts).toBe('1')
+})
+
+challengeTest('challenge route: ignores custom titles and uses a safe generated title', async () => {
+    const sourcePostId = 't3_sourcepost_custom_title'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+
+    vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_customtitle' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_custom' } as never)
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({
+            timeTaken: 45,
+            skillLevel: 3,
+            mistakes: 0,
+            customTitle: 'Can you beat my zero-mistake run?',
+        })
+    )
+
+    expect(res.status).toBe(200)
+    expect(reddit.submitCustomPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+            title: expect.not.stringContaining('Can you beat my zero-mistake run?'),
+            userGeneratedContent: {
+                text: expect.not.stringContaining('Can you beat my zero-mistake run?'),
+            },
+        }),
+    )
+})
+
+challengeTest('challenge route: ignores overlong custom titles instead of publishing user text', async () => {
+    const sourcePostId = 't3_sourcepost_long_title'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+
+    const submitSpy = vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_generatedtitle' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_generated' } as never)
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({
+            timeTaken: 45,
+            skillLevel: 3,
+            mistakes: 0,
+            customTitle: 'a'.repeat(121),
+        })
+    )
+
+    expect(res.status).toBe(200)
+    expect(submitSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+            title: expect.not.stringContaining('a'.repeat(121)),
+            userGeneratedContent: {
+                text: expect.not.stringContaining('a'.repeat(121)),
+            },
+        }),
+    )
 })
 
 challengeTest('challenge route: initializes stats with attempts=0 and beats=0', async () => {

@@ -35,11 +35,12 @@ describe('loggedOutScoreKey', () => {
 
 describe('writeLoggedOutScore / readLoggedOutScore', () => {
     it('round-trips a valid score', () => {
-        writeLoggedOutScore({ postId: 't3_a', timeTaken: 42, mistakes: 1 })
+        writeLoggedOutScore({ postId: 't3_a', timeTaken: 42, mistakes: 1, board: 'rbrb' })
         expect(readLoggedOutScore('t3_a')).toEqual({
             postId: 't3_a',
             timeTaken: 42,
             mistakes: 1,
+            board: 'rbrb',
         })
     })
 
@@ -60,10 +61,18 @@ describe('writeLoggedOutScore / readLoggedOutScore', () => {
         expect(readLoggedOutScore('t3_a')).toBeNull()
     })
 
+    it('returns null when the board is missing (untrusted legacy payload)', () => {
+        localStorage.setItem(
+            loggedOutScoreKey('t3_a'),
+            JSON.stringify({ postId: 't3_a', timeTaken: 42, mistakes: 0 }),
+        )
+        expect(readLoggedOutScore('t3_a')).toBeNull()
+    })
+
     it('never throws when localStorage is unavailable', () => {
         vi.stubGlobal('localStorage', undefined)
         expect(() =>
-            writeLoggedOutScore({ postId: 't3_a', timeTaken: 10, mistakes: 0 }),
+            writeLoggedOutScore({ postId: 't3_a', timeTaken: 10, mistakes: 0, board: 'rbrb' }),
         ).not.toThrow()
         expect(readLoggedOutScore('t3_a')).toBeNull()
     })
@@ -71,7 +80,7 @@ describe('writeLoggedOutScore / readLoggedOutScore', () => {
 
 describe('clearLoggedOutScore', () => {
     it('removes a stored score', () => {
-        writeLoggedOutScore({ postId: 't3_a', timeTaken: 42, mistakes: 0 })
+        writeLoggedOutScore({ postId: 't3_a', timeTaken: 42, mistakes: 0, board: 'rbrb' })
         clearLoggedOutScore('t3_a')
         expect(readLoggedOutScore('t3_a')).toBeNull()
     })

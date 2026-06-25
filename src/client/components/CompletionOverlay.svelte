@@ -34,11 +34,24 @@
     /** Called when Challenge button is clicked (optional) */
     onChallenge?: () => void;
 
+    /** Whether a challenge post has already been created this session */
+    hasChallenged?: boolean;
+
+    /** URL of the created challenge post */
+    challengeUrl?: string | null;
+
     /** Personal challenge beat info (if user beat a challenge) */
     personalChallengeBeat?: {
       challengerUsername: string;
       challengerTime: number;
     } | null;
+
+    /** Solved puzzle grid colors string — used to build the emoji share card. */
+    puzzleColors?: string;
+    /** Grid size — required to split puzzleColors into rows. */
+    gridSize?: number;
+    /** Puzzle number — shown in the share card header. */
+    puzzleNumber?: number;
   };
 
   let {
@@ -51,8 +64,47 @@
     hasCommentedVictory = false,
     commentingVictory = false,
     onChallenge,
+    hasChallenged = false,
+    challengeUrl = null,
     personalChallengeBeat = null,
+    puzzleColors = "",
+    gridSize = 4,
+    puzzleNumber = 0,
   }: Props = $props();
+
+  let copied = $state(false);
+
+  function buildShareText(): string {
+    if (!puzzleColors || gridSize < 1) return "";
+    const rows: string[] = [];
+    for (let r = 0; r < gridSize; r++) {
+      let row = "";
+      for (let c = 0; c < gridSize; c++) {
+        const char = puzzleColors[r * gridSize + c];
+        row += char === "r" ? "🟥" : "🟦";
+      }
+      rows.push(row);
+    }
+    const header =
+      puzzleNumber > 0
+        ? `Urjo #${puzzleNumber} — ${timeTaken}s 🏆`
+        : `Urjo — ${timeTaken}s 🏆`;
+    return [header, ...rows].join("\n");
+  }
+
+  async function handleShare(): Promise<void> {
+    const text = buildShareText();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+      setTimeout(() => {
+        copied = false;
+      }, 2000);
+    } catch {
+      // clipboard unavailable in some webview environments — fail silently
+    }
+  }
 </script>
 
 {#if isCompleted}
@@ -91,6 +143,19 @@
 
     <!-- Action buttons -->
     <div class="flex flex-col gap-3 w-full">
+      <!-- Emoji share card — visible when clipboard is likely available -->
+      {#if puzzleColors && gridSize > 0}
+        <button
+          onclick={handleShare}
+          class="w-full px-4 py-3.5 rounded-2xl text-sm font-bold transition-all active:scale-95
+            {copied
+            ? 'bg-green-500/20 border border-green-500/40 text-green-400'
+            : 'border border-theme-border text-theme-text-secondary hover:bg-theme-hover'}"
+        >
+          {copied ? "✓ Copied to clipboard" : "Share Result"}
+        </button>
+      {/if}
+
       {#if onCommentVictory && loginGate.showSocialActions}
         <button
           onclick={onCommentVictory}
@@ -119,9 +184,14 @@
         {#if onChallenge && loginGate.showSocialActions}
           <button
             onclick={onChallenge}
-            class="w-full px-4 py-3.5 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-sm hover:bg-yellow-400 active:scale-95 transition-all"
+            disabled={hasChallenged}
+            class="w-full px-4 py-3.5 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-sm hover:bg-yellow-400 active:scale-95 transition-all disabled:opacity-60 disabled:active:scale-100"
           >
-            Challenge
+            {#if hasChallenged}
+              ✓ Challenge Created
+            {:else}
+              Challenge
+            {/if}
           </button>
         {:else}
           <div aria-hidden="true"></div>

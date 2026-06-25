@@ -60,6 +60,11 @@
 		hasChallenged: boolean;
 		challengeUrl: string | null;
 		challengePromptEligible?: boolean;
+		challengerInfo?: {
+			username: string;
+			avatarUrl?: string;
+			targetSeconds: number;
+		};
 	};
 
 	type EventProps = {
@@ -102,6 +107,11 @@
 		onEngagementDismissed?: () => void;
 	};
 
+	type OnboardingOverlay = {
+		activePlayers: number;
+		targetToBeat?: { seconds: number; username?: string };
+	};
+
 	type Props = GameProps &
 		ProgressionProps &
 		ChallengeProps &
@@ -111,6 +121,9 @@
 		ActionProps & {
 			postId?: string | undefined;
 			personalChallenge?: PersonalChallengeData | null;
+			/** Variant C: show dismissible info overlay on top of the game board. */
+			showOnboardingOverlay?: boolean;
+			onboardingOverlay?: OnboardingOverlay;
 		};
 
 	let {
@@ -147,10 +160,28 @@
 		},
 		solution = "",
 		personalChallenge = null,
+		challengerInfo = undefined,
+		showOnboardingOverlay = false,
+		onboardingOverlay = undefined,
 	}: Props = $props();
 
 	let showLeaderboard = $state(false);
 	let showSettings = $state(false);
+
+	// Variant C: onboarding overlay — auto-dismisses after 3 s.
+	// Also dismissed immediately by App.svelte on the first cell change.
+	let overlayVisible = $state(false);
+	$effect(() => {
+		if (!showOnboardingOverlay) {
+			overlayVisible = false;
+			return;
+		}
+		overlayVisible = true;
+		const timer = setTimeout(() => {
+			overlayVisible = false;
+		}, 3000);
+		return () => clearTimeout(timer);
+	});
 	let showModPreview = $state(false);
 	let showChallengeConfirm = $state(false);
 	let showVictoryCommentConfirm = $state(false);
@@ -495,6 +526,31 @@
 		<!-- Completion overlay — now a bottom sheet rendered outside <main> -->
 	</main>
 
+	<!-- Challenger strip — shown below the board on challenge posts -->
+	{#if isChallenge && challengerInfo && !isCompleted}
+		<div
+			class="flex-none flex items-center justify-center gap-2.5 px-4 py-2"
+		>
+			{#if challengerInfo.avatarUrl}
+				<img
+					src={challengerInfo.avatarUrl}
+					alt={challengerInfo.username}
+					class="w-10 h-10 rounded-full object-cover shrink-0"
+				/>
+			{:else}
+				<div
+					class="w-10 h-10 rounded-full bg-theme-hover flex items-center justify-center shrink-0 text-xl leading-none"
+					aria-hidden="true"
+				>
+					👤
+				</div>
+			{/if}
+			<p class="text-base font-semibold text-theme-text-secondary">
+				Beat {challengerInfo.username}'s {challengerInfo.targetSeconds}s
+			</p>
+		</div>
+	{/if}
+
 	<!-- Footer -->
 	<footer class="flex-none flex items-center justify-between gap-2 px-1">
 		<div class="w-9"></div>
@@ -518,6 +574,38 @@
 	</footer>
 </div>
 
+<!-- Variant C onboarding overlay — pointer-events: none so all game taps pass
+     through unblocked. Auto-dismisses after 3 s; App.svelte also sets
+     showOnboardingOverlay=false on the first cell change. -->
+{#if showOnboardingOverlay && onboardingOverlay && overlayVisible}
+	<div
+		class="pointer-events-none fixed inset-0 z-20 flex items-start justify-center pt-10 transition-opacity duration-300"
+		aria-hidden="true"
+	>
+		<div
+			class="mx-4 flex flex-col items-center gap-0.5 rounded-2xl bg-theme-bg-primary/85 px-5 py-3.5 shadow-lg backdrop-blur-sm"
+		>
+			<p class="text-sm font-bold text-theme-text-primary">
+				{#if puzzleNumber > 0}Puzzle #{puzzleNumber} ·{/if}
+				{#if onboardingOverlay.activePlayers > 0}
+					{onboardingOverlay.activePlayers.toLocaleString()} played today
+				{/if}
+			</p>
+			{#if onboardingOverlay.targetToBeat}
+				<p class="text-xs text-theme-text-muted">
+					Beat {onboardingOverlay.targetToBeat.username ??
+						"the record"}'s {onboardingOverlay.targetToBeat
+						.seconds}s
+				</p>
+			{:else}
+				<p class="text-xs text-theme-text-muted">
+					Tap any cell to start
+				</p>
+			{/if}
+		</div>
+	</div>
+{/if}
+
 <!-- Completion overlay -->
 <CompletionOverlay
 	{isCompleted}
@@ -529,6 +617,11 @@
 	{hasCommentedVictory}
 	{commentingVictory}
 	onChallenge={() => (showChallengeConfirm = true)}
+	{hasChallenged}
+	{challengeUrl}
+	{puzzleColors}
+	{gridSize}
+	{puzzleNumber}
 	personalChallengeBeat={personalChallengeBeat()}
 />
 
@@ -540,7 +633,9 @@
 <ConfirmDialog
 	isOpen={showChallengeConfirm}
 	title="Create Rival Challenge?"
-	message="This creates a public post in r/urjo for others to beat."
+	message="This posts a public challenge to Reddit{username
+		? ` as u/${username}`
+		: ''} using an Urjo-generated title. Others will see it."
 	confirmLabel="Create"
 	onConfirm={confirmChallenge}
 	onCancel={() => (showChallengeConfirm = false)}

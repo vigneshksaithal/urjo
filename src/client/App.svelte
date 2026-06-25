@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { showLoginPrompt, getShareData } from "@devvit/web/client";
+	import {
+		showLoginPrompt,
+		getShareData,
+		showToast,
+	} from "@devvit/web/client";
 	import type {
 		Grid,
 		CellColor,
@@ -9,6 +13,7 @@
 		StreakData,
 		CoinReward,
 		GridSizeResponse,
+		FirstScreenData,
 	} from "../shared/types";
 	import type { EngagementCompletionData } from "../shared/engagement-types";
 	import type { SeasonInfo } from "../shared/growth-types";
@@ -18,7 +23,7 @@
 	import TutorialView from "./views/TutorialView.svelte";
 	import FirstScreen from "./components/FirstScreen.svelte";
 	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
-	import { deserializeGrid } from "./lib/utils";
+	import { deserializeGrid, serializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
 	import {
 		mistakeCount,
@@ -50,7 +55,7 @@
 		dailyFirstSolve: string | null;
 	};
 
-	type View = "game" | "tutorial" | "first-screen" | "error";
+	type View = "game" | "tutorial" | "error" | "first-screen";
 
 	const PLACEHOLDER_COLORS = "brbbrbbrbrbbrbrbbrbbrbbrbrbbrbrbbrbbrbbrbbrb";
 	const PLACEHOLDER_NUMBERS = "----------------";
@@ -124,7 +129,6 @@
 	let puzzleSolution = $state("");
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
 	let puzzleNumber = $state(0);
-	let firstScreen = $state<GameState["firstScreen"] | undefined>(undefined);
 	let currentSeason = $state<SeasonInfo | undefined>(undefined);
 	let isFirstTimeUser = $state(false);
 	let seasonRank = $state<number | null>(null);
@@ -141,6 +145,11 @@
 	});
 	// Personal challenge data from deeplink share (getShareData)
 	let personalChallenge = $state<PersonalChallengeData | null>(null);
+	let challengerInfo = $state<GameState["challengerInfo"]>(undefined);
+	// A/B/C first-screen experiment
+	let abVariant = $state<"A" | "B" | undefined>(undefined);
+	let showVariantCOverlay = $state(false);
+	let firstScreenData = $state<FirstScreenData | undefined>(undefined);
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -214,7 +223,7 @@
 			gridSizePreference = data.gridSizePreference ?? 4;
 			isChallenge = data.isChallenge ?? false;
 			isFirstTimeUser = data.isFirstTimeUser ?? false;
-			firstScreen = data.firstScreen;
+			challengerInfo = data.challengerInfo;
 			puzzleNumber = data.puzzleNumber ?? 0;
 			isMod = data.isMod ?? false;
 
@@ -267,8 +276,37 @@
 			seasonPoints = 0;
 			resetMistakes();
 
-			currentView =
-				isFirstTimeUser && !tutorialCompleted ? "tutorial" : "game";
+			firstScreenData = data.firstScreen;
+			// Challenge posts always go directly to the game — no preview screen.
+			// First-timers see the tutorial. Variant A/B: show first-screen splash.
+			// Variant C: game loads immediately with a dismissible info overlay.
+			if (isChallenge) {
+				currentView = "game";
+				showVariantCOverlay = false;
+			} else if (isFirstTimeUser && !tutorialCompleted) {
+				currentView = "tutorial";
+				showVariantCOverlay = false;
+			} else if (
+				data.variant === "C" &&
+				!(data.hasPlayedToday ?? false) &&
+				data.firstScreen !== undefined
+			) {
+				currentView = "game";
+				showVariantCOverlay = true;
+				abVariant = undefined;
+			} else if (
+				(data.variant === "A" || data.variant === "B") &&
+				!(data.hasPlayedToday ?? false) &&
+				data.firstScreen !== undefined
+			) {
+				currentView = "first-screen";
+				showVariantCOverlay = false;
+				abVariant = data.variant;
+			} else {
+				currentView = "game";
+				showVariantCOverlay = false;
+				abVariant = undefined;
+			}
 
 			// Load economy data (logged-in only — no wallet for anon users)
 			if (isLoggedIn) {
@@ -312,6 +350,7 @@
 				body: JSON.stringify({
 					timeTaken: stashed.timeTaken,
 					mistakes: stashed.mistakes,
+					board: stashed.board,
 				}),
 			});
 			if (response.ok) {
@@ -329,6 +368,8 @@
 	 * Handle cell color change during gameplay (purely client-side).
 	 */
 	function handleCellChange(row: number, col: number, color: CellColor) {
+		// Dismiss Variant C onboarding overlay on the first board interaction.
+		if (showVariantCOverlay) showVariantCOverlay = false;
 		const gridRow = grid[row];
 		if (!gridRow) return;
 		const cell = gridRow[col];
@@ -376,6 +417,10 @@
 		const beatPersonalChallenge =
 			personalChallenge !== null && time < personalChallenge.time;
 
+		// Serialize the solved board so the server can verify the solution
+		// before crediting anything (completion is never taken on trust).
+		const solvedBoard = serializeGrid(grid);
+
 		// Logged-out players: stash the result so it survives the login reload
 		// and can be credited once they sign in. Skip the session-run/economy
 		// round-trip — there's no wallet to credit server-side.
@@ -385,6 +430,7 @@
 					postId,
 					timeTaken: time,
 					mistakes: $mistakeCount,
+					board: solvedBoard,
 				});
 			}
 		}
@@ -404,6 +450,7 @@
 					timeTaken: time,
 					mistakes: $mistakeCount,
 					sessionRun: newSessionRun,
+					board: solvedBoard,
 					// Include personal challenge beat info for bonus reward
 					...(beatPersonalChallenge && personalChallenge
 						? {
@@ -517,15 +564,20 @@
 					mistakes: $mistakeCount,
 				}),
 			});
-			if (response.ok) {
-				const data = await response.json();
-				if (data.success) {
-					hasChallenged = true;
-					challengeUrl = data.postUrl ?? null;
-				}
+			const data = await response.json();
+			if (response.ok && data.success) {
+				hasChallenged = true;
+				challengeUrl = data.postUrl ?? null;
+				showToast("Challenge post created!");
+			} else {
+				const reason: string =
+					typeof data?.error === "string"
+						? data.error
+						: "Failed to create challenge";
+				showToast(reason);
 			}
 		} catch {
-			// Non-critical
+			showToast("Could not create challenge — check your connection");
 		}
 	}
 
@@ -653,24 +705,16 @@
 		}
 
 		tutorialCompleted = true;
-		// Req 7.1: always go to GameView after tutorial — no FirstScreen gate.
 		currentView = "game";
 	}
 
 	/**
-	 * Handle first-screen "Play" CTA — transition directly to the puzzle.
+	 * Handle "Play" / "Beat Xs" tap on the first screen (Variants A and B).
+	 * Fires the screen-tap analytics event then transitions to the game.
 	 */
-	async function handleFirstScreenPlay() {
-		void fireOnce(postId ?? "", "play");
-		try {
-			await fetch("/api/game/tutorial-complete", { method: "POST" });
-		} catch {
-			// Non-critical — the first-screen state is local for this session.
-		}
-		tutorialCompleted = true;
-		isFirstTimeUser = false;
+	function handleFirstScreenPlay(): void {
+		fetch("/api/game/first-screen-tap", { method: "POST" }).catch(() => {});
 		currentView = "game";
-		startTime = Date.now();
 	}
 </script>
 
@@ -696,16 +740,24 @@
 			isReplay={tutorialCompleted}
 		/>
 	{:else if currentView === "first-screen"}
-		{#if firstScreen}
-			<FirstScreen
-				puzzle={firstScreen.samplePuzzle}
-				instruction={firstScreen.instruction}
-				targetToBeat={firstScreen.targetToBeat}
-				{puzzleNumber}
-				communityStats={firstScreen.communityStats}
-				onPlay={handleFirstScreenPlay}
-			/>
-		{/if}
+		<FirstScreen
+			puzzle={firstScreenData?.samplePuzzle ?? {
+				colors: puzzleColors,
+				numbers: puzzleNumbers,
+				solution: puzzleSolution,
+				difficulty: "easy",
+				gridSize,
+			}}
+			{puzzleNumber}
+			communityStats={firstScreenData?.communityStats ?? {
+				activePlayers: 0,
+				collectiveStreakDays: 0,
+			}}
+			targetToBeat={firstScreenData?.targetToBeat}
+			variant={abVariant ?? "A"}
+			currentStreak={streakData.currentStreak}
+			onPlay={handleFirstScreenPlay}
+		/>
 	{:else if currentView === "game"}
 		{@const gameProps = {
 			grid,
@@ -745,14 +797,22 @@
 			weekendBonusCoins,
 			seasonProgress,
 			personalChallenge,
+			...(challengerInfo !== undefined && { challengerInfo }),
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
+			showOnboardingOverlay: showVariantCOverlay,
+			...(showVariantCOverlay &&
+				firstScreenData !== undefined && {
+					onboardingOverlay: {
+						activePlayers:
+							firstScreenData.communityStats.activePlayers,
+						...(firstScreenData.targetToBeat !== undefined && {
+							targetToBeat: firstScreenData.targetToBeat,
+						}),
+					},
+				}),
 		}}
-		{#if coinReward}
-			<GameView {...gameProps} />
-		{:else}
-			<GameView {...gameProps} />
-		{/if}
+		<GameView {...gameProps} />
 	{/if}
 </div>
 

@@ -23,7 +23,7 @@ import {
 	getUserDisplay,
 	getUserStreakData,
 } from '../lib/economy'
-import { getSkillLevel } from '../lib/helpers'
+import { getSkillLevel, countPlayersAbove } from '../lib/helpers'
 
 export const economyRouter = new Hono()
 
@@ -122,18 +122,30 @@ economyRouter.post('/api/shop/buy', async (c) => {
 			}
 		}
 
-		// Deduct coins and add title
-		const newCoins = economy.coins - title.cost
-		const newOwnedTitles = [...economy.ownedTitles, titleId]
+		// Deduct coins atomically. hIncrBy is the only safe way to spend — a
+		// read-modify-write (hGetAll → hSet) lets two concurrent buys both pass
+		// the balance check and double-spend, and clobbers concurrent coin
+		// grants from /complete. If the atomic decrement overshoots (a racing
+		// buy got there first), refund and fail.
+		const economyKey = `user:${userId}:economy`
+		const balanceAfter = await redis.hIncrBy(economyKey, 'coins', -title.cost)
+		if (balanceAfter < 0) {
+			await redis.hIncrBy(economyKey, 'coins', title.cost)
+			return c.json({ error: 'Not enough coins' }, 400)
+		}
 
-		await saveUserEconomy(userId, {
-			coins: newCoins,
-			ownedTitles: newOwnedTitles,
-		})
+		// Append the title. Re-read fresh (not the pre-decrement snapshot) so we
+		// don't drop a title another concurrent write just added.
+		const fresh = await getUserEconomy(userId)
+		if (!fresh.ownedTitles.includes(titleId)) {
+			await redis.hSet(economyKey, {
+				ownedTitles: JSON.stringify([...fresh.ownedTitles, titleId]),
+			})
+		}
 
 		const response: BuyTitleResponse = {
 			success: true,
-			newBalance: newCoins,
+			newBalance: balanceAfter,
 		}
 
 		return c.json(response)
@@ -220,26 +232,34 @@ economyRouter.post('/api/shop/buy-streak-freeze', async (c) => {
 	try {
 		const economy = await getUserEconomy(userId)
 
-		// Check if user has enough coins
-		if (economy.coins < STREAK_FREEZE_COST) {
-			return c.json({ error: 'Not enough coins' }, 400)
-		}
-
-		// Check if user already has max freezes
+		// Check if user already has max freezes (fast pre-check; re-checked
+		// atomically below to close the race window).
 		if (economy.streakFreezes >= MAX_STREAK_FREEZES) {
 			return c.json({ error: 'Maximum freezes reached' }, 400)
 		}
 
-		// Deduct coins and add freeze
-		await saveUserEconomy(userId, {
-			coins: economy.coins - STREAK_FREEZE_COST,
-			streakFreezes: economy.streakFreezes + 1,
-		})
+		const economyKey = `user:${userId}:economy`
+
+		// Deduct coins atomically; refund if a concurrent spend beat us to it.
+		const balanceAfter = await redis.hIncrBy(economyKey, 'coins', -STREAK_FREEZE_COST)
+		if (balanceAfter < 0) {
+			await redis.hIncrBy(economyKey, 'coins', STREAK_FREEZE_COST)
+			return c.json({ error: 'Not enough coins' }, 400)
+		}
+
+		// Add the freeze atomically and enforce the cap on the post-increment
+		// value. If two buys race past the pre-check, the loser is rolled back.
+		const freezesAfter = await redis.hIncrBy(economyKey, 'streakFreezes', 1)
+		if (freezesAfter > MAX_STREAK_FREEZES) {
+			await redis.hIncrBy(economyKey, 'streakFreezes', -1)
+			await redis.hIncrBy(economyKey, 'coins', STREAK_FREEZE_COST)
+			return c.json({ error: 'Maximum freezes reached' }, 400)
+		}
 
 		return c.json({
 			success: true,
-			streakFreezes: economy.streakFreezes + 1,
-			newBalance: economy.coins - STREAK_FREEZE_COST,
+			streakFreezes: freezesAfter,
+			newBalance: balanceAfter,
 		})
 	} catch (error) {
 		console.error('Error buying streak freeze:', error)
@@ -279,11 +299,9 @@ economyRouter.get('/api/leaderboard/coins', async (c) => {
 		if (userId) {
 			const userScore = await redis.zScore('leaderboard:coins', userId)
 			if (userScore !== undefined && userScore !== null) {
-				// Count how many users have higher scores
-				const higherCount = await redis.zRange('leaderboard:coins', userScore + 1, Number.MAX_SAFE_INTEGER, {
-					by: 'score',
-				})
-				userRank = higherCount.length + 1
+				// Count how many users have strictly higher scores (robust to
+				// fractional scores and ties).
+				userRank = (await countPlayersAbove('leaderboard:coins', userScore)) + 1
 			}
 		}
 

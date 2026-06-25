@@ -66,7 +66,13 @@ export type GameState = {
 	}
 	notifyOptIn?: boolean
 	hintsDismissed?: { numberConstraint: boolean; adjacencyViolation: boolean }
-	firstScreen?: FirstScreenData
+	/** Challenger info for challenge posts — always present when isChallenge is true.
+	 *  Replaces the firstScreen preview; shown as a strip below the board. */
+	challengerInfo?: {
+		username: string
+		avatarUrl?: string
+		targetSeconds: number
+	}
 	/** Active weekend event payload — present on every state response so the
 	 *  banner has fresh "ends in" data on each (re)open. Inactive events are
 	 *  also returned (active=false) so the client can hide the banner. */
@@ -85,6 +91,16 @@ export type GameState = {
 		rank: number | null
 		score: number
 	}
+	/** First-screen preview data for the onboarding splash. Present for
+	 *  non-challenge posts when the user hasn't played today. */
+	firstScreen?: FirstScreenData
+	/** A/B/C first-screen experiment variant assigned to this session.
+	 *  Absent for logged-out users, challenge posts, and first-time users
+	 *  (who see the tutorial instead). */
+	variant?: 'A' | 'B' | 'C'
+	/** True when the user has already had a first-action on this post today.
+	 *  When true the client skips the first screen and goes straight to game. */
+	hasPlayedToday?: boolean
 }
 
 export type NextChallengeResponse = {
@@ -96,6 +112,10 @@ export type NextChallengeResponse = {
 export type CompleteRequest = {
 	timeTaken: number // seconds
 	mistakes?: number
+	/** The fully-solved board, serialized as the colors string (r/b/.). The
+	 *  server verifies this equals the puzzle's unique solution before
+	 *  awarding anything — completion is never taken on the client's word. */
+	board?: string
 	/** How many puzzles the player has already completed in this session
 	 *  (incl. the one being reported). Used to apply the run-again bonus. */
 	sessionRun?: number

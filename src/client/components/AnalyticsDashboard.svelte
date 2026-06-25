@@ -11,11 +11,27 @@
         onClose: () => void;
     };
 
+    type VariantMetrics = {
+        variant: "A" | "B" | "C";
+        opens: number;
+        screenTaps: number | null;
+        firstActions: number;
+        completions: number;
+        screenTapRate: number | null;
+        firstActionRate: number | null;
+        completionRate: number | null;
+    };
+
     let { isOpen, onClose }: Props = $props();
 
     let metrics = $state<SimpleMetrics[]>([]);
     let loading = $state(false);
     let error = $state<string | null>(null);
+
+    let variantMetrics = $state<VariantMetrics[]>([]);
+    let variantLoading = $state(false);
+    let variantError = $state<string | null>(null);
+    let variantDate = $state<string>("");
 
     // Most recent day with a closed retention window drives the headline tiles.
     let latest = $derived(metrics[metrics.length - 1] ?? null);
@@ -23,6 +39,9 @@
     $effect(() => {
         if (isOpen && metrics.length === 0) {
             void fetchMetrics();
+        }
+        if (isOpen && variantMetrics.length === 0) {
+            void fetchVariantMetrics();
         }
     });
 
@@ -39,6 +58,25 @@
             error = e instanceof Error ? e.message : "Failed to load analytics";
         } finally {
             loading = false;
+        }
+    }
+
+    async function fetchVariantMetrics(): Promise<void> {
+        variantLoading = true;
+        variantError = null;
+        try {
+            const today = new Date().toISOString().split("T")[0]!;
+            variantDate = today;
+            const res = await fetch(`/api/analytics/variants?date=${today}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const json = await res.json();
+            if (json.status === "error") throw new Error(json.message);
+            variantMetrics = json.data as VariantMetrics[];
+        } catch (e) {
+            variantError =
+                e instanceof Error ? e.message : "Failed to load variant data";
+        } finally {
+            variantLoading = false;
         }
     }
 
@@ -258,6 +296,109 @@
                                 {/each}
                             </tbody>
                         </table>
+                    </div>
+
+                    <!-- A/B/C first-screen experiment -->
+                    <div class="mt-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-xs text-theme-text-muted">
+                                A/B/C First-Screen Test · {variantDate}
+                                <span class="ml-1 text-[10px] opacity-60"
+                                    >(primary metric: FA%)</span
+                                >
+                            </p>
+                            <button
+                                class="p-1 rounded hover:bg-theme-bg-hover text-theme-text-muted disabled:opacity-50"
+                                onclick={() => void fetchVariantMetrics()}
+                                disabled={variantLoading}
+                                aria-label="Refresh variant data"
+                            >
+                                <RefreshCw
+                                    class="w-3 h-3 {variantLoading
+                                        ? 'animate-spin'
+                                        : ''}"
+                                />
+                            </button>
+                        </div>
+                        {#if variantError}
+                            <p
+                                class="text-xs text-red-400 px-2 py-1 rounded border border-red-500/30 bg-red-500/10"
+                            >
+                                {variantError}
+                            </p>
+                        {:else if variantLoading && variantMetrics.length === 0}
+                            <div
+                                class="flex items-center gap-1 text-theme-text-muted py-2"
+                            >
+                                <Loader2 class="w-3 h-3 animate-spin" />
+                                <span class="text-xs">Loading…</span>
+                            </div>
+                        {:else}
+                            <div
+                                class="rounded-lg border border-theme-border overflow-hidden"
+                            >
+                                <table class="w-full text-xs">
+                                    <thead>
+                                        <tr
+                                            class="bg-theme-bg-hover text-theme-text-muted"
+                                        >
+                                            <th
+                                                class="px-2 py-2 text-left font-semibold"
+                                                >Variant</th
+                                            >
+                                            <th
+                                                class="px-2 py-2 text-right font-semibold"
+                                                >Opens</th
+                                            >
+                                            <th
+                                                class="px-2 py-2 text-right font-semibold"
+                                                >Screen Tap%</th
+                                            >
+                                            <th
+                                                class="px-2 py-2 text-right font-semibold text-urjo-blue"
+                                                >FA%</th
+                                            >
+                                            <th
+                                                class="px-2 py-2 text-right font-semibold"
+                                                >Compl%</th
+                                            >
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {#each variantMetrics as v, i (v.variant)}
+                                            <tr
+                                                class={i % 2 === 0
+                                                    ? "bg-theme-bg-modal"
+                                                    : "bg-theme-bg-hover/40"}
+                                            >
+                                                <td
+                                                    class="px-2 py-2 text-left font-bold text-theme-text-primary"
+                                                    >{v.variant}</td
+                                                >
+                                                <td
+                                                    class="px-2 py-2 text-right text-theme-text-muted"
+                                                    >{num(v.opens)}</td
+                                                >
+                                                <td
+                                                    class="px-2 py-2 text-right text-theme-text-primary"
+                                                    >{pct(v.screenTapRate)}</td
+                                                >
+                                                <td
+                                                    class="px-2 py-2 text-right font-bold text-theme-text-primary"
+                                                    >{pct(
+                                                        v.firstActionRate,
+                                                    )}</td
+                                                >
+                                                <td
+                                                    class="px-2 py-2 text-right text-theme-text-primary"
+                                                    >{pct(v.completionRate)}</td
+                                                >
+                                            </tr>
+                                        {/each}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {/if}
                     </div>
                 {/if}
             </div>

@@ -43,7 +43,7 @@ const seedPuzzle = async (): Promise<void> => {
     })
 }
 
-const VALID_BODY = { timeTaken: 30, mistakes: 0 }
+const VALID_BODY = { timeTaken: 30, mistakes: 0, board: 'rrbbrrbbrrbbrrbb' }
 
 const testMigrate = createDevvitTest({
     userId: 't2_returning',
@@ -115,6 +115,70 @@ testMigrate('rejects invalid timeTaken', async () => {
         }),
     )
     expect(res.status).toBe(400)
+})
+
+testMigrate('rejects a board that is not the solution and does not consume the one-shot key', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'returning' } as never)
+    await withCtx(CTX, seedPuzzle)
+
+    // Forged replay — wrong board.
+    const forged = await withCtx(CTX, () =>
+        app.request('/api/game/migrate-logged-out-score', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timeTaken: 1, mistakes: 0, board: 'bbbbrrrrbbbbrrrr' }),
+        }),
+    )
+    expect(forged.status).toBe(400)
+    // Nothing credited.
+    const coins = await withCtx(CTX, () => redis.hGet(`user:${CTX.userId}:economy`, 'totalCoins'))
+    expect(coins).toBeUndefined()
+
+    // The one-shot migrate key was NOT burned, so a legitimate replay still works.
+    const ok = await withCtx(CTX, () =>
+        app.request('/api/game/migrate-logged-out-score', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(VALID_BODY),
+        }),
+    )
+    expect(ok.status).toBe(200)
+    const body = await ok.json() as { migrated: boolean }
+    expect(body.migrated).toBe(true)
+
+    vi.restoreAllMocks()
+})
+
+testMigrate('verifies against the post puzzle even when a stale per-user puzzle exists', async () => {
+    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'returning' } as never)
+    await withCtx(CTX, seedPuzzle) // post puzzle solution = 'rrbbrrbbrrbbrrbb'
+
+    // Simulate a returning user whose /state regenerated a DIFFERENT per-user
+    // puzzle (e.g. a 6×6 preference) before migrate runs. The logged-out solve
+    // was the post puzzle, so migrate must verify against that, not this.
+    await withCtx(CTX, () =>
+        redis.hSet(`user:${CTX.userId}:game:${CTX.postId}:currentPuzzle`, {
+            colors: 'r'.repeat(36),
+            numbers: '-'.repeat(36),
+            solution: 'r'.repeat(36),
+            difficulty: 'easy',
+            gridSize: '6',
+            instanceId: 'inst-stale',
+        }),
+    )
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/migrate-logged-out-score', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(VALID_BODY), // board = post solution
+        }),
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json() as { migrated: boolean }
+    expect(body.migrated).toBe(true)
+
+    vi.restoreAllMocks()
 })
 
 const testMigrateNoUser = createDevvitTest({

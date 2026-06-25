@@ -50,12 +50,21 @@ describe("GameView.svelte continue button flow", () => {
 
 	it("keeps Continue and Challenge together in the second success-screen row", () => {
 		expect(completionOverlaySource).toContain('class="grid grid-cols-2 gap-3 w-full"');
-		expect(completionOverlaySource).toMatch(/>\s*Challenge\s*</);
+		// Button text is conditional: {#if hasChallenged}✓ Challenge Created{:else}Challenge{/if}
+		expect(completionOverlaySource).toMatch(/\{:else\}\s*Challenge\s*\{\/if\}/);
 		expect(completionOverlaySource).toContain("border-white/70 text-white");
 		expect(completionOverlaySource).toContain("bg-yellow-500 text-yellow-950");
 		expect(gameViewSource).toContain("onChallenge={() => (showChallengeConfirm = true)}");
 		expect(gameViewSource).not.toContain("showChallengeAndContinueConfirm");
 		expect(gameViewSource).not.toContain("confirmChallengeAndContinue");
+	});
+
+	it("makes challenge post consent clear before posting as the user", () => {
+		expect(gameViewSource).toContain("This posts a public challenge to Reddit");
+		expect(gameViewSource).toContain("as u/");
+		expect(gameViewSource).toContain("using an Urjo-generated title");
+		expect(completionOverlaySource).not.toContain("Challenge title");
+		expect(completionOverlaySource).not.toContain("Write your challenge title");
 	});
 
 	it("does not render the mystery box bonus reward modal after completion", () => {

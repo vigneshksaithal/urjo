@@ -41,6 +41,6 @@ export const getLoginGate = (isLoggedIn: boolean | undefined): LoginGate => {
  */
 export const LOGIN_CTA = {
     title: 'Save your progress',
-    body: 'Sign in to save your streak, earn coins, and subscribe for daily puzzles.',
+    body: 'Sign in to save your streak, earn coins, and keep your daily puzzle progress.',
     button: 'Sign in to save',
 } as const

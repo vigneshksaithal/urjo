@@ -33,8 +33,9 @@ describe('getLoginGate', () => {
 describe('LOGIN_CTA', () => {
     it('communicates that signing in saves progress and unlocks features', () => {
         // Reddit guidance: the CTA must tell the user their game data will be
-        // saved when they sign in / subscribe.
+        // saved without implying a subscribe action.
         expect(LOGIN_CTA.body.toLowerCase()).toContain('save')
+        expect(LOGIN_CTA.body.toLowerCase()).not.toContain('subscribe')
         expect(LOGIN_CTA.title.length).toBeGreaterThan(0)
         expect(LOGIN_CTA.button.length).toBeGreaterThan(0)
     })

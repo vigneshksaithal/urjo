@@ -7,8 +7,7 @@
       "scope": "user",
       "asUser": [
         "SUBMIT_COMMENT",
-        "SUBMIT_POST",
-        "SUBSCRIBE_TO_SUBREDDIT"
+        "SUBMIT_POST"
       ]
     },
     "redis": true
@@ -39,7 +38,9 @@
   },
   "triggers": {
     "onAppInstall": "/internal/on-app-install",
-    "onPostCreate": "/internal/on-post-create"
+    "onPostCreate": "/internal/on-post-create",
+    "onPostDelete": "/internal/on-post-delete",
+    "onCommentDelete": "/internal/on-comment-delete"
   },
   "scheduler": {
     "tasks": {

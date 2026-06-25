@@ -9,7 +9,8 @@ import { redis, runWithContext } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
 import { app } from '../../index'
 import * as seasons from '../../lib/seasons'
-import { getTodayUTC } from '../../lib/helpers'
+import { getTodayUTC, getISOWeek } from '../../lib/helpers'
+import { getUserEconomy, saveUserEconomy } from '../../lib/economy'
 
 // postId is not injected by createDevvitTest — it only sets userId/subreddit.
 // We must call runWithContext with a context that includes postId for routes that need it.
@@ -19,6 +20,7 @@ import { Context } from '@devvit/server'
 
 const POST_ID = 't3_post1'
 const USER_ID = 't2_testuser'
+const SOLUTION = 'rbrbbrbrrbbbbrbr'
 
 // Full headers matching what createDevvitTest injects, plus devvit-post
 const TEST_HEADERS = {
@@ -40,6 +42,24 @@ const seedPuzzle = async (): Promise<void> => {
         difficulty: 'easy',
         gridSize: '4',
     })
+}
+
+// Issue a fresh per-user puzzle instance with a unique instanceId. The server
+// credits each issued puzzle at most once (replay protection), so multi-solve
+// tests must issue a new instance before each completion — exactly what a real
+// "run again" / grid-size switch does. Returns the board to submit.
+let instanceCounter = 0
+const issueInstance = async (gridSize = '4', solution = SOLUTION): Promise<string> => {
+    instanceCounter += 1
+    await redis.hSet(`user:${USER_ID}:game:${POST_ID}:currentPuzzle`, {
+        colors: solution,
+        numbers: '-'.repeat(solution.length),
+        solution,
+        difficulty: 'easy',
+        gridSize,
+        instanceId: `inst-${instanceCounter}-${Date.now()}`,
+    })
+    return solution
 }
 
 // Helper: run app.request inside a context that includes postId
@@ -96,10 +116,11 @@ const testComplete = createDevvitTest({
  * Requirement 5.3: POST /api/game/complete returns 200 with expected response fields
  */
 testComplete('POST /api/game/complete returns 200 with performanceScore, newSkillLevel, previousSkillLevel, streak, coinReward', async () => {
+    await seedPuzzle()
     const res = await requestWithPost('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeTaken: 5 }),
+        body: JSON.stringify({ timeTaken: 5, board: SOLUTION }),
     })
     expect(res.status).toBe(200)
 
@@ -199,6 +220,7 @@ const testPreviewUpdate = createDevvitTest({
  * Requirement 6: First completion on a daily post updates the preview data in Redis
  */
 testPreviewUpdate('POST /api/game/complete updates daily preview on first completion', async () => {
+    await seedPuzzle()
     // Seed a daily preview in Redis (simulating what the scheduler does)
     await redis.hSet(`game:${POST_ID}:preview`, {
         type: 'daily',
@@ -215,7 +237,7 @@ testPreviewUpdate('POST /api/game/complete updates daily preview on first comple
     const res = await requestWithPost('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeTaken: 30 }),
+        body: JSON.stringify({ timeTaken: 30, board: SOLUTION }),
     })
     expect(res.status).toBe(200)
 
@@ -236,6 +258,7 @@ const testPreviewDedup = createDevvitTest({
  * Requirement 6: Preview update is deduped — second completion does not update preview again
  */
 testPreviewDedup('POST /api/game/complete does not update daily preview on second completion (deduped)', async () => {
+    await seedPuzzle()
     // Seed a daily preview in Redis
     await redis.hSet(`game:${POST_ID}:preview`, {
         type: 'daily',
@@ -255,7 +278,7 @@ testPreviewDedup('POST /api/game/complete does not update daily preview on secon
     const res = await requestWithPost('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeTaken: 20 }),
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
     })
     expect(res.status).toBe(200)
 
@@ -275,6 +298,7 @@ const testPreviewNonDaily = createDevvitTest({
  * Requirement 6: Preview update only applies to daily posts, not challenge posts
  */
 testPreviewNonDaily('POST /api/game/complete does not update preview for challenge posts', async () => {
+    await seedPuzzle()
     // Seed a challenge preview (not daily)
     await redis.hSet(`game:${POST_ID}:preview`, {
         type: 'challenge',
@@ -292,7 +316,7 @@ testPreviewNonDaily('POST /api/game/complete does not update preview for challen
     const res = await requestWithPost('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeTaken: 15 }),
+        body: JSON.stringify({ timeTaken: 15, board: SOLUTION }),
     })
     expect(res.status).toBe(200)
 
@@ -319,7 +343,7 @@ const seedPuzzleGrid = async (gridSize: string): Promise<void> => {
 const COMPLETE_INIT = (timeTaken: number, mistakes = 0): RequestInit => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ timeTaken, mistakes }),
+    body: JSON.stringify({ timeTaken, mistakes, board: SOLUTION }),
 })
 
 // gridSize reaches the route via the seeded puzzle hash (getCurrentPuzzle reads
@@ -342,7 +366,7 @@ testDifficultyPays('POST /api/game/complete: 6×6 records more coins and season 
     // ── 4×4 completion. It is the day's first solve, so it also collects the
     //    daily-first coin bonus — beating it with the 6×6 is therefore a
     //    conservative, robust comparison. ──
-    await seedPuzzleGrid('4')
+    await issueInstance('4')
     const before4 = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
     const res4 = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
     expect(res4.status).toBe(200)
@@ -354,8 +378,8 @@ testDifficultyPays('POST /api/game/complete: 6×6 records more coins and season 
     // value) — isolates grid difficulty from the daily-decay confound.
     await redis.del(solvesKey)
 
-    // ── 6×6 completion at the same time/mistakes. ──
-    await seedPuzzleGrid('6')
+    // ── 6×6 completion at the same time/mistakes (fresh issued instance). ──
+    await issueInstance('6')
     const before6 = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
     const res6 = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
     expect(res6.status).toBe(200)
@@ -384,15 +408,16 @@ const testRepeatedSolvesDecay = createDevvitTest({
  * fewer points (daily decay) but never zero (positive floor).
  */
 testRepeatedSolvesDecay('POST /api/game/complete: repeated same-day solves award progressively fewer (never zero) season points', async () => {
-    await seedPuzzleGrid('4')
     const season = seasons.getCurrentSeason()
     const leaderboardKey = `season:${season.seasonId}:leaderboard`
 
-    // Solve the same puzzle four times in a row. The bucket is stable across
-    // these solves (a handful of fast solves can't promote/demote level), so
-    // only the daily-decay factor changes the awarded points.
+    // Solve four fresh puzzle instances in a row (each "run again" issues a new
+    // instance). The bucket is stable across these solves (a handful of fast
+    // solves can't promote/demote level), so only the daily-decay factor
+    // changes the awarded points.
     const deltas: number[] = []
     for (let i = 0; i < 4; i++) {
+        await issueInstance('4')
         const before = (await redis.zScore(leaderboardKey, USER_ID)) ?? 0
         const res = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
         expect(res.status).toBe(200)
@@ -511,4 +536,154 @@ testSeasonInactive('POST /api/game/complete: season inactive writes no counter a
     } finally {
         spy.mockRestore()
     }
+})
+
+// ─── Anti-cheat: server-side solution verification (C1) ──────────────────────
+
+const testForgedBoard = createDevvitTest({ userId: USER_ID, subredditName: 'testsub' })
+
+/**
+ * A completion whose board does not equal the puzzle's solution is rejected and
+ * awards nothing — the server never takes the client's word that it solved.
+ */
+testForgedBoard('POST /api/game/complete rejects a board that is not the solution', async () => {
+    await seedPuzzle()
+
+    const res = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // A forged "fast" completion with a wrong board.
+        body: JSON.stringify({ timeTaken: 1, board: 'bbbbrrrrbbbbrrrr' }),
+    })
+    expect(res.status).toBe(400)
+
+    // Nothing was credited: no solve counter, no season row, no speed entry.
+    const econ = await getUserEconomy(USER_ID)
+    expect(econ.totalSolves).toBe(0)
+    expect(econ.coins).toBe(0)
+
+    const season = seasons.getCurrentSeason()
+    expect(await redis.zCard(`season:${season.seasonId}:leaderboard`)).toBe(0)
+    expect(await redis.zCard(`leaderboard:speed:${getTodayUTC()}:4`)).toBe(0)
+})
+
+const testMissingBoard = createDevvitTest({ userId: USER_ID, subredditName: 'testsub' })
+
+testMissingBoard('POST /api/game/complete rejects a completion with no board', async () => {
+    await seedPuzzle()
+
+    const res = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 10 }),
+    })
+    expect(res.status).toBe(400)
+})
+
+// ─── Anti-farm: completion is idempotent per issued puzzle (C2) ──────────────
+
+const testReplay = createDevvitTest({ userId: USER_ID, subredditName: 'testsub' })
+
+/**
+ * Replaying the same solved board is rejected (409), so coins/season/solves are
+ * credited exactly once per issued puzzle.
+ */
+testReplay('POST /api/game/complete credits a puzzle once and rejects replays', async () => {
+    await seedPuzzle()
+
+    const first = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    expect(first.status).toBe(200)
+    const coinsAfterFirst = (await getUserEconomy(USER_ID)).coins
+    expect((await getUserEconomy(USER_ID)).totalSolves).toBe(1)
+
+    const replay = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    expect(replay.status).toBe(409)
+
+    // No double-credit.
+    const econ = await getUserEconomy(USER_ID)
+    expect(econ.totalSolves).toBe(1)
+    expect(econ.coins).toBe(coinsAfterFirst)
+})
+
+const testRunAgainCredits = createDevvitTest({ userId: USER_ID, subredditName: 'testsub' })
+
+/**
+ * A genuinely new puzzle instance (as issued by "run again") is credited again
+ * — idempotency is per-instance, not per-post.
+ */
+testRunAgainCredits('POST /api/game/complete credits a fresh instance after run-again', async () => {
+    await issueInstance('4')
+    const r1 = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    expect(r1.status).toBe(200)
+
+    await issueInstance('4')
+    const r2 = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    expect(r2.status).toBe(200)
+
+    expect((await getUserEconomy(USER_ID)).totalSolves).toBe(2)
+})
+
+// ─── Weekly leaderboard counts completions (M1) ──────────────────────────────
+
+const testWeekly = createDevvitTest({ userId: USER_ID, subredditName: 'testsub' })
+
+testWeekly('POST /api/game/complete increments the weekly completion count', async () => {
+    const weeklyKey = `leaderboard:weekly:${getISOWeek()}`
+
+    await issueInstance('4')
+    await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    expect(await redis.zScore(weeklyKey, USER_ID)).toBe(1)
+
+    await issueInstance('4')
+    await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    // Must increment to 2 (the old zAdd-score-1 bug would leave it pinned at 1).
+    expect(await redis.zScore(weeklyKey, USER_ID)).toBe(2)
+})
+
+// ─── Completion does not clobber owned/equipped titles (H2) ──────────────────
+
+const testTitlePersists = createDevvitTest({ userId: USER_ID, subredditName: 'testsub' })
+
+testTitlePersists('POST /api/game/complete preserves owned and equipped titles', async () => {
+    await seedPuzzle()
+    await saveUserEconomy(USER_ID, {
+        coins: 0,
+        ownedTitles: ['puzzler', 'streak_lord'],
+        equippedTitle: 'streak_lord',
+    })
+
+    const res = await requestWithPost('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+    })
+    expect(res.status).toBe(200)
+
+    const econ = await getUserEconomy(USER_ID)
+    expect(econ.ownedTitles).toContain('streak_lord')
+    expect(econ.equippedTitle).toBe('streak_lord')
 })

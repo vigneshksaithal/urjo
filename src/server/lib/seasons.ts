@@ -21,7 +21,7 @@ import {
 import { getGridLevelConfig } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
 import { speedFactor, dailyDecay } from '../../shared/scoring'
-import { fetchUsername } from './helpers'
+import { fetchUsername, countPlayersAbove } from './helpers'
 
 // ─── Key Builders ──────────────────────────────────────────────────────────────
 
@@ -170,11 +170,9 @@ export const getSeasonLeaderboard = async (
     let playerRank: number | null = null
 
     if (playerScore !== undefined && playerScore !== null) {
-        // Count how many users have a higher score
-        const higherEntries = await redis.zRange(key, playerScore + 1, Number.MAX_SAFE_INTEGER, {
-            by: 'score',
-        })
-        playerRank = higherEntries.length + 1
+        // Count how many users have a strictly higher score (robust to
+        // fractional scores and ties).
+        playerRank = (await countPlayersAbove(key, playerScore)) + 1
     }
 
     return {

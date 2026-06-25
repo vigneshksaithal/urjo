@@ -23,6 +23,7 @@ import type {
 import { MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize, DEFAULT_GRID_SIZE } from '../../shared/constants'
 import { MAX_STREAK_FREEZES } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
+import { isBoardSolved } from '../../shared/board'
 import { FREE_STREAK_FREEZE_CADENCE_DAYS } from '../../shared/streak-rewards'
 import { generatePuzzle } from '../lib/generator'
 import {
@@ -46,6 +47,9 @@ import {
 	getGridHistory,
 	setGridHistory,
 	getISOWeek,
+	safeParseInt,
+	countPlayersAbove,
+	makeInstanceId,
 } from '../lib/helpers'
 import { isUserMigrated, migrateUserToPerGrid } from '../lib/migration'
 import { checkAchievements, checkStreakMilestone, unlockAchievements, getUnlockedAchievements } from '../lib/achievements'
@@ -67,6 +71,13 @@ import {
 	getSessionIdFromHeader,
 } from '../lib/qualified'
 import { trackOpen } from '../lib/metrics'
+import {
+	assignVariant,
+	trackVariantOpen,
+	trackVariantScreenTap,
+	trackVariantFirstAction,
+	trackVariantCompletion,
+} from '../lib/ab-test'
 import {
 	isDifficulty,
 	markS2REligible,
@@ -110,6 +121,23 @@ const resultCommentDedupKey = (userId: string, postId: string): string =>
 const redditCommentsUrl = (postId: string): string =>
 	`https://reddit.com/comments/${postId.replace(/^t3_/, '')}`
 
+const formatMistakeCount = (mistakes: number): string =>
+	mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`
+
+const buildChallengeTargetLine = (
+	scoreSeconds: string | undefined,
+	mistakes: string | undefined,
+): string => {
+	if (!scoreSeconds) return ''
+
+	const parsedMistakes = mistakes === undefined ? undefined : Number.parseInt(mistakes, 10)
+	const mistakesText = parsedMistakes === undefined || Number.isNaN(parsedMistakes)
+		? ''
+		: ` with ${formatMistakeCount(parsedMistakes)}`
+
+	return `Score to beat: ${scoreSeconds}s${mistakesText}`
+}
+
 export const gameRouter = new Hono()
 
 // ─── checkChallengeBeat ──────────────────────────────────────────────────────
@@ -120,9 +148,10 @@ export const gameRouter = new Hono()
  */
 async function updateLeaderboardComment(postId: string): Promise<void> {
 	try {
-		const [stats, meta] = await Promise.all([
+		const [stats, meta, puzzleMeta] = await Promise.all([
 			redis.hGetAll(`game:${postId}:stats`),
 			redis.hGetAll(`game:${postId}:meta`),
+			redis.hGetAll(`game:${postId}:puzzle`),
 		])
 
 		const leaderboardCommentId = meta['leaderboardCommentId']
@@ -142,7 +171,13 @@ async function updateLeaderboardComment(postId: string): Promise<void> {
 			} catch { /* fallback */ }
 		}
 
+		const targetLine = buildChallengeTargetLine(
+			puzzleMeta['challengeScore'],
+			puzzleMeta['challengeMistakes'],
+		)
+
 		const leaderboardText = `🏆 **Challenge Leaderboard**
+${targetLine ? `\n${targetLine}\n` : ''}
 
 👥 Attempts: ${attempts}
 ✅ Beaten: ${beats} times
@@ -276,6 +311,10 @@ const generatePuzzleForGridLevel = (gridSize: GridSize, level: number): Serializ
 
 /**
  * Get the current puzzle data for a user.
+ *
+ * `instanceId` identifies the specific issued puzzle so completion can be
+ * credited at most once per issuance ('post' = the post's baked puzzle, a
+ * random id = a freshly generated per-user puzzle from grid-size/next-challenge).
  */
 const getCurrentPuzzle = async (
 	postId: string,
@@ -286,6 +325,7 @@ const getCurrentPuzzle = async (
 	solution: string
 	difficulty: string
 	gridSize: string
+	instanceId: string
 } | null> => {
 	const userPuzzle = await redis.hGetAll(`user:${userId}:game:${postId}:currentPuzzle`)
 	if (userPuzzle && userPuzzle.colors) {
@@ -295,6 +335,7 @@ const getCurrentPuzzle = async (
 			solution: userPuzzle.solution ?? '',
 			difficulty: userPuzzle.difficulty ?? 'easy',
 			gridSize: userPuzzle.gridSize ?? '4',
+			instanceId: userPuzzle.instanceId ?? 'self',
 		}
 	}
 
@@ -307,10 +348,12 @@ const getCurrentPuzzle = async (
 		solution: puzzle.solution ?? '',
 		difficulty: puzzle.difficulty ?? 'easy',
 		gridSize: puzzle.gridSize ?? '4',
+		instanceId: 'post',
 	}
 }
 
 type FirstScreenTarget = NonNullable<FirstScreenData['targetToBeat']>
+type FirstScreenMaker = { username: string; avatarUrl?: string }
 
 const getFirstScreenTarget = async (
 	date: string,
@@ -338,6 +381,27 @@ const getFirstScreenTarget = async (
 		seconds: leader.score,
 		username: await fetchUsername(leader.member, viewerId),
 	}
+}
+
+const getFirstScreenMaker = async (
+	postPuzzleMeta: Record<string, string> | undefined,
+	viewerId: string,
+): Promise<FirstScreenMaker | undefined> => {
+	const storedUsername = postPuzzleMeta?.challengeByUsername
+	if (storedUsername && storedUsername !== 'Anon') {
+		return {
+			username: storedUsername,
+			...(postPuzzleMeta?.challengeByAvatar && { avatarUrl: postPuzzleMeta.challengeByAvatar }),
+		}
+	}
+
+	const challengerId = postPuzzleMeta?.challengeBy
+	if (!challengerId) return undefined
+
+	const username = await fetchUsername(challengerId, viewerId)
+	if (!username || username === 'Anon') return undefined
+
+	return { username }
 }
 
 /**
@@ -374,6 +438,12 @@ const updateStreak = async (userId: string): Promise<StreakData> => {
 
 	if (streakData.lastPlayedDate) {
 		const dayDiff = getDayDifference(streakData.lastPlayedDate, today)
+		if (dayDiff <= 0) {
+			// Defensive: a non-positive diff means lastPlayedDate is today or
+			// in the future (clock skew / bad stored data). Treat it like
+			// "already played today" — never wipe an existing streak.
+			return streakData
+		}
 		if (dayDiff === 1 || dayDiff === 2) {
 			newStreak = streakData.currentStreak + 1
 		} else if (dayDiff > 2) {
@@ -471,10 +541,13 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 		await redis.hIncrBy(economyKey, 'speedSolves', 1)
 	}
 
-	// Update non-atomic fields with hSet
+	// Update non-atomic fields with hSet. Only `dailyFirstSolve` is owned by
+	// the completion path. `ownedTitles`/`equippedTitle` are deliberately NOT
+	// written here — they're owned by the shop/mystery-box paths, and reading
+	// them defaults safely (getUserEconomy → ['puzzler'] / 'puzzler'). Writing
+	// a stale snapshot of them on every solve would clobber a concurrent
+	// purchase or equip.
 	await redis.hSet(economyKey, {
-		ownedTitles: economyData?.ownedTitles ?? '["puzzler"]',
-		equippedTitle: economyData?.equippedTitle ?? 'puzzler',
 		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
 	})
 	// Update coins leaderboard
@@ -554,6 +627,7 @@ gameRouter.get('/api/game/state', async (c) => {
 					solution: postPuzzle.solution ?? '',
 					difficulty: postPuzzle.difficulty ?? 'easy',
 					gridSize: postPuzzle.gridSize ?? '4',
+					instanceId: 'post',
 				}
 			} else {
 				return c.json({ error: 'Game not found' }, 404)
@@ -571,12 +645,14 @@ gameRouter.get('/api/game/state', async (c) => {
 			if (storedGridSize !== gridSizePreference) {
 				const skillLevel = await getGridSkillLevel(userId, gridSizePreference)
 				const newPuzzle = generatePuzzleForGridLevel(gridSizePreference, skillLevel)
+				const instanceId = makeInstanceId()
 				await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
 					colors: newPuzzle.colors,
 					numbers: newPuzzle.numbers,
 					solution: newPuzzle.solution,
 					difficulty: newPuzzle.difficulty,
 					gridSize: newPuzzle.gridSize.toString(),
+					instanceId,
 				})
 				puzzle = {
 					colors: newPuzzle.colors,
@@ -584,6 +660,7 @@ gameRouter.get('/api/game/state', async (c) => {
 					solution: newPuzzle.solution,
 					difficulty: newPuzzle.difficulty,
 					gridSize: newPuzzle.gridSize.toString(),
+					instanceId,
 				}
 			}
 		}
@@ -678,8 +755,8 @@ gameRouter.get('/api/game/state', async (c) => {
 			const cachedActive = await redis.get('stats:activePlayers:7d')
 			const cachedStreaks = await redis.get('stats:collectiveStreaks')
 			communityStats = {
-				activePlayers: cachedActive !== undefined ? parseInt(cachedActive, 10) : 0,
-				collectiveStreakDays: cachedStreaks !== undefined ? parseInt(cachedStreaks, 10) : 0,
+				activePlayers: safeParseInt(cachedActive, 0),
+				collectiveStreakDays: safeParseInt(cachedStreaks, 0),
 			}
 		} catch {
 			// non-critical
@@ -688,18 +765,25 @@ gameRouter.get('/api/game/state', async (c) => {
 		// ─── Current season info ───────────────────────────────────────────────
 		const currentSeason = getCurrentSeason()
 
-		const firstScreenTarget = isFirstTimeUser
-			? await getFirstScreenTarget(today, serializedPuzzle.gridSize, postPuzzleMeta, userId)
-			: undefined
-
-		const firstScreen: FirstScreenData | undefined = isFirstTimeUser
-			? {
-				samplePuzzle: serializedPuzzle,
-				instruction: 'Fill each row and column with equal reds and blues.',
-				communityStats: communityStats ?? { activePlayers: 0, collectiveStreakDays: 0 },
-				...(firstScreenTarget !== undefined && { targetToBeat: firstScreenTarget }),
+		// ─── Challenger info (challenge posts only) ────────────────────────────
+		// Returned for ALL visitors so the in-game strip can show avatar +
+		// target time without a separate fetch. Never shown on regular posts.
+		let challengerInfo: GameState['challengerInfo'] | undefined
+		if (isChallenge) {
+			try {
+				const maker = await getFirstScreenMaker(postPuzzleMeta, userId)
+				const target = await getFirstScreenTarget(today, serializedPuzzle.gridSize, postPuzzleMeta, userId)
+				if (maker !== undefined && target !== undefined) {
+					challengerInfo = {
+						username: maker.username,
+						...(maker.avatarUrl !== undefined && { avatarUrl: maker.avatarUrl }),
+						targetSeconds: target.seconds,
+					}
+				}
+			} catch {
+				// non-critical — strip simply won't render
 			}
-			: undefined
+		}
 
 		// ─── Moderator check (non-critical, used to show analytics UI) ─────────
 		let isMod = false
@@ -722,14 +806,8 @@ gameRouter.get('/api/game/state', async (c) => {
 				const leaderboardKey = `season:${currentSeason.seasonId}:leaderboard`
 				const playerScore = await redis.zScore(leaderboardKey, userId)
 				if (playerScore !== undefined && playerScore !== null) {
-					const higherEntries = await redis.zRange(
-						leaderboardKey,
-						playerScore + 1,
-						Number.MAX_SAFE_INTEGER,
-						{ by: 'score' },
-					)
 					seasonProgress = {
-						rank: higherEntries.length + 1,
+						rank: (await countPlayersAbove(leaderboardKey, playerScore)) + 1,
 						score: playerScore,
 					}
 				} else {
@@ -740,6 +818,44 @@ gameRouter.get('/api/game/state', async (c) => {
 			console.error('[State] Season progress fetch failed (non-critical):', err)
 		}
 
+		// ─── A/B/C first-screen experiment ────────────────────────────────────────
+		// Shown only for non-challenge, logged-in, non-first-time users who
+		// have NOT already had a first-action on this post today.
+		let abVariant: 'A' | 'B' | 'C' | undefined
+		let hasPlayedToday = false
+		let firstScreenData: FirstScreenData | undefined
+		if (!isChallenge && !isFirstTimeUser) {
+			try {
+				abVariant = assignVariant(userId)
+				// Check if user already acted today — skip first screen if so.
+				const actedKey = `analytics:acted:${today}:${postId}:${userId}`
+				const acted = await redis.get(actedKey)
+				hasPlayedToday = acted !== undefined
+				// Build first-screen data for both A/B component and Variant C overlay.
+				if (communityStats !== undefined) {
+					const target = await getFirstScreenTarget(
+						today,
+						serializedPuzzle.gridSize,
+						postPuzzleMeta,
+						userId,
+					)
+					firstScreenData = {
+						samplePuzzle: serializedPuzzle,
+						instruction: 'Equal reds and blues per row and column — no identical neighbours.',
+						communityStats,
+						...(target !== undefined && { targetToBeat: target }),
+					}
+				}
+				// Track the open per variant (deduped, fire-and-forget).
+				if (!hasPlayedToday) {
+					void trackVariantOpen(today, postId, userId, abVariant).catch((err) =>
+						console.error('[AB] variant open tracking failed:', err),
+					)
+				}
+			} catch (err) {
+				console.error('[AB] Variant setup failed (non-critical):', err)
+			}
+		}
 
 		const gameState: GameState = {
 			puzzle: serializedPuzzle,
@@ -758,12 +874,16 @@ gameRouter.get('/api/game/state', async (c) => {
 			currentSeason,
 			notifyOptIn,
 			hintsDismissed,
-			...(firstScreen !== undefined && { firstScreen }),
+			...(challengerInfo !== undefined && { challengerInfo }),
 			// Weekend Event — surfaced on every state read so the banner can
 			// render the latest "ends in" countdown without an extra fetch.
 			weekendEvent: getActiveWeekendEvent(new Date()),
 			// Always-on progression strip data
 			...(seasonProgress !== undefined && { seasonProgress }),
+			// A/B/C first-screen experiment
+			...(abVariant !== undefined && { variant: abVariant }),
+			...(hasPlayedToday && { hasPlayedToday: true }),
+			...(firstScreenData !== undefined && { firstScreen: firstScreenData }),
 		}
 
 		return c.json(gameState)
@@ -825,7 +945,13 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 				solution: newPuzzle.solution,
 				difficulty: newPuzzle.difficulty,
 				gridSize: newPuzzle.gridSize.toString(),
+				instanceId: makeInstanceId(),
 			})
+			// Reset the server-side timer anchor so this freshly issued puzzle
+			// is timed from now, not from a stale earlier issuance.
+			const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+			await redis.set(startTimeKey, Date.now().toString())
+			await redis.expire(startTimeKey, 86400)
 		}
 
 		const response: GridSizeResponse = {
@@ -858,7 +984,13 @@ gameRouter.post('/api/game/first-action', async (c) => {
 		)
 		const today = getTodayUTC()
 		const isNew = await trackFirstAction(today, postId, userId, subredditId, source)
-
+		// Track per-variant first-action (fire-and-forget, only on first action).
+		if (isNew) {
+			const variant = assignVariant(userId)
+			void trackVariantFirstAction(today, variant).catch((err) =>
+				console.error('[AB] variant first-action tracking failed:', err),
+			)
+		}
 		// ─── DQP gate: mark first-tap and commit if all conditions are met ────
 		try {
 			const sessionId = getSessionIdFromHeader(c.req.raw.headers)
@@ -872,6 +1004,25 @@ gameRouter.post('/api/game/first-action', async (c) => {
 		return c.json({ tracked: isNew })
 	} catch (error) {
 		console.error('[Analytics] First action tracking failed:', error)
+		return c.json({ tracked: false })
+	}
+})
+
+// ─── POST /api/game/first-screen-tap ─────────────────────────────────────────
+// Fired when a user taps "Play" / "Beat Xs" on a Variant A or B first screen.
+// Fire-and-forget from the client; logged-out users are silently ignored.
+
+gameRouter.post('/api/game/first-screen-tap', async (c) => {
+	const { userId } = context
+	if (!userId) return c.json({ tracked: false })
+
+	try {
+		const today = getTodayUTC()
+		const variant = assignVariant(userId)
+		await trackVariantScreenTap(today, variant)
+		return c.json({ tracked: true })
+	} catch (err) {
+		console.error('[AB] First-screen tap tracking failed:', err)
 		return c.json({ tracked: false })
 	}
 })
@@ -985,6 +1136,31 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const puzzle = await getCurrentPuzzle(postId, userId)
 		const rawGridSize = puzzle ? parseInt(puzzle.gridSize, 10) : 4
 		const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
+
+		// ─── Anti-cheat: verify the submitted board is the real solution ──────
+		// The client decides completion locally, but the server is the trust
+		// boundary. Every generated puzzle has a unique solution, so a genuine
+		// solve serializes to exactly the stored solution string. Without this,
+		// a client could POST a fabricated fast time and farm coins, season
+		// points, and the speed leaderboard without ever solving anything.
+		if (!puzzle || !isBoardSolved(body.board, puzzle.solution)) {
+			// Logged so a wave of *legitimate* mismatches (e.g. a client/puzzle
+			// bug) is visible in production rather than silently denying rewards.
+			console.warn(`[Complete] board verification failed for ${userId} on ${postId}; denying reward`)
+			return c.json({ error: 'Solution does not match the puzzle' }, 400)
+		}
+
+		// ─── Idempotency: credit each issued puzzle at most once ──────────────
+		// Keyed on the puzzle instance (not just the post) so a "run again"
+		// puzzle is credited again, but replaying the same solved board — the
+		// trivial coin/season farm — is rejected.
+		const completionKey = `user:${userId}:solved:${postId}:${puzzle.instanceId}`
+		const alreadyCompleted = await redis.get(completionKey)
+		if (alreadyCompleted !== undefined) {
+			return c.json({ error: 'Puzzle already completed' }, 409)
+		}
+		await redis.set(completionKey, '1')
+		await redis.expire(completionKey, 2592000) // 30-day TTL
 
 		const currentLevel = await getGridSkillLevel(userId, gridSize)
 		const history = await getGridHistory(userId, gridSize)
@@ -1103,8 +1279,11 @@ gameRouter.post('/api/game/complete', async (c) => {
 				coinReward.mysteryBox = box
 			}
 
-			// Increment weekly leaderboard for community highlights
-			await redis.zAdd(`leaderboard:weekly:${isoWeek}`, { score: 1, member: userId })
+			// Increment the weekly completion count for community highlights.
+			// Must use zIncrBy (not zAdd, which would overwrite the score to 1
+			// every solve, making "Player of the Week" meaningless).
+			await redis.zIncrBy(`leaderboard:weekly:${isoWeek}`, userId, 1)
+			await redis.expire(`leaderboard:weekly:${isoWeek}`, 1209600) // 14-day TTL
 
 			// Check for newly unlocked achievements
 			const updatedEconomy = await getUserEconomy(userId)
@@ -1157,7 +1336,13 @@ gameRouter.post('/api/game/complete', async (c) => {
 		try {
 			const { subredditId } = context
 			const today = getTodayUTC()
-			await trackCompletion(today, postId, userId, subredditId)
+			const completionIsNew = await trackCompletion(today, postId, userId, subredditId)
+			if (completionIsNew) {
+				const variant = assignVariant(userId)
+				void trackVariantCompletion(today, variant).catch((err) =>
+					console.error('[AB] variant completion tracking failed:', err),
+				)
+			}
 			if (isChallengePost) {
 				await trackChallengeCompletion(today, postId, userId, preCompletionEconomy.totalSolves === 0)
 			}
@@ -1255,8 +1440,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 				seasonPoints = playerScore ?? 0
 
 				if (playerScore !== undefined && playerScore !== null) {
-					const higherEntries = await redis.zRange(leaderboardKey, playerScore + 1, Number.MAX_SAFE_INTEGER, { by: 'score' })
-					seasonRank = higherEntries.length + 1
+					seasonRank = (await countPlayersAbove(leaderboardKey, playerScore)) + 1
 				}
 			}
 		} catch (err) {
@@ -1327,11 +1511,25 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 			return c.json({ error: 'Invalid request body' }, 400)
 		}
 
-		const { timeTaken, mistakes: rawMistakes } = body as Record<string, unknown>
+		const { timeTaken, mistakes: rawMistakes, board } = body as Record<string, unknown>
 		if (typeof timeTaken !== 'number' || timeTaken <= 0) {
 			return c.json({ error: 'Invalid timeTaken' }, 400)
 		}
 		const mistakes = typeof rawMistakes === 'number' && rawMistakes >= 0 ? rawMistakes : 0
+
+		// ─── Anti-cheat: verify the replayed board before crediting ───────────
+		// A logged-out player always solves the post's baked puzzle (logged-out
+		// /state and /complete both serve game:{postId}:puzzle), so verify the
+		// replayed board against THAT — not getCurrentPuzzle, which for a
+		// returning user can be a regenerated per-user puzzle with a different
+		// solution (that mismatch would silently 400 every legitimate migrate).
+		// Done BEFORE the idempotency guard so a rejected replay doesn't burn
+		// the one-shot key.
+		const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
+		if (!isBoardSolved(board, postPuzzle?.solution ?? '')) {
+			console.warn(`[Migrate] board verification failed for ${userId} on ${postId}; skipping credit`)
+			return c.json({ error: 'Solution does not match the puzzle' }, 400)
+		}
 
 		// Idempotency guard — credit a given post's logged-out score once.
 		const migratedKey = `user:${userId}:loggedOutMigrated:${postId}`
@@ -1342,8 +1540,7 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 		await redis.set(migratedKey, 'true')
 		await redis.expire(migratedKey, 2592000) // 30-day TTL
 
-		const puzzle = await getCurrentPuzzle(postId, userId)
-		const rawGridSize = puzzle ? parseInt(puzzle.gridSize, 10) : 4
+		const rawGridSize = postPuzzle.gridSize ? parseInt(postPuzzle.gridSize, 10) : 4
 		const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
 
 		const currentLevel = await getGridSkillLevel(userId, gridSize)
@@ -1381,8 +1578,7 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 				const playerScore = await redis.zScore(leaderboardKey, userId)
 				seasonPoints = playerScore ?? 0
 				if (playerScore !== undefined && playerScore !== null) {
-					const higherEntries = await redis.zRange(leaderboardKey, playerScore + 1, Number.MAX_SAFE_INTEGER, { by: 'score' })
-					seasonRank = higherEntries.length + 1
+					seasonRank = (await countPlayersAbove(leaderboardKey, playerScore)) + 1
 				}
 			}
 		} catch (err) {
@@ -1468,7 +1664,13 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 			solution: newPuzzle.solution,
 			difficulty: newPuzzle.difficulty,
 			gridSize: newPuzzle.gridSize.toString(),
+			instanceId: makeInstanceId(),
 		})
+		// Reset the server-side timer anchor for the freshly issued puzzle so
+		// run-again solves are timed consistently (server-authoritative).
+		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		await redis.set(startTimeKey, Date.now().toString())
+		await redis.expire(startTimeKey, 86400)
 
 		const response: NextChallengeResponse = {
 			puzzle: newPuzzle,
@@ -1698,12 +1900,17 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		const body: ChallengeRequest = await c.req.json()
 		const { timeTaken, mistakes } = body
 
-		// Rate limit: one challenge post per user per day
+		// Rate limit user-authored challenge posts to reduce spam risk.
+		const MAX_DAILY_CHALLENGES = 3
 		const today = getTodayUTC()
-		const challengeKey = `user:${userId}:challenge:${today}`
-		const alreadyChallenged = await redis.get(challengeKey)
-		if (alreadyChallenged === 'true') {
-			return c.json<ChallengeResponse>({ success: false, error: 'Already created a challenge today' })
+		const challengeKey = `user:${userId}:challenge:count:${today}`
+		const countStr = await redis.get(challengeKey)
+		const challengeCount = countStr !== null && countStr !== undefined ? parseInt(countStr, 10) : 0
+		if (challengeCount >= MAX_DAILY_CHALLENGES) {
+			return c.json<ChallengeResponse>({
+				success: false,
+				error: `You've reached the limit of ${MAX_DAILY_CHALLENGES} challenge posts today`,
+			})
 		}
 
 		// Get current puzzle for this post
@@ -1733,15 +1940,15 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			}
 		}
 
-		// Build title — rotating high-CTR templates WITHOUT "Level X" (removes beginner signal)
+		// Build title from constrained app text; user free-form text is not published.
 		const perfectTag = mistakes === 0 ? ' (zero mistakes)' : ''
 		const gridLabel = `${puzzle.gridSize}×${puzzle.gridSize}`
 		const difficultyLabel = parseInt(puzzle.gridSize, 10) <= 4 ? 'Quick' : parseInt(puzzle.gridSize, 10) <= 6 ? 'Standard' : 'Hard'
 		const titleTemplates = [
-			`🎯 ${timeTaken}s to beat — u/${username} just set the bar${perfectTag}`,
-			`🔥 u/${username} cleared a ${difficultyLabel} ${gridLabel} in ${timeTaken}s${perfectTag}. Your move.`,
-			`👀 ${timeTaken}s${perfectTag}. u/${username} challenges you on this ${gridLabel}. Think you're faster?`,
-			`🏆 ${difficultyLabel} puzzle dropped: ${timeTaken}s to beat. u/${username} says try 🎯`,
+			`Urjo challenge: ${timeTaken}s target on ${gridLabel}${perfectTag}`,
+			`Urjo ${difficultyLabel} ${gridLabel}: u/${username} finished in ${timeTaken}s${perfectTag}`,
+			`Urjo ${gridLabel} challenge from u/${username}: ${timeTaken}s target${perfectTag}`,
+			`Urjo ${difficultyLabel} puzzle challenge: ${timeTaken}s target${perfectTag}`,
 		]
 		// Rotate template based on hour to spread variety without randomness (deterministic)
 		const templateIndex = new Date().getUTCHours() % titleTemplates.length
@@ -1771,6 +1978,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			challengeScore: timeTaken.toString(),
 			challengeByUsername: username,
 			challengeByAvatar: challengerAvatar,
+			challengeMistakes: mistakes.toString(),
 			sourcePostId: postId,
 			challengeChainLength: challengeChainLength.toString(),
 		})
@@ -1781,18 +1989,22 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			beats: '0',
 		})
 
-		// Mark rate limit
-		await redis.set(challengeKey, 'true')
+		// Increment daily challenge counter (expires at 24h)
+		const newCount = challengeCount + 1
+		await redis.set(challengeKey, newCount.toString())
 		await redis.expire(challengeKey, 86400)
 
-		// Post a comment on the challenge post showing the score to beat (no Level reference)
-		const scoreComment = `🏆 Score to beat: ${timeTaken}s with ${mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`}\n\nThink you can do better? Solve the puzzle above! 🎯`
-		await reddit.submitComment({ id: newPost.id as `t3_${string}`, text: scoreComment })
+		// Post the initial leaderboard comment (APP account, no user action needed).
+		// Non-critical — if rate-limited, meta is stored without a comment ID and
+		// the leaderboard comment will simply be absent.
+		let leaderboardCommentId = ''
+		try {
+			const targetLine = buildChallengeTargetLine(timeTaken.toString(), mistakes.toString())
+			const leaderboardComment = await reddit.submitComment({
+				id: newPost.id,
+				text: `🏆 **Challenge Leaderboard**
 
-		// Post the initial leaderboard comment (APP account, no user action needed)
-		const leaderboardComment = await reddit.submitComment({
-			id: newPost.id,
-			text: `🏆 **Challenge Leaderboard**
+${targetLine}
 
 👥 Attempts: 0
 ✅ Beaten: 0 times
@@ -1800,13 +2012,17 @@ gameRouter.post('/api/game/challenge', async (c) => {
 👑 Champion: --
 
 Think you can beat it? Play above! 🎯`,
-		})
+			})
+			leaderboardCommentId = leaderboardComment.id
+		} catch (lbErr) {
+			console.error('[Challenge] Leaderboard comment failed (non-critical):', lbErr)
+		}
 
 		// Store postType and leaderboard comment ID together — single hSet avoids clobbering
 		await redis.hSet(`game:${newPost.id}:meta`, {
 			postType: 'urjo-puzzle',
-			leaderboardCommentId: leaderboardComment.id,
-			stickyCommentId: leaderboardComment.id,
+			leaderboardCommentId,
+			stickyCommentId: leaderboardCommentId,
 			sourcePostId: postId,
 			challengeCreatorId: userId,
 			challengeChainLength: challengeChainLength.toString(),

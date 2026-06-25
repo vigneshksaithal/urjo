@@ -101,8 +101,27 @@ analyticsRouter.get('/api/analytics/qualified-summary', async (c) => {
 })
 
 
+// ─── GET /api/analytics/variants ──────────────────────────────────────────────
+
+/**
+ * Per-variant funnel metrics for the A/B/C first-screen experiment.
+ * Returns opens, screen_taps (A/B only), first_actions, and completions
+ * plus derived rates for a single UTC date (default: today).
+ */
+analyticsRouter.get('/api/analytics/variants', async (c) => {
+    try {
+        const date = c.req.query('date') ?? new Date().toISOString().split('T')[0]!
+        const data = await readVariantMetrics(date)
+        return c.json({ status: 'success', data })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
 // ─── New scorecard endpoints (DQP / D7 / S2R / Drift) ──────────────────────────
 
+import { readVariantMetrics } from '../lib/ab-test'
 import { buildScorecard, formatScorecardMarkdown } from '../lib/scorecard'
 import {
     buildQualifiedSummary,

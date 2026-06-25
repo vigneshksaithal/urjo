@@ -22,17 +22,9 @@ import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
 import { dwellRouter } from './routes/dwell'
 import { previewRouter } from './routes/preview'
-import {
-  computeDailyMentionBatch,
-  getOptInUserIds,
-  getCompleterUserIdsForDate,
-  getMentionedUserIdsForDate,
-  tryMarkUserMentioned,
-  buildMentionCommentText,
-} from './lib/notify'
 import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
 import { selectDailyMissions } from './lib/missions'
-import { getTodayUTC, getISOWeek, getYesterdayUTC, fetchUsername, readUserStreak } from './lib/helpers'
+import { getTodayUTC, getISOWeek, getYesterdayUTC } from './lib/helpers'
 import { runDriftCheck, formatDriftLogLine } from './lib/drift'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
@@ -46,6 +38,7 @@ import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
 import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-types'
 
 const HTTP_STATUS_BAD_REQUEST = 400
+const HTTP_STATUS_INTERNAL_ERROR = 500
 
 export const app = new Hono()
 
@@ -54,10 +47,51 @@ type PostCreatePayload = {
   author?: { name?: string }
 }
 
+type PostDeletePayload = {
+  postId?: string
+  post?: { id?: string }
+}
+
+type CommentDeletePayload = {
+  commentId?: string
+  postId?: string
+  comment?: { id?: string }
+  post?: { id?: string }
+}
+
 const REDDIT_GAMES_SUBREDDIT = 'RedditGames'
 
 const normalizePostId = (postId: string): `t3_${string}` =>
   postId.startsWith('t3_') ? postId as `t3_${string}` : `t3_${postId}`
+
+const cleanupDeletedPostData = async (postId: `t3_${string}`): Promise<void> => {
+  await redis.del(
+    `game:${postId}:puzzle`,
+    `game:${postId}:meta`,
+    `game:${postId}:stats`,
+    `game:${postId}:preview`,
+    `challenge:${postId}:beat_events`,
+    `viral:challenge:${postId}:created_at`,
+    `referral:${postId}:count`,
+    `preview:updated:${postId}`,
+  )
+}
+
+const cleanupDeletedCommentReference = async (
+  postId: `t3_${string}`,
+  commentId: string,
+): Promise<void> => {
+  const metaKey = `game:${postId}:meta`
+  const meta = await redis.hGetAll(metaKey)
+  const fields = [
+    meta.stickyCommentId === commentId ? 'stickyCommentId' : null,
+    meta.leaderboardCommentId === commentId ? 'leaderboardCommentId' : null,
+  ].filter((field): field is string => field !== null)
+
+  if (fields.length > 0) {
+    await redis.hDel(metaKey, fields)
+  }
+}
 
 const createPostHandler = async (c: Context) => {
   try {
@@ -116,6 +150,40 @@ app.post('/internal/on-app-install', async (c: Context) => {
   }
 })
 app.post('/internal/menu/post-create', createPostHandler)
+
+app.post('/internal/on-post-delete', async (c: Context) => {
+  try {
+    const input = await c.req.json<PostDeletePayload>().catch(() => null)
+    const rawPostId = input?.postId ?? input?.post?.id
+    if (typeof rawPostId === 'string' && rawPostId.length > 0) {
+      await cleanupDeletedPostData(normalizePostId(rawPostId))
+    }
+    return c.json({ status: 'ok' })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to handle post delete'
+    return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+  }
+})
+
+app.post('/internal/on-comment-delete', async (c: Context) => {
+  try {
+    const input = await c.req.json<CommentDeletePayload>().catch(() => null)
+    const commentId = input?.commentId ?? input?.comment?.id
+    const rawPostId = input?.postId ?? input?.post?.id
+    if (
+      typeof commentId === 'string' &&
+      commentId.length > 0 &&
+      typeof rawPostId === 'string' &&
+      rawPostId.length > 0
+    ) {
+      await cleanupDeletedCommentReference(normalizePostId(rawPostId), commentId)
+    }
+    return c.json({ status: 'ok' })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to handle comment delete'
+    return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+  }
+})
 
 type LeaderEntry = { medal: '🥇' | '🥈' | '🥉'; username: string; score: number }
 
@@ -387,43 +455,6 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
         await reddit.submitComment({ id: post.id as `t3_${string}`, text: recapComment })
       } catch (seasonErr) {
         console.error('[Scheduler] Season recap failed (non-critical):', seasonErr)
-      }
-    }
-
-    // At 16:00 UTC: post daily mention comments for opted-in completers
-    if (new Date().getUTCHours() === 16) {
-      try {
-        const yesterday = getYesterdayUTC()
-        const todayDate = getTodayUTC()
-
-        const [optInUserIds, yesterdayCompleterUserIds, alreadyMentionedUserIds] = await Promise.all([
-          getOptInUserIds(),
-          getCompleterUserIdsForDate(yesterday),
-          getMentionedUserIdsForDate(todayDate),
-        ])
-
-        const batch = computeDailyMentionBatch(
-          optInUserIds,
-          yesterdayCompleterUserIds,
-          alreadyMentionedUserIds,
-        )
-
-        for (const userId of batch) {
-          const claimed = await tryMarkUserMentioned(todayDate, userId)
-          if (!claimed) continue
-
-          try {
-            const username = await fetchUsername(userId)
-            const streak = await readUserStreak(userId)
-            const text = buildMentionCommentText(username, streak, post.id)
-            await reddit.submitComment({ id: post.id as `t3_${string}`, text })
-          } catch (commentErr) {
-            console.error('[Mention] Failed for user', userId, commentErr)
-            // Dedup key remains set — prevents retry storms (Req 15.7)
-          }
-        }
-      } catch (mentionErr) {
-        console.error('[Mention] Scheduler step failed (non-critical):', mentionErr)
       }
     }
 

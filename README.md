@@ -12,7 +12,7 @@ Urjo is a Devvit webview puzzle game built for Reddit posts. Players solve compa
 
 ## Compliance Posture
 
-Urjo keeps Reddit actions explicit and separate. The app does not ask for votes, force posting, force subscribing, mass-tag users, or auto-crosspost every puzzle. The `r/RedditGames` crosspost path is disabled by default and only runs when the post metadata explicitly approves it.
+Urjo keeps Reddit actions explicit and separate. The app does not ask for votes, force posting, force subscribing, post public daily mention comments, or auto-crosspost every puzzle. Score comments are explicit user actions that reply under the pinned score thread. Rival Challenge posts are explicit user actions with confirmation before posting. The `r/RedditGames` crosspost path is disabled by default and only runs when the post metadata explicitly approves it.
 
 ## Development
 
