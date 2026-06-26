@@ -64,6 +64,8 @@ Available from `@devvit/web/client` — use in response to user-initiated action
 import {
   showToast,
   showForm,
+  showShareSheet,
+  showLoginPrompt,
   navigateTo,
   requestExpandedMode,
   getWebViewMode,
@@ -101,6 +103,26 @@ import { connectRealtime } from '@devvit/web/client'
   }
 </script>
 ```
+
+### Share sheet
+
+Use `showShareSheet()` for invites and lightweight sharing that does not create a Reddit post/comment. `data` is optional deeplink payload and must stay under 1024 characters.
+
+```svelte
+<script lang="ts">
+  import { showShareSheet } from '@devvit/web/client'
+
+  const handleShare = async (): Promise<void> => {
+    await showShareSheet({
+      title: "Play today's challenge",
+      text: `I scored ${score}. Can you beat it?`,
+      data: JSON.stringify({ type: 'score-challenge', score }),
+    })
+  }
+</script>
+```
+
+Use Reddit user-action posts/comments only when the player explicitly chooses to create Reddit content.
 
 ### Forms (promise-based)
 
@@ -145,6 +167,26 @@ import { connectRealtime } from '@devvit/web/client'
 {:else}
   <!-- Full game UI -->
 {/if}
+```
+
+Inline mode should load quickly, fit post bounds, avoid scroll traps, and use only simple tap/click interactions. Full gameplay, heavy gestures, long load states, and dense controls belong in expanded mode. `requestExpandedMode()` must be called from a trusted user event.
+
+### Login prompt
+
+Let logged-out users play the core loop. Prompt login only at a natural breakpoint when it preserves something the player wants: saving progress, joining the leaderboard, sharing, subscribing, or enabling notifications.
+
+```svelte
+<script lang="ts">
+  import { showLoginPrompt } from '@devvit/web/client'
+
+  const handleSaveProgress = (): void => {
+    if (!currentUserId) {
+      showLoginPrompt()
+      return
+    }
+    // save progress through /api/*
+  }
+</script>
 ```
 
 ### Realtime (live updates)
@@ -194,6 +236,8 @@ import { connectRealtime } from '@devvit/web/client'
   }
 </script>
 ```
+
+Payment buttons must clearly label the product and price, call `purchase(sku)` only after a user action, and never hide core gameplay behind a purchase. Fulfillment and refund behavior belong on server endpoints configured in `devvit.json`.
 
 ## Fetch on mount pattern
 
@@ -281,5 +325,9 @@ import { connectRealtime } from '@devvit/web/client'
 - [ ] Error narrowing with `instanceof Error`
 - [ ] Response `status` field checked before accessing `data`
 - [ ] Client effects (`showToast`, `navigateTo`, etc.) only called from user-initiated actions
+- [ ] `requestExpandedMode()` is called only from a trusted click/touch event
+- [ ] Share sheet used for lightweight invites instead of unnecessary Reddit posts/comments
+- [ ] Login prompt appears only at natural breakpoints, not before core play
+- [ ] Payment UI is explicit and does not gate core gameplay
 - [ ] Realtime connections cleaned up in `onMount` return function
 - [ ] `bun run test` passes with zero failures

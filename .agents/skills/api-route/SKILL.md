@@ -40,6 +40,8 @@ import type {
 } from '@devvit/web/shared'
 ```
 
+Use the import style already present in the repo. In Devvit Web apps, some capabilities may be exposed from `@devvit/web/server`; older or capability-specific code may import from packages such as `@devvit/notifications` or `@devvit/media`.
+
 ## Route handler pattern
 
 ```typescript
@@ -104,6 +106,15 @@ return c.json<TriggerResponse>({ status: 'ok' })
 ```typescript
 return c.json<TaskResponse>({ status: 'ok' })
 ```
+
+## Devvit-sensitive route guardrails
+
+- User-action routes (post/comment/subscribe as user) must be called only from explicit, separate UI actions and must never gate gameplay.
+- Generic score comment routes must submit as the user and reply to a single stickied score comment.
+- Subscribe routes must call `reddit.subscribeToCurrentSubreddit()` only after explicit user action; do not try to read subscription state from Reddit.
+- Notification routes require approved gated beta access. Use Devvit opt-in APIs as source of truth; do not store device tokens or custom push subscriptions.
+- Payment fulfillment/refund routes must return the typed payment handler response and grant/revoke only the promised entitlement.
+- Deletion trigger routes must remove stored Reddit user content or identifying data for deleted posts/comments/accounts.
 
 ## Context guard helpers
 
@@ -234,6 +245,7 @@ if (owner !== userId) {
 - No filesystem access — use Redis or `media.upload()`
 - No native Node modules (sharp, ffmpeg) — use external services
 - All server endpoints must start with `/api/` (client-facing) or `/internal/` (platform)
+- HTTP fetch domains must be exact approved hostnames; do not add wildcards, protocols, or paths to config
 
 ## Checklist before finishing
 - [ ] Tests written FIRST in `src/server/__tests__/` using `@devvit/test`
@@ -248,4 +260,9 @@ if (owner !== userId) {
 - [ ] Identity from `context.userId`, never from request body
 - [ ] Response contains only client-necessary fields
 - [ ] Typed request/response types used for menu/trigger/scheduler handlers
+- [ ] User-action routes enforce explicit, separate, non-gating behavior in tests
+- [ ] Notification routes use Devvit opt-in APIs only and are gated by approval assumptions
+- [ ] Payment fulfill/refund routes test accepted and rejected orders
+- [ ] Deletion triggers remove stored Reddit content/identity references
+- [ ] External HTTP calls have exact approved domains and tests mock `fetch`
 - [ ] `bun run test` passes with zero failures

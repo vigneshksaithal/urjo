@@ -31,6 +31,13 @@ import { redis } from '@devvit/redis'
 | Leaderboard | `leaderboard:{scope}:{timeframe}` | `leaderboard:wins:daily` |
 | Global counter | `stats:{metric}` | `stats:totalGames` |
 
+## Key design rules
+
+- Redis data is namespaced per app installation/subreddit. Do not assume one installation can read another installation's keys.
+- Devvit Redis does not support listing every key globally. Store related records under stable collection keys when you need to find them again.
+- For cross-community leaderboards or analytics, use a deliberate shared service over HTTP Fetch instead of assuming Redis is global.
+- If storing Reddit user content or identifying data, add deletion-trigger cleanup and TTL/maintenance strategy.
+
 ## Supported Redis commands
 
 ### Simple read/write
@@ -75,11 +82,59 @@ const top10 = await redis.zRange('leaderboard:wins', 0, 9, { by: 'rank', reverse
 // returns array of { member: string, score: number }
 ```
 
+Use sorted sets for set-like or queue-like behavior:
+
+```typescript
+// Unique unordered collection: every member gets the same score
+await redis.zAdd('daily:players:2026-06-26', { member: userId, score: 0 })
+
+// FIFO queue: timestamp score, then process oldest entries with zRange + zRem
+await redis.zAdd('queue:cleanup', { member: jobId, score: Date.now() })
+```
+
+### Stable collection keys
+
+Use hashes when you must scan or iterate known records:
+
+```typescript
+await redis.hSet('app:user-profiles', {
+  [userId]: JSON.stringify(profile),
+})
+
+const page = await redis.hScan('app:user-profiles', 0)
+```
+
+Prefer `hScan` / `hKeys` on a known hash over scattering records across keys you cannot list later.
+
+### Bitfields (dense streaks/flags)
+
+Use bitfields for compact daily completion flags, dense booleans, or small counters:
+
+```typescript
+await redis.bitfield(`user:${userId}:streak:${year}`, 'set', 'u1', `#${dayIndex}`, 1)
+const [completed] = await redis.bitfield(`user:${userId}:streak:${year}`, 'get', 'u1', `#${dayIndex}`)
+```
+
+Validate `year` and `dayIndex` before touching Redis. For daily streaks, write from the server-verified completion path only and anchor the bit to the content's UTC date, not the client clock.
+
 ### Key expiration
 
 ```typescript
 await redis.expire('session:abc', 3600)         // seconds
 const remaining = await redis.expireTime('key')  // seconds remaining
+```
+
+For temporary state, prefer TTLs. For long-lived sorted sets or hashes, cap what you display and schedule cleanup jobs for old data.
+
+### Compressed values
+
+For large JSON values or historical payloads that still belong in Redis, use `redisCompressed` and do not mix clients on the same key.
+
+```typescript
+import { redisCompressed } from '@devvit/redis'
+
+await redisCompressed.set('cache:heavy-payload', JSON.stringify(payload))
+const raw = await redisCompressed.get('cache:heavy-payload')
 ```
 
 ### Transactions
@@ -114,6 +169,15 @@ Transaction limits: max 20 concurrent per installation, 5-second execution timeo
 
 - Prefer `hGetAll` over multiple `hGet` calls
 - Prefer `mGet` / `mSet` over multiple `get` / `set` calls
+
+## Scheduled maintenance
+
+Large migrations, backfills, leaderboard cleanup, and old-record deletion can exceed request limits. Process them in bounded scheduler batches:
+
+- Store a cursor/progress marker in Redis
+- Process a small fixed number of records per task run
+- Schedule the next one-off task if more work remains
+- Avoid deleting arbitrary data at write time just because storage is full
 
 ## Null safety (noUncheckedIndexedAccess is on)
 
@@ -152,5 +216,10 @@ const data = await cache('leaderboard-top10', async () => {
 - [ ] Batch reads used where multiple keys needed
 - [ ] Expiration set on ephemeral data (sessions, temp state)
 - [ ] Transactions used for multi-step atomic operations
+- [ ] Dense daily flags/streaks use bitfields where appropriate
+- [ ] Iterable collections use stable hash/sorted-set keys with scan/cursor strategy
+- [ ] Large Redis values use `redisCompressed` consistently
+- [ ] Maintenance/migrations are bounded scheduler jobs, not one huge request
+- [ ] Stored Reddit user content has deletion-trigger cleanup
 - [ ] Total storage estimate documented if significant
 - [ ] `bun run test` passes with zero failures

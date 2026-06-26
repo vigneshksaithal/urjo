@@ -1,6 +1,6 @@
 ---
 name: devvit-config
-description: Modify devvit.json to add menu items, triggers, scheduler tasks, forms, permissions, or post entrypoints. Use when wiring new server endpoints to Reddit UI actions.
+description: Modify devvit.json to add menu items, triggers, scheduler tasks, forms, permissions, settings/secrets, payments, or post entrypoints. Use when wiring new server endpoints to Reddit UI actions or configurable app values.
 ---
 
 # Update Devvit Config
@@ -18,8 +18,7 @@ description: Modify devvit.json to add menu items, triggers, scheduler tasks, fo
     "entrypoints": {
       "default": {
         "entry": "index.html",
-        "height": "tall",       // "short" | "regular" | "tall"
-        "inline": true          // renders inside post feed, not popup
+        "height": "tall"        // "short" | "regular" | "tall"
       }
     }
   },
@@ -33,6 +32,7 @@ description: Modify devvit.json to add menu items, triggers, scheduler tasks, fo
   "scheduler": { ... },
   "forms": { ... },
   "payments": { ... },
+  "settings": { ... },
   "marketingAssets": { ... },
   "scripts": { ... },
   "dev": { ... }
@@ -42,7 +42,14 @@ description: Modify devvit.json to add menu items, triggers, scheduler tasks, fo
 ## Required properties
 
 - **`name`** (required): 3-16 chars, lowercase letters/numbers/hyphens, starts with a letter.
-- At least one of `post`, `server`, or `blocks` must be present.
+- At least one of `post` or `server` must be present for Devvit Web apps. Treat Blocks as legacy; do not add Blocks for new work.
+
+## Devvit 0.13 guardrails
+
+- Do not add `inline` to post entrypoints. It is deprecated and implied.
+- Do not use `splash` or `loading` options in `submitCustomPost()`; use a dedicated HTML entrypoint for launch/loading screens.
+- Prefer Devvit Web for new work. Do not add Blocks-only APIs such as `Devvit.addCustomPostType()`.
+- Request only the permissions actually used by the feature.
 
 ## Adding a menu item
 
@@ -67,7 +74,7 @@ Menu items appear in Reddit's "..." menu on posts or subreddits. Each maps to an
 | Field | Values | Notes |
 |-------|--------|-------|
 | `location` | `"subreddit"`, `"post"`, `"comment"` | Where the menu item appears |
-| `forUserType` | `"moderator"`, `"member"` | Who can see it |
+| `forUserType` | `"moderator"` or omit for everyone | Who can see it |
 | `endpoint` | `/internal/menu/{name}` | Must match a Hono route |
 
 After adding a menu item, create the matching Hono handler:
@@ -244,6 +251,16 @@ Map form identifiers to submission endpoints (used with menu response forms):
 | `payments` | In-app purchases |
 | `reddit.asUser` | Submitting posts/comments as the user (requires app approval) |
 
+### User action permissions
+
+Only add `permissions.reddit.asUser` when the app actually performs user actions. These actions have review requirements:
+
+- `SUBMIT_POST`: explicit user-created posts only, with `runAs: 'USER'` and `userGeneratedContent`.
+- `SUBMIT_COMMENT`: explicit score/comment sharing only. Generic score comments must reply to a single stickied score comment.
+- `SUBSCRIBE_TO_SUBREDDIT`: explicit, separate subscribe button only. There is no API to check whether the user is already subscribed; store only app-local UI state if needed.
+
+Never combine user actions with gameplay actions (`Play Again and Subscribe`, `Post Score to Continue`, `Comment & Continue`). Posting, commenting, and subscribing must be clear, separate, manual choices.
+
 ## Payments configuration
 
 ```json
@@ -257,6 +274,27 @@ Map form identifiers to submission endpoints (used with menu response forms):
   }
 }
 ```
+
+Payments are policy-sensitive. Only add `payments: true` and payment endpoints when products are registered/reviewed, the fulfill endpoint grants the promised digital good, and the refund endpoint revokes any reversible entitlement. Do not paywall core gameplay, use deceptive pricing, or direct users to off-platform payments.
+
+## Settings and secrets
+
+Use settings for small configurable values, not player state or content storage. Read settings server-side:
+
+```typescript
+import { settings } from '@devvit/web/server'
+
+const apiKey = await settings.get('api-key')
+const maxAttempts = await settings.get('max-attempts')
+```
+
+Guidance:
+
+- App secrets are global developer-managed values such as API keys. Mark them secret in `devvit.json`; never commit real values.
+- Installation settings are per-subreddit values such as difficulty, schedule choices, or feature toggles.
+- Validate and default setting values after `settings.get()` before using them.
+- Store per-user state, large JSON, content archives, and progress in Redis, not settings.
+- After defining settings in `devvit.json`, build/playtest before setting secrets via the Devvit CLI.
 
 ## Scripts configuration
 
@@ -300,8 +338,7 @@ Icon must be 1024x1024 PNG.
     "entrypoints": {
       "default": {
         "entry": "src/client/preview.html",
-        "height": "regular",
-        "inline": true
+        "height": "regular"
       },
       "game": {
         "entry": "src/client/game.html"
@@ -338,4 +375,9 @@ Can be overridden by `DEVVIT_SUBREDDIT` env var.
 - [ ] Corresponding server handler exists and handles errors
 - [ ] Typed request/response types imported from `@devvit/web/shared`
 - [ ] Required permissions added for features used
+- [ ] Settings declared with correct scope/type/secret flag and read server-side only
+- [ ] No secrets hardcoded in source code
+- [ ] No deprecated `inline`, `splash`, or Blocks-only config for new work
+- [ ] User actions are explicit, separate, non-gating, and covered by `reddit.asUser`
+- [ ] Payments do not limit core gameplay and include fulfill/refund handlers
 - [ ] `bun run test` passes with zero failures

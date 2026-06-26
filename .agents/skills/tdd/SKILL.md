@@ -211,6 +211,8 @@ test('sends push notifications', async ({ mocks, userId }) => {
 })
 ```
 
+Notification features are gated beta behavior. Tests should verify the app uses Devvit notification APIs as the source of truth (`optInCurrentUser`, `optOutCurrentUser`, `isOptedIn`, `listOptedInUsers`, `enqueue`) and does not maintain custom device-token or Redis opt-in systems.
+
 ## Testing HTTP (blocked by default)
 
 HTTP requests throw by default in tests. Mock `globalThis.fetch` to test code that makes HTTP calls:
@@ -248,6 +250,23 @@ test('mocks external HTTP', async () => {
 | `server/lib/` | Business logic, Redis patterns | In-memory Redis (automatic) |
 | `server/routes/` | HTTP status, response shape, errors | `app.request()` + `vi.spyOn` |
 | `client/*.ts` | Extracted logic (not .svelte) | Standard Vitest mocks |
+
+## Compliance tests to add
+
+When the feature touches the behavior below, write tests for the rule, not just the happy path:
+
+| Feature | Required tests |
+|---|---|
+| User score comments | Uses `runAs: 'USER'`, replies to stored sticky comment, rejects missing post/user context |
+| User-created posts | Requires explicit endpoint action, includes `userGeneratedContent`, validates UGC shape/size |
+| Subscribe action | Separate endpoint/action, does not gate gameplay, handles failure without blocking replay |
+| Logged-out play | Core game/read endpoints work without `context.userId`; save/share/progression prompts require login |
+| Streaks | Server-verified completion only, UTC content date, new user streak `0`, leap-year/year-boundary cases |
+| Media uploads | Rejects invalid body, unbounded data URLs, unsupported media type, and non-allowlisted remote URLs |
+| Deletion triggers | Removes stored post/comment/account content and identity references while keeping allowed metadata |
+| Scheduler batches | Persists cursor, schedules next job only when more work remains, respects batch size |
+| Payments | Fulfill grants promised entitlement; refund revokes reversible entitlement; rejected orders return reason |
+| Notifications | Uses Devvit opt-in APIs only, batches recipients, handles `enqueue` failures without aborting all users |
 
 ## TDD rules
 

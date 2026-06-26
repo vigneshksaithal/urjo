@@ -130,6 +130,17 @@ const post = await reddit.submitCustomPost({
 - During playtest, `runAs: 'USER'` falls back to app account for non-owner users
 - After app approval, it operates on behalf of all users
 
+### User action review rules
+
+Posting, commenting, and subscribing as the user are Devvit user actions. They must be:
+
+- Triggered by an explicit manual action, such as a clearly labeled button
+- Separate from gameplay actions (`Play Again`, `Continue`, `Next Level`)
+- Optional and non-gating; never require or encourage posting/commenting/subscribing to progress
+- Transparent about what will appear on Reddit and that it will use the user's account
+
+Do not create hidden, automatic, bundled, or surprise user actions. Examples that fail review: `Play Again and Subscribe`, `Post Score to Play Next Level`, `Comment & Continue`.
+
 ### Submit a comment
 
 ```typescript
@@ -139,6 +150,13 @@ await reddit.submitComment({
   runAs: 'USER',  // optional — defaults to 'APP'
 })
 ```
+
+Score sharing has stricter rules:
+
+- Generic score comments must use `runAs: 'USER'`
+- Generic score comments must reply to one stickied score-thread comment
+- Top-level score comments are only appropriate when the user adds meaningful custom commentary
+- The share button must be separate from continuing or replaying the game
 
 ### Get a post or comment by ID
 
@@ -176,6 +194,21 @@ await reddit.setPostFlair({
 })
 ```
 
+### Subscribe to current subreddit
+
+Requires `permissions.reddit.asUser: ["SUBSCRIBE_TO_SUBREDDIT"]` and app approval. `subscribeToCurrentSubreddit()` does not take `runAs`; with approval and permission it subscribes the current user.
+
+```typescript
+await reddit.subscribeToCurrentSubreddit()
+```
+
+Rules:
+
+- Subscribe only after an explicit subscribe button or equivalent manual action
+- Keep subscribe separate from gameplay, score posting, and replay buttons
+- Never gate progress, rewards, or access behind subscribing
+- There is no API to check whether the user is already subscribed; if needed, store app-local UI state after a subscribe action
+
 ### Navigation response (menu items)
 
 When a menu item handler needs to redirect the user to a post:
@@ -203,6 +236,8 @@ app.post('/internal/menu/create-game', async (c) => {
 - `setPostData()` replaces the entire object — merge existing fields first
 - Error handling follows the `api-route` skill pattern (try/catch, `instanceof Error`)
 - Prefer `getCurrentUsername()` over `getCurrentUser()` when you only need the name
+- Apps cannot upvote/downvote, follow users, or add friends on behalf of users or app accounts
+- If storing Reddit user content or identifying data, handle post/comment/account deletion triggers and remove stored content as required by Devvit Rules
 
 ## Checklist before finishing
 - [ ] Tests written FIRST in `src/server/__tests__/` using `@devvit/test`
@@ -212,4 +247,8 @@ app.post('/internal/menu/create-game', async (c) => {
 - [ ] Menu item handlers return `UiResponse` with appropriate action
 - [ ] `runAs: 'USER'` includes `userGeneratedContent` field
 - [ ] `permissions.reddit.asUser` added to devvit.json when using user actions
+- [ ] User actions are explicit, separate, transparent, and never required for progression
+- [ ] Generic score comments reply to one stickied score comment
+- [ ] Subscribe action is separate and does not assume subscription state can be read
+- [ ] Stored Reddit user content has deletion-trigger cleanup
 - [ ] `bun run test` passes with zero failures
