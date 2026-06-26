@@ -86,11 +86,12 @@ Available skills in `.agents/skills/`:
 | `svelte-component/SKILL.md` | Creating or modifying Svelte components |
 | `redis-schema/SKILL.md` | Any Redis key/data structure changes |
 | `reddit-api/SKILL.md` | Interacting with Reddit API |
-| `devvit-config/SKILL.md` | Devvit configuration changes |
+| `devvit-config/SKILL.md` | Devvit configuration changes, settings, secrets, permissions, menu items, triggers, forms, payments |
 | `realtime/SKILL.md` | Live updates, multiplayer, event-driven features |
-| `scheduler/SKILL.md` | Cron jobs, delayed tasks, timed events |
+| `daily-content/SKILL.md` | Daily/weekly challenges, scheduler tasks, delayed jobs, timed events, cleanup jobs, content calendars |
+| `engagement-loops/SKILL.md` | Hooked loops, retention mechanics, viral/social mechanics, feed-first game design |
+| `progression-system/SKILL.md` | Streaks, XP, levels, leagues, leaderboards, achievements, flair, player identity |
 | `media-uploads/SKILL.md` | Uploading images to Reddit at runtime |
-| `user-actions/SKILL.md` | Posting, commenting, or subscribing on behalf of users |
 
 ### Step 2: Clarify Requirements
 
