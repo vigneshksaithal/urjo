@@ -3,7 +3,7 @@
   "name": "devvit-svelte-template",
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "bun@1.3.13",
+  "packageManager": "bun@1.3.14",
   "scripts": {
     "postinstall": "vite build",
     "build": "vite build",
