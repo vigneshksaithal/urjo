@@ -20,6 +20,7 @@ export const createStickyComment = async (
 		id: postId as `t3_${string}`,
 		text,
 	})
+	await stickyComment.distinguish(true)
 
 	await redis.hSet(`game:${postId}:meta`, {
 		stickyCommentId: stickyComment.id,

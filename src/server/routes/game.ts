@@ -44,6 +44,8 @@ import {
 	setGridSizePreference,
 	getGridSkillLevel,
 	setGridSkillLevel,
+	getPathLevel,
+	incrementPathLevel,
 	getGridHistory,
 	setGridHistory,
 	getISOWeek,
@@ -138,6 +140,13 @@ const buildChallengeTargetLine = (
 	return `Score to beat: ${scoreSeconds}s${mistakesText}`
 }
 
+const normalizeChallengeTitle = (value: unknown): string | undefined => {
+	if (typeof value !== 'string') return undefined
+	const title = value.trim()
+	if (title.length < 1 || title.length > 120) return undefined
+	return title
+}
+
 export const gameRouter = new Hono()
 
 // ─── checkChallengeBeat ──────────────────────────────────────────────────────
@@ -228,6 +237,8 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 				fastestTime: timeTaken.toString(),
 				championId: winnerId,
 			})
+			// Reverse index for account deletion: track all posts where this user is champion
+			await redis.zAdd(`user:${winnerId}:championOf`, { member: postId, score: Date.now() })
 		}
 
 		// Update the leaderboard comment
@@ -239,6 +250,10 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 			const previewDedupKey = `preview:beat:${postId}:${winnerId}`
 			const alreadyUpdatedPreview = await redis.get(previewDedupKey)
 			if (!alreadyUpdatedPreview) {
+				// Two-step write: a crash between set and expire would orphan this key.
+				// Acceptable: the preview just updates again on the next beat. The
+				// MULTI/EXEC-without-WATCH pattern is unavailable in Devvit's Redis
+				// client, and using WATCH here introduces worse failure modes.
 				await redis.set(previewDedupKey, 'true')
 				await redis.expire(previewDedupKey, 3600) // 1-hour TTL dedup
 
@@ -257,7 +272,8 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 			console.error('[Preview] Challenge beat preview update failed (non-critical):', previewErr)
 		}
 
-		// Mark beat as recorded — after stats are written so partial failure doesn't lose data
+		// Mark beat as recorded — after stats are written so partial failure doesn't lose data.
+		// Two-step write: see previewDedupKey comment above for rationale.
 		await redis.set(notifyKey, 'true')
 		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
 
@@ -654,6 +670,7 @@ gameRouter.get('/api/game/state', async (c) => {
 					gridSize: newPuzzle.gridSize.toString(),
 					instanceId,
 				})
+				await redis.expire(`user:${userId}:game:${postId}:currentPuzzle`, 2592000) // 30-day TTL
 				puzzle = {
 					colors: newPuzzle.colors,
 					numbers: newPuzzle.numbers,
@@ -670,6 +687,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			? (parseInt(puzzle.gridSize, 10) as GridSize)
 			: gridSizePreference
 		const skillLevel = await getGridSkillLevel(userId, effectiveGridSize)
+		const pathLevel = await getPathLevel(userId)
 
 		const tutorialCompleted = (await redis.get(`user:${userId}:tutorialCompleted`)) === 'true'
 		const streak = await getStreakData(userId)
@@ -862,6 +880,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			tutorialCompleted,
 			isLoggedIn: true,
 			skillLevel,
+			pathLevel,
 			gridSizePreference,
 			postId,
 			isChallenge,
@@ -947,6 +966,7 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 				gridSize: newPuzzle.gridSize.toString(),
 				instanceId: makeInstanceId(),
 			})
+			await redis.expire(`user:${userId}:game:${postId}:currentPuzzle`, 2592000) // 30-day TTL
 			// Reset the server-side timer anchor so this freshly issued puzzle
 			// is timed from now, not from a stale earlier issuance.
 			const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
@@ -1164,6 +1184,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 		const currentLevel = await getGridSkillLevel(userId, gridSize)
 		const history = await getGridHistory(userId, gridSize)
+		const pathLevel = await incrementPathLevel(userId)
 
 		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel, mistakes, gridSize)
 
@@ -1395,6 +1416,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 				const dedupKey = `preview:updated:${postId}`
 				const alreadyUpdated = await redis.get(dedupKey)
 				if (alreadyUpdated === undefined) {
+					// Two-step write: see checkChallengeBeat previewDedupKey for rationale.
 					await redis.set(dedupKey, '1')
 					await redis.expire(dedupKey, 86400) // 24h TTL
 
@@ -1459,6 +1481,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 			performanceScore,
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
+			pathLevel,
 			isLoggedIn: true,
 			streak,
 			coinReward,
@@ -1666,6 +1689,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 			gridSize: newPuzzle.gridSize.toString(),
 			instanceId: makeInstanceId(),
 		})
+		await redis.expire(`user:${userId}:game:${postId}:currentPuzzle`, 2592000) // 30-day TTL
 		// Reset the server-side timer anchor for the freshly issued puzzle so
 		// run-again solves are timed consistently (server-authoritative).
 		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
@@ -1804,10 +1828,33 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
 		let stickyCommentId = postMeta['stickyCommentId']
 		if (!stickyCommentId) {
+			// Use an optimistic lock so only one concurrent request creates the sticky.
+			// 15-second TTL on the lock key ensures it is always released.
+			const lockKey = `game:${postId}:stickyLock`
+			const lockTxn = await redis.watch(lockKey)
+			const existingLock = await redis.get(lockKey)
+			if (existingLock !== undefined) {
+				// Another request is already creating the sticky — ask the client to retry.
+				// Unwatch releases the transaction slot before returning.
+				await lockTxn.unwatch()
+				return c.json({ error: 'Post is being set up. Try again in a moment.' }, 503)
+			}
+			await lockTxn.multi()
+			await lockTxn.set(lockKey, '1')
+			await lockTxn.expire(lockKey, 15)
+			const lockResult = await lockTxn.exec()
+			if (!lockResult || lockResult.length === 0) {
+				// Transaction aborted — another concurrent request won the race
+				return c.json({ error: 'Post is being set up. Try again in a moment.' }, 503)
+			}
 			try {
 				stickyCommentId = await createStickyComment(postId)
+				// Explicitly release lock now that stickyCommentId is stored in meta.
+				// Future requests will find it there and skip this branch entirely.
+				await redis.del(lockKey)
 			} catch (err) {
 				console.error('[ResultComment] Failed to create sticky comment:', err)
+				await redis.del(lockKey) // release lock so future requests can retry
 				return c.json({ error: 'Unable to post comment right now. Try again shortly.' }, 503)
 			}
 		}
@@ -1818,7 +1865,12 @@ gameRouter.post('/api/game/result-comment', async (c) => {
 			runAs: 'USER',
 		})
 
-		// Set dedup flag
+		// Set dedup flag. Two-step write: a crash between set and expire would orphan
+		// this key, permanently blocking the user from commenting on this post. We accept
+		// this risk because the window is sub-millisecond in Devvit's managed runtime.
+		// MULTI/EXEC without WATCH is unavailable in Devvit's Redis client, and using
+		// WATCH here would abort the write if a concurrent request modifies the key —
+		// a worse outcome since the comment was already posted successfully.
 		await redis.set(dedupKey, '1')
 		await redis.expire(dedupKey, RESULT_COMMENT_TTL)
 		// Aligns with viral channel `result_comment` recorded below.
@@ -1899,6 +1951,7 @@ gameRouter.post('/api/game/challenge', async (c) => {
 	try {
 		const body: ChallengeRequest = await c.req.json()
 		const { timeTaken, mistakes } = body
+		const customTitle = normalizeChallengeTitle(body.customTitle)
 
 		// Rate limit user-authored challenge posts to reduce spam risk.
 		const MAX_DAILY_CHALLENGES = 3
@@ -1952,7 +2005,8 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		]
 		// Rotate template based on hour to spread variety without randomness (deterministic)
 		const templateIndex = new Date().getUTCHours() % titleTemplates.length
-		const title = titleTemplates[templateIndex] ?? titleTemplates[0]!
+		const generatedTitle = titleTemplates[templateIndex] ?? titleTemplates[0]!
+		const title = customTitle ?? generatedTitle
 
 		if (!subredditName) return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' })
 
@@ -1989,7 +2043,9 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			beats: '0',
 		})
 
-		// Increment daily challenge counter (expires at 24h)
+		// Increment daily challenge counter (expires at 24h).
+		// Two-step write: see result-comment dedup for rationale. A crash here leaves a
+		// stale counter; the user can retry after it expires naturally.
 		const newCount = challengeCount + 1
 		await redis.set(challengeKey, newCount.toString())
 		await redis.expire(challengeKey, 86400)
@@ -2013,6 +2069,7 @@ ${targetLine}
 
 Think you can beat it? Play above! 🎯`,
 			})
+			await leaderboardComment.distinguish(true)
 			leaderboardCommentId = leaderboardComment.id
 		} catch (lbErr) {
 			console.error('[Challenge] Leaderboard comment failed (non-critical):', lbErr)
@@ -2029,6 +2086,8 @@ Think you can beat it? Play above! 🎯`,
 			createdAt: Date.now().toString(),
 		})
 		await incrementChallengesCreated(userId)
+		// Reverse index for account deletion: track challenge posts created by this user
+		await redis.zAdd(`user:${userId}:createdChallenges`, { member: newPost.id, score: Date.now() })
 		await trackChallengePostCreated(today, userId, newPost.id)
 
 		// ─── Custom post preview for feed engagement (VIRAL: curiosity-gap masking) ─

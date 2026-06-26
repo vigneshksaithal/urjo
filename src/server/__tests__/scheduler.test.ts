@@ -26,7 +26,10 @@ const schedulerRequest = async (): Promise<Response> =>
 
 const mockRedditApis = (postId = 't3_sched1') => {
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: postId } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_sticky1' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({
+        id: 't1_sticky1',
+        distinguish: vi.fn().mockResolvedValue(undefined),
+    } as never)
 }
 
 const test = createDevvitTest({ userId: 't2_testuser', subredditName: 'testsub', subredditId: 't5_testsub' })
@@ -555,7 +558,10 @@ testProperty11SchedulerRuns(
                     }
                 }
             }
-            return { id: 't1_prop11comment' } as never
+            return {
+                id: 't1_prop11comment',
+                distinguish: vi.fn().mockResolvedValue(undefined),
+            } as never
         })
 
         const res1 = await withCtx(() => schedulerRequest())

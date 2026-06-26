@@ -318,8 +318,12 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
 })
 
 testResultComment('POST /api/game/result-comment creates missing sticky comment before replying', async () => {
+    const distinguishSticky = vi.fn().mockResolvedValue(undefined)
     vi.spyOn(webReddit, 'submitComment')
-        .mockResolvedValueOnce({ id: 't1_created_sticky' } as never)
+        .mockResolvedValueOnce({
+            id: 't1_created_sticky',
+            distinguish: distinguishSticky,
+        } as never)
         .mockResolvedValueOnce({ id: 't1_result_comment' } as never)
 
     const res = await withCtx(CTX, () =>
@@ -345,6 +349,7 @@ testResultComment('POST /api/game/result-comment creates missing sticky comment 
             runAs: 'USER',
         }),
     )
+    expect(distinguishSticky).toHaveBeenCalledWith(true)
 
     const meta = await withCtx(CTX, () => redis.hGetAll('game:t3_testpost:meta'))
     expect(meta['stickyCommentId']).toBe('t1_created_sticky')

@@ -32,13 +32,13 @@
     commentingVictory?: boolean;
 
     /** Called when Challenge button is clicked (optional) */
-    onChallenge?: () => void;
+    onChallenge?: (customTitle?: string) => void;
 
     /** Whether a challenge post has already been created this session */
     hasChallenged?: boolean;
 
-    /** URL of the created challenge post */
-    challengeUrl?: string | null;
+    /** Editable title seeded into the challenge post field */
+    defaultChallengeTitle?: string;
 
     /** Personal challenge beat info (if user beat a challenge) */
     personalChallengeBeat?: {
@@ -65,7 +65,7 @@
     commentingVictory = false,
     onChallenge,
     hasChallenged = false,
-    challengeUrl = null,
+    defaultChallengeTitle = "",
     personalChallengeBeat = null,
     puzzleColors = "",
     gridSize = 4,
@@ -73,6 +73,22 @@
   }: Props = $props();
 
   let copied = $state(false);
+  let challengeTitle = $state("");
+  let challengeTitleSeed = $state("");
+  const challengeTitleKey = $derived(`${isCompleted}:${defaultChallengeTitle}`);
+
+  $effect(() => {
+    if (!isCompleted) {
+      challengeTitle = "";
+      challengeTitleSeed = "";
+      return;
+    }
+
+    if (challengeTitleSeed !== challengeTitleKey) {
+      challengeTitle = "";
+      challengeTitleSeed = challengeTitleKey;
+    }
+  });
 
   function buildShareText(): string {
     if (!puzzleColors || gridSize < 1) return "";
@@ -104,6 +120,19 @@
     } catch {
       // clipboard unavailable in some webview environments — fail silently
     }
+  }
+
+  function handleChallengeTitleInput(event: Event): void {
+    challengeTitle = (event.currentTarget as HTMLInputElement).value;
+  }
+
+  function handleChallenge(): void {
+    const trimmedTitle = challengeTitle.trim();
+    onChallenge?.(
+      trimmedTitle.length > 0
+        ? trimmedTitle
+        : defaultChallengeTitle || undefined,
+    );
   }
 </script>
 
@@ -173,6 +202,22 @@
         </button>
       {/if}
 
+      {#if onChallenge && loginGate.showSocialActions && !hasChallenged}
+        <label class="flex flex-col gap-1.5">
+          <span class="text-xs font-semibold text-theme-text-muted">
+            Challenge title
+          </span>
+          <input
+            type="text"
+            value={challengeTitle}
+            oninput={handleChallengeTitleInput}
+            maxlength="120"
+            placeholder="Write your challenge title"
+            class="w-full rounded-xl border border-theme-border bg-theme-bg-secondary px-3 py-3 text-sm font-semibold text-theme-text-primary outline-none transition-colors placeholder:text-theme-text-muted focus:border-yellow-400"
+          />
+        </label>
+      {/if}
+
       <div class="grid grid-cols-2 gap-3 w-full">
         <button
           onclick={onContinue}
@@ -183,7 +228,7 @@
 
         {#if onChallenge && loginGate.showSocialActions}
           <button
-            onclick={onChallenge}
+            onclick={handleChallenge}
             disabled={hasChallenged}
             class="w-full px-4 py-3.5 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-sm hover:bg-yellow-400 active:scale-95 transition-all disabled:opacity-60 disabled:active:scale-100"
           >

@@ -133,6 +133,13 @@ export const recordSeasonScore = async (
     const newScore = (currentScore ?? 0) + score
     await redis.zAdd(key, { member: userId, score: newScore })
     await redis.expire(key, 7776000) // 90 days
+
+    // Reverse index for account deletion: record this user's first participation
+    // in this season so deleteUserData can remove them from all past leaderboards
+    // without a full key scan (which Devvit Redis does not support).
+    if (currentScore === undefined) {
+        await redis.zAdd(`user:${userId}:seasonParticipation`, { member: seasonId, score: Date.now() })
+    }
 }
 
 /**

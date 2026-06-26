@@ -41,6 +41,11 @@ const challengeRequest = (body: object) =>
         body: JSON.stringify(body),
     })
 
+const stickyComment = (id: string, distinguish = vi.fn().mockResolvedValue(undefined)) => ({
+    id,
+    distinguish,
+})
+
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
 const seedChallengePuzzle = async (
@@ -371,7 +376,7 @@ challengeTest('challenge route: stores postType and leaderboardCommentId in a si
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_newpost1' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_leaderboard' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_leaderboard') as never)
     vi.spyOn(reddit, 'getSnoovatarUrl').mockResolvedValue('https://img/c.png' as never)
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>
@@ -404,7 +409,10 @@ challengeTest('challenge route: puts generic score details in the pinned thread 
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_scorethread' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_score_thread' } as never)
+    const distinguishSticky = vi.fn().mockResolvedValue(undefined)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(
+        stickyComment('t1_score_thread', distinguishSticky) as never
+    )
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>
         challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
@@ -416,6 +424,7 @@ challengeTest('challenge route: puts generic score details in the pinned thread 
         id: 't3_scorethread',
         text: expect.stringContaining('Score to beat: 45s with zero mistakes'),
     })
+    expect(distinguishSticky).toHaveBeenCalledWith(true)
 })
 
 challengeTest('challenge route: returns comments URL and increments challengesCreated', async () => {
@@ -427,7 +436,7 @@ challengeTest('challenge route: returns comments URL and increments challengesCr
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_newposturl' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_url' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_url') as never)
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>
         challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
@@ -445,7 +454,7 @@ challengeTest('challenge route: returns comments URL and increments challengesCr
     expect(challengePosts).toBe('1')
 })
 
-challengeTest('challenge route: ignores custom titles and uses a safe generated title', async () => {
+challengeTest('challenge route: uses a trimmed custom title when provided', async () => {
     const sourcePostId = 't3_sourcepost_custom_title'
     await redis.hSet(`game:${sourcePostId}:puzzle`, {
         colors: 'rbrb', numbers: '----', solution: 'rbrb',
@@ -454,7 +463,7 @@ challengeTest('challenge route: ignores custom titles and uses a safe generated 
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_customtitle' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_custom' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_custom') as never)
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>
         challengeRequest({
@@ -468,15 +477,15 @@ challengeTest('challenge route: ignores custom titles and uses a safe generated 
     expect(res.status).toBe(200)
     expect(reddit.submitCustomPost).toHaveBeenCalledWith(
         expect.objectContaining({
-            title: expect.not.stringContaining('Can you beat my zero-mistake run?'),
+            title: 'Can you beat my zero-mistake run?',
             userGeneratedContent: {
-                text: expect.not.stringContaining('Can you beat my zero-mistake run?'),
+                text: 'Can you beat my zero-mistake run?',
             },
         }),
     )
 })
 
-challengeTest('challenge route: ignores overlong custom titles instead of publishing user text', async () => {
+challengeTest('challenge route: ignores overlong custom titles and uses a generated title', async () => {
     const sourcePostId = 't3_sourcepost_long_title'
     await redis.hSet(`game:${sourcePostId}:puzzle`, {
         colors: 'rbrb', numbers: '----', solution: 'rbrb',
@@ -485,7 +494,7 @@ challengeTest('challenge route: ignores overlong custom titles instead of publis
 
     const submitSpy = vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_generatedtitle' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_generated' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_generated') as never)
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>
         challengeRequest({
@@ -516,7 +525,7 @@ challengeTest('challenge route: initializes stats with attempts=0 and beats=0', 
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_newpost2' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb2' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb2') as never)
 
     await withContext(sourcePostId, 't2_challenger', () =>
         challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
@@ -540,7 +549,7 @@ challengeTest('challenge route: precomputes and stores challenger username and a
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_avatarpost' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_avatar' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_avatar') as never)
     vi.spyOn(reddit, 'getSnoovatarUrl').mockResolvedValue('https://img/challenger.png' as never)
 
     await withContext(sourcePostId, 't2_challenger', () =>
@@ -565,7 +574,7 @@ challengeTest('challenge route: still creates the post when snoovatar lookup fai
 
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_noavatarpost' } as never)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_lb_noavatar' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_noavatar') as never)
     vi.spyOn(reddit, 'getSnoovatarUrl').mockRejectedValue(new Error('no avatar'))
 
     const res = await withContext(sourcePostId, 't2_challenger', () =>

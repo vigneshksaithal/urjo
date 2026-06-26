@@ -20,6 +20,7 @@
 	import ModPreviewPanel from "../components/ModPreviewPanel.svelte";
 	import ConfirmDialog from "../components/ConfirmDialog.svelte";
 	import CompletionOverlay from "../components/CompletionOverlay.svelte";
+	import LevelPathOverlay from "../components/LevelPathOverlay.svelte";
 	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
 	import Megaphone from "lucide-svelte/icons/megaphone";
@@ -44,6 +45,7 @@
 		coins?: number;
 		streakData: StreakData;
 		skillLevel?: number;
+		pathLevel?: number;
 		seasonRank?: number | null;
 		seasonPoints?: number;
 		seasonProgress?:
@@ -101,7 +103,7 @@
 		onCellChange: (row: number, col: number, color: CellColor) => void;
 		onNextChallenge: () => void;
 		onRestart: () => void;
-		onChallenge: () => void;
+		onChallenge: (customTitle?: string) => void;
 		onOpenAnalytics?: () => void;
 		onGridSizeChange?: (size: number) => void;
 		onEngagementDismissed?: () => void;
@@ -148,6 +150,7 @@
 		engagement,
 		puzzleColors,
 		skillLevel = 1,
+		pathLevel = 1,
 		puzzleNumber = 0,
 		notifyOptIn = false,
 		postId,
@@ -184,7 +187,9 @@
 	});
 	let showModPreview = $state(false);
 	let showChallengeConfirm = $state(false);
+	let pendingChallengeTitle = $state("");
 	let showVictoryCommentConfirm = $state(false);
+	let showLevelPath = $state(false);
 	let commentingVictory = $state(false);
 	let hasCommentedVictory = $state(false);
 	let dismissedMilestoneKey = $state<string | null>(null);
@@ -192,6 +197,12 @@
 	let showAchievements = $state(false);
 	// Personal challenge banner - dismissed when user clicks X
 	let showPersonalChallengeBanner = $state(true);
+
+	$effect(() => {
+		if (!isCompleted) {
+			showLevelPath = false;
+		}
+	});
 
 	// ─── Notify toggle ─────────────────────────────────────────────────────────
 	// Optimistic update with revert on failure (Reqs 13.1–13.5)
@@ -262,13 +273,30 @@
 		showLoginPrompt();
 	}
 
+	function requestChallenge(customTitle?: string): void {
+		pendingChallengeTitle = customTitle?.trim() ?? "";
+		showChallengeConfirm = true;
+	}
+
 	function confirmChallenge(): void {
 		showChallengeConfirm = false;
-		onChallenge();
+		onChallenge(pendingChallengeTitle.length > 0 ? pendingChallengeTitle : undefined);
+	}
+
+	function buildChallengePostTitle(): string {
+		const seconds = Math.max(timeTaken ?? 0, 1);
+		const perfectTag = mistakes === 0 ? " (zero mistakes)" : "";
+		const challenger = username ? ` from u/${username}` : "";
+		return `Urjo ${gridSize}×${gridSize} challenge${challenger}: ${seconds}s target${perfectTag}`;
 	}
 
 	function handlePrimaryCta(): void {
+		showLevelPath = true;
+	}
+
+	function handleLevelSelect(): void {
 		void fireOnce(postId ?? "", "next-puzzle");
+		showLevelPath = false;
 		hasCommentedVictory = false;
 		onNextChallenge();
 	}
@@ -616,14 +644,25 @@
 	onCommentVictory={() => (showVictoryCommentConfirm = true)}
 	{hasCommentedVictory}
 	{commentingVictory}
-	onChallenge={() => (showChallengeConfirm = true)}
+	onChallenge={requestChallenge}
 	{hasChallenged}
-	{challengeUrl}
+	defaultChallengeTitle={buildChallengePostTitle()}
 	{puzzleColors}
 	{gridSize}
 	{puzzleNumber}
 	personalChallengeBeat={personalChallengeBeat()}
 />
+
+{#if showLevelPath}
+	<LevelPathOverlay
+		isOpen={true}
+		currentLevel={pathLevel}
+		streak={streakData.currentStreak}
+		{coins}
+		{puzzleNumber}
+		onLevelSelect={handleLevelSelect}
+	/>
+{/if}
 
 <!-- Confetti effect -->{#if showConfetti}
 	<ConfettiEffect />
@@ -635,7 +674,7 @@
 	title="Create Rival Challenge?"
 	message="This posts a public challenge to Reddit{username
 		? ` as u/${username}`
-		: ''} using an Urjo-generated title. Others will see it."
+		: ' as your Reddit account'} with the title shown above. Others will see it."
 	confirmLabel="Create"
 	onConfirm={confirmChallenge}
 	onCancel={() => (showChallengeConfirm = false)}
@@ -647,7 +686,7 @@
 	title="Comment Your Victory?"
 	message="Posts your victory publicly{username
 		? ` as u/${username}`
-		: ''} as a reply to the pinned comment on this post. Others will see it."
+		: ' as your Reddit account'} as a reply to the pinned comment on this post. Others will see it."
 	confirmLabel={commentingVictory ? "Commenting..." : "Comment"}
 	onConfirm={confirmVictoryComment}
 	onCancel={() => (showVictoryCommentConfirm = false)}

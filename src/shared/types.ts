@@ -43,6 +43,7 @@ export type GameState = {
 	puzzle: SerializedPuzzle
 	tutorialCompleted: boolean
 	skillLevel: number
+	pathLevel: number
 	gridSizePreference: number
 	/** False when the viewer is a logged-out Reddit user. The client uses
 	 *  this to hide account-scoped UI (wallet, streak, leaderboards, social
@@ -125,6 +126,7 @@ export type CompleteResponse = {
 	performanceScore: number
 	newSkillLevel: number
 	previousSkillLevel: number
+	pathLevel: number
 	/** False when the puzzle was solved by a logged-out user. Meta-progression
 	 *  (streak, coins, season) is omitted in that case and the client shows a
 	 *  login CTA on the result screen instead. Defaults to true when absent. */
@@ -205,6 +207,7 @@ export type ChallengeRequest = {
 	timeTaken: number
 	skillLevel: number
 	mistakes: number
+	customTitle?: string
 }
 
 /** Challenge post response */

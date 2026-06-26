@@ -1,7 +1,7 @@
 import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis } from '@devvit/web/server'
 import { describe, it, expect } from 'vitest'
-import { getTodayUTC, getYesterdayUTC, getDayDifference, getLoginStreak, updateLoginStreak, getGridSizePreference, setGridSizePreference, getGridSkillLevel, setGridSkillLevel, getGridHistory, setGridHistory } from '../helpers'
+import { getTodayUTC, getYesterdayUTC, getDayDifference, getLoginStreak, updateLoginStreak, getGridSizePreference, setGridSizePreference, getGridSkillLevel, setGridSkillLevel, getGridHistory, setGridHistory, getPathLevel, incrementPathLevel } from '../helpers'
 import type { GameRecord } from '../../../shared/types'
 
 // ─── getTodayUTC ──────────────────────────────────────────────────────────────
@@ -151,6 +151,30 @@ testGridSkill('setGridSkillLevel persists levels independently per grid size', a
     expect(await getGridSkillLevel('t2_testuser', 4)).toBe(2)
     expect(await getGridSkillLevel('t2_testuser', 6)).toBe(3)
     expect(await getGridSkillLevel('t2_testuser', 8)).toBe(4)
+})
+
+// ─── Path Level Progression ─────────────────────────────────────────────────
+
+const testPathLevel = createDevvitTest({ userId: 't2_testuser' })
+
+testPathLevel('getPathLevel returns level 1 for a new user', async () => {
+    expect(await getPathLevel('t2_testuser')).toBe(1)
+})
+
+testPathLevel('incrementPathLevel persists the next visible map level', async () => {
+    await redis.set('user:t2_testuser:pathLevel', '4')
+
+    const level = await incrementPathLevel('t2_testuser')
+
+    expect(level).toBe(5)
+    expect(await getPathLevel('t2_testuser')).toBe(5)
+})
+
+testPathLevel('incrementPathLevel advances a new user from level 1 to level 2', async () => {
+    const level = await incrementPathLevel('t2_newpath')
+
+    expect(level).toBe(2)
+    expect(await getPathLevel('t2_newpath')).toBe(2)
 })
 
 // ─── Per-Grid Game History ───────────────────────────────────────────────────

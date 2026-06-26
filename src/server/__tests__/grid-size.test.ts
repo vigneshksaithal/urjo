@@ -189,6 +189,25 @@ test('GET /api/game/state includes gridSizePreference in response', async () => 
     expect(body.skillLevel).toBe(2)
 })
 
+test('GET /api/game/state includes persisted path level separately from skill level', async () => {
+    const postId = 't3_state_path_level'
+
+    await seedPuzzle(postId, 4)
+    await redis.set('user:t2_griduser:gridMigrated', 'true')
+    await redis.set('user:t2_griduser:gridSizePreference', '4')
+    await redis.set('user:t2_griduser:skillLevel:4', '1')
+    await redis.set('user:t2_griduser:pathLevel', '8')
+
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'griduser' } as never)
+
+    const res = await withContext(postId, 't2_griduser', gameStateRequest)
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { skillLevel: number; pathLevel: number }
+    expect(body.skillLevel).toBe(1)
+    expect(body.pathLevel).toBe(8)
+})
+
 test('GET /api/game/state uses baked-in grid size for challenge posts', async () => {
     const postId = 't3_state_challenge'
 
@@ -262,6 +281,41 @@ test('POST /api/game/complete updates per-grid skill level only', async () => {
     // 4×4 skill level must remain unchanged
     const level4 = await redis.get(`user:${userId}:skillLevel:4`)
     expect(level4).toBe('2')
+})
+
+test('POST /api/game/complete increments persisted path level once per credited puzzle', async () => {
+    const postId = 't3_complete_path_level'
+    const userId = 't2_griduser'
+    const colors = 'r'.repeat(16)
+
+    await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+        colors,
+        numbers: '-'.repeat(16),
+        solution: colors,
+        difficulty: 'easy',
+        gridSize: '4',
+        instanceId: 'path-1',
+    })
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors,
+        numbers: '-'.repeat(16),
+        solution: colors,
+        difficulty: 'easy',
+        gridSize: '4',
+    })
+    await redis.set(`user:${userId}:skillLevel:4`, '1')
+    await redis.set(`user:${userId}:pathLevel`, '6')
+    await seedStartTime(userId, postId, 30)
+
+    const first = await withContext(postId, userId, () => completeRequest({ mistakes: 0, board: colors }))
+    expect(first.status).toBe(200)
+    const firstBody = await first.json() as { pathLevel: number }
+    expect(firstBody.pathLevel).toBe(7)
+    expect(await redis.get(`user:${userId}:pathLevel`)).toBe('7')
+
+    const second = await withContext(postId, userId, () => completeRequest({ mistakes: 0, board: colors, timeTaken: 30 }))
+    expect(second.status).toBe(409)
+    expect(await redis.get(`user:${userId}:pathLevel`)).toBe('7')
 })
 
 test('POST /api/game/complete records speed to grid-size-scoped leaderboard', async () => {

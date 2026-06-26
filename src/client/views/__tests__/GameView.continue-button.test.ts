@@ -11,7 +11,7 @@ const completionOverlayPath = join(
 const completionOverlaySource = readFileSync(completionOverlayPath, "utf-8");
 
 describe("GameView.svelte continue button flow", () => {
-	it("routes the completion Continue action directly to onNextChallenge", () => {
+	it("routes the completion Continue action to the level path first", () => {
 		const handlePrimaryCtaMatch = gameViewSource.match(
 			/function handlePrimaryCta\(\): void \{([\s\S]*?)\n\t\}/,
 		);
@@ -20,10 +20,24 @@ describe("GameView.svelte continue button flow", () => {
 
 		const handlePrimaryCtaBody = handlePrimaryCtaMatch?.[1] ?? "";
 
-		expect(handlePrimaryCtaBody).toContain('void fireOnce(postId ?? "", "next-puzzle");');
-		expect(handlePrimaryCtaBody).toContain("onNextChallenge();");
-		expect(handlePrimaryCtaBody).not.toContain('if (id === "next-puzzle")');
-		expect(handlePrimaryCtaBody).not.toContain("simplifiedCtas.primary.id");
+		expect(handlePrimaryCtaBody).toContain("showLevelPath = true;");
+		expect(handlePrimaryCtaBody).not.toContain("onNextChallenge();");
+	});
+
+	it("starts the next puzzle only after the playable level is tapped", () => {
+		const handleLevelSelectMatch = gameViewSource.match(
+			/function handleLevelSelect\(\): void \{([\s\S]*?)\n\t\}/,
+		);
+
+		expect(handleLevelSelectMatch).not.toBeNull();
+
+		const handleLevelSelectBody = handleLevelSelectMatch?.[1] ?? "";
+
+		expect(handleLevelSelectBody).toContain('void fireOnce(postId ?? "", "next-puzzle");');
+		expect(handleLevelSelectBody).toContain("showLevelPath = false;");
+		expect(handleLevelSelectBody).toContain("onNextChallenge();");
+		expect(handleLevelSelectBody).not.toContain('if (id === "next-puzzle")');
+		expect(handleLevelSelectBody).not.toContain("simplifiedCtas.primary.id");
 	});
 
 	it("wires victory comments through explicit confirmation before posting", () => {
@@ -46,6 +60,7 @@ describe("GameView.svelte continue button flow", () => {
 		expect(gameViewSource).toContain("puzzleNumber,");
 		expect(gameViewSource).toContain("timeTaken: Math.max(timeTaken ?? 0, 1)");
 		expect(gameViewSource).toContain("Posts your victory publicly");
+		expect(gameViewSource).toContain("as your Reddit account");
 	});
 
 	it("keeps Continue and Challenge together in the second success-screen row", () => {
@@ -54,7 +69,7 @@ describe("GameView.svelte continue button flow", () => {
 		expect(completionOverlaySource).toMatch(/\{:else\}\s*Challenge\s*\{\/if\}/);
 		expect(completionOverlaySource).toContain("border-white/70 text-white");
 		expect(completionOverlaySource).toContain("bg-yellow-500 text-yellow-950");
-		expect(gameViewSource).toContain("onChallenge={() => (showChallengeConfirm = true)}");
+		expect(gameViewSource).toContain("onChallenge={requestChallenge}");
 		expect(gameViewSource).not.toContain("showChallengeAndContinueConfirm");
 		expect(gameViewSource).not.toContain("confirmChallengeAndContinue");
 	});
@@ -62,13 +77,24 @@ describe("GameView.svelte continue button flow", () => {
 	it("makes challenge post consent clear before posting as the user", () => {
 		expect(gameViewSource).toContain("This posts a public challenge to Reddit");
 		expect(gameViewSource).toContain("as u/");
-		expect(gameViewSource).toContain("using an Urjo-generated title");
-		expect(completionOverlaySource).not.toContain("Challenge title");
-		expect(completionOverlaySource).not.toContain("Write your challenge title");
+		expect(gameViewSource).toContain("with the title shown above");
+		expect(completionOverlaySource).toContain("Challenge title");
+		expect(completionOverlaySource).toContain("Write your challenge title");
+		expect(completionOverlaySource).toContain("maxlength=\"120\"");
 	});
 
 	it("does not render the mystery box bonus reward modal after completion", () => {
 		expect(gameViewSource).not.toContain("<MysteryBoxAnimation");
 		expect(gameViewSource).not.toContain("showMysteryBoxOverlay");
+	});
+
+	it("renders the level path as the post-completion interstitial", () => {
+		expect(gameViewSource).toContain('import LevelPathOverlay from "../components/LevelPathOverlay.svelte";');
+		expect(gameViewSource).toContain("let showLevelPath = $state(false);");
+		expect(gameViewSource).toContain("{#if showLevelPath}");
+		expect(gameViewSource).toContain("<LevelPathOverlay");
+		expect(gameViewSource).toContain("isOpen={true}");
+		expect(gameViewSource).toContain("currentLevel={pathLevel}");
+		expect(gameViewSource).toContain("onLevelSelect={handleLevelSelect}");
 	});
 });

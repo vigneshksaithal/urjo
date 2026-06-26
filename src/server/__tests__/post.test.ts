@@ -11,8 +11,12 @@ const test = createDevvitTest({
 })
 
 test('createPost creates a Reddit post and stores puzzle in Redis', async () => {
+	const distinguishSticky = vi.fn().mockResolvedValue(undefined)
 	vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_abc123' } as never)
-	vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_sticky123' } as never)
+	vi.spyOn(reddit, 'submitComment').mockResolvedValue({
+		id: 't1_sticky123',
+		distinguish: distinguishSticky,
+	} as never)
 
 	await createPost()
 
@@ -34,6 +38,8 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 		id: 't3_abc123',
 		text: expect.stringContaining('Share your victory'),
 	})
+	expect(distinguishSticky).toHaveBeenCalledWith(true)
+
 	const meta = await redis.hGetAll('game:t3_abc123:meta')
 	expect(meta[URJO_POST_TYPE_KEY]).toBe(URJO_PUZZLE_POST_TYPE)
 	expect(meta.stickyCommentId).toBe('t1_sticky123')

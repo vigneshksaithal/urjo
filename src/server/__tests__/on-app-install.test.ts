@@ -25,7 +25,10 @@ const installRequest = async (): Promise<Response> =>
 
 const mockRedditApis = (postId = 't3_install1') => {
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: postId } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_install_sticky' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({
+        id: 't1_install_sticky',
+        distinguish: vi.fn().mockResolvedValue(undefined),
+    } as never)
 }
 
 const test = createDevvitTest({
@@ -69,7 +72,10 @@ test('onAppInstall records installation in sorted set and metadata hash', async 
 
 test('onAppInstall creates first puzzle post automatically', async () => {
     vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_firstpost' } as never)
-    vi.spyOn(reddit, 'submitComment').mockResolvedValue({ id: 't1_first_sticky' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue({
+        id: 't1_first_sticky',
+        distinguish: vi.fn().mockResolvedValue(undefined),
+    } as never)
 
     const res = await withCtx(() => installRequest())
 

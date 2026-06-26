@@ -19,6 +19,7 @@ import { calculatePerformanceScore } from './adaptive'
 
 /** Default skill level / grid size shown to logged-out players. */
 const LOGGED_OUT_SKILL_LEVEL = 1
+const LOGGED_OUT_PATH_LEVEL = 1
 const LOGGED_OUT_GRID_SIZE = 4
 
 /** Weekend-event payload shape, mirrored from GameState for reuse. */
@@ -50,6 +51,7 @@ export const buildLoggedOutGameState = (input: LoggedOutStateInput): GameState =
         tutorialCompleted: true,
         isFirstTimeUser: false,
         skillLevel: LOGGED_OUT_SKILL_LEVEL,
+        pathLevel: LOGGED_OUT_PATH_LEVEL,
         gridSizePreference: LOGGED_OUT_GRID_SIZE,
         postId,
         isChallenge,
@@ -91,6 +93,7 @@ export const buildLoggedOutCompleteResponse = (
         performanceScore,
         newSkillLevel: LOGGED_OUT_SKILL_LEVEL,
         previousSkillLevel: LOGGED_OUT_SKILL_LEVEL,
+        pathLevel: LOGGED_OUT_PATH_LEVEL,
         isLoggedIn: false,
         weekendBonusCoins: 0,
         ...(weekendEvent !== undefined && { weekendEvent }),

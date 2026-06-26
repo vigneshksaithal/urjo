@@ -218,6 +218,28 @@ export const setGridSkillLevel = async (userId: string, gridSize: GridSize, leve
 	await redis.set(`user:${userId}:skillLevel:${gridSize}`, level.toString())
 }
 
+// ─── Path Level Progression ─────────────────────────────────────────────────
+
+const PATH_LEVEL_KEY = (userId: string): string => `user:${userId}:pathLevel`
+
+/**
+ * Get the user's visible level-map position.
+ * This is separate from adaptive skill level, which is capped per grid ladder.
+ */
+export const getPathLevel = async (userId: string): Promise<number> => {
+	const value = await redis.get(PATH_LEVEL_KEY(userId))
+	return safeParseInt(value, 1)
+}
+
+/**
+ * Advance the user's visible level-map position after a credited completion.
+ */
+export const incrementPathLevel = async (userId: string): Promise<number> => {
+	const nextLevel = (await getPathLevel(userId)) + 1
+	await redis.set(PATH_LEVEL_KEY(userId), nextLevel.toString())
+	return nextLevel
+}
+
 // ─── Per-Grid Game History ──────────────────────────────────────────────────
 
 /**

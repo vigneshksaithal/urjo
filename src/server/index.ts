@@ -23,6 +23,7 @@ import { notifyRouter } from './routes/notify'
 import { dwellRouter } from './routes/dwell'
 import { previewRouter } from './routes/preview'
 import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
+import { deleteUserData } from './lib/account-deletion'
 import { selectDailyMissions } from './lib/missions'
 import { getTodayUTC, getISOWeek, getYesterdayUTC } from './lib/helpers'
 import { runDriftCheck, formatDriftLogLine } from './lib/drift'
@@ -57,6 +58,11 @@ type CommentDeletePayload = {
   postId?: string
   comment?: { id?: string }
   post?: { id?: string }
+}
+
+type AccountDeletePayload = {
+  userId?: string
+  user?: { id?: string }
 }
 
 const REDDIT_GAMES_SUBREDDIT = 'RedditGames'
@@ -181,6 +187,20 @@ app.post('/internal/on-comment-delete', async (c: Context) => {
     return c.json({ status: 'ok' })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to handle comment delete'
+    return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+  }
+})
+
+app.post('/internal/on-account-delete', async (c: Context) => {
+  try {
+    const input = await c.req.json<AccountDeletePayload>().catch(() => null)
+    const userId = input?.userId ?? input?.user?.id
+    if (typeof userId === 'string' && userId.length > 0) {
+      await deleteUserData(userId)
+    }
+    return c.json({ status: 'ok' })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to handle account delete'
     return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
   }
 })

@@ -80,6 +80,7 @@
 	});
 	let timeTaken = $state(0);
 	let skillLevel = $state(1);
+	let pathLevel = $state(1);
 	let showLevelUp = $state(false);
 	let levelUpNewLevel = $state(1);
 	let hasChallenged = $state(false);
@@ -220,6 +221,7 @@
 			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
+			pathLevel = data.pathLevel;
 			gridSizePreference = data.gridSizePreference ?? 4;
 			isChallenge = data.isChallenge ?? false;
 			isFirstTimeUser = data.isFirstTimeUser ?? false;
@@ -489,6 +491,9 @@
 				if (data.engagement) {
 					engagement = data.engagement as EngagementCompletionData;
 				}
+				if (typeof data.pathLevel === "number") {
+					pathLevel = data.pathLevel;
+				}
 				// Level-up feedback
 				if (
 					data.newSkillLevel &&
@@ -551,18 +556,20 @@
 	/**
 	 * Handle challenge post creation.
 	 */
-	async function handleChallenge() {
+	async function handleChallenge(customTitle?: string) {
 		if (hasChallenged) return;
 		void fireOnce(postId ?? "", "challenge");
 		try {
+			const challengeBody = {
+				timeTaken,
+				skillLevel,
+				mistakes: $mistakeCount,
+				...(customTitle && { customTitle }),
+			};
 			const response = await fetch("/api/game/challenge", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					timeTaken,
-					skillLevel,
-					mistakes: $mistakeCount,
-				}),
+				body: JSON.stringify(challengeBody),
 			});
 			const data = await response.json();
 			if (response.ok && data.success) {
@@ -782,6 +789,7 @@
 			onGridSizeChange: handleGridSizeChange,
 			puzzleColors,
 			skillLevel,
+			pathLevel,
 			puzzleNumber,
 			seasonRank,
 			seasonPoints,
