@@ -25,6 +25,7 @@
 	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
+	import { getElapsedSeconds } from "./lib/elapsed-time";
 	import {
 		mistakeCount,
 		onCellChange,
@@ -79,6 +80,7 @@
 		lastPlayedDate: null,
 	});
 	let timeTaken = $state(0);
+	let liveElapsedSeconds = $state(0);
 	let skillLevel = $state(1);
 	let pathLevel = $state(1);
 	let showLevelUp = $state(false);
@@ -151,6 +153,25 @@
 	let abVariant = $state<"A" | "B" | undefined>(undefined);
 	let showVariantCOverlay = $state(false);
 	let firstScreenData = $state<FirstScreenData | undefined>(undefined);
+
+	$effect(() => {
+		if (isCompleted) {
+			liveElapsedSeconds = timeTaken;
+			return;
+		}
+		if (!timerStarted) {
+			liveElapsedSeconds = 0;
+			return;
+		}
+
+		const updateElapsedSeconds = (): void => {
+			liveElapsedSeconds = getElapsedSeconds(startTime);
+		};
+
+		updateElapsedSeconds();
+		const interval = setInterval(updateElapsedSeconds, 1000);
+		return () => clearInterval(interval);
+	});
 
 	function createPlaceholderGrid(): Grid {
 		const result: Grid = [];
@@ -404,7 +425,7 @@
 		// Check completion client-side using full constraint validation
 		if (isGridComplete(grid, gridSize)) {
 			isCompleted = true;
-			timeTaken = Math.round((Date.now() - startTime) / 1000);
+			timeTaken = getElapsedSeconds(startTime);
 			// Check last active cell before reporting
 			onPuzzleComplete(grid, gridSize);
 			reportCompletion(timeTaken);
@@ -600,7 +621,7 @@
 		resetHints();
 		try {
 			const timeSpent = timerStarted
-				? Math.round((Date.now() - startTime) / 1000)
+				? getElapsedSeconds(startTime)
 				: 0;
 			const response = await fetch("/api/game/next-challenge", {
 				method: "POST",
@@ -775,6 +796,7 @@
 			challengeUrl,
 			coins,
 			timeTaken,
+			liveElapsedSeconds,
 			mistakes: $mistakeCount,
 			isLoggedIn,
 			isChallenge,

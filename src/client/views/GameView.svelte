@@ -12,6 +12,7 @@
 	import GameBoard from "../components/GameBoard.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
 	import CoinDisplay from "../components/CoinDisplay.svelte";
+	import TimerDisplay from "../components/TimerDisplay.svelte";
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
@@ -35,6 +36,7 @@
 		gridSize: number;
 		isCompleted: boolean;
 		timeTaken?: number;
+		liveElapsedSeconds?: number;
 		mistakes?: number;
 		solution?: string;
 		puzzleColors?: string;
@@ -142,6 +144,7 @@
 		onOpenAnalytics,
 		isMod = false,
 		timeTaken,
+		liveElapsedSeconds = 0,
 		mistakes = 0,
 		username,
 		isLoggedIn = true,
@@ -493,9 +496,13 @@
 		/>
 	{/if}
 
-	<!-- Streak and coins sit above the puzzle as one centered status row. -->
-	{#if loginGate.showWallet && coins !== undefined}
-		<CoinDisplay {coins} streak={streakData.currentStreak} />
+	{#if !isCompleted}
+		<TimerDisplay elapsedSeconds={liveElapsedSeconds ?? 0} />
+	{/if}
+
+	<!-- Streak progress sits above the puzzle as one centered status row. -->
+	{#if loginGate.showWallet}
+		<CoinDisplay streak={streakData.currentStreak} />
 	{/if}
 
 	<!-- Logged-out sign-in banner — sits where the progression strip would be
@@ -557,7 +564,7 @@
 	<!-- Challenger strip — shown below the board on challenge posts -->
 	{#if isChallenge && challengerInfo && !isCompleted}
 		<div
-			class="flex-none flex items-center justify-center gap-2.5 px-4 py-2"
+			class="flex-none flex items-center justify-center gap-3 px-4 pb-2"
 		>
 			{#if challengerInfo.avatarUrl}
 				<img
@@ -573,7 +580,7 @@
 					👤
 				</div>
 			{/if}
-			<p class="text-base font-semibold text-theme-text-secondary">
+			<p class="text-sm leading-tight text-theme-text-secondary">
 				Beat {challengerInfo.username}'s {challengerInfo.targetSeconds}s
 			</p>
 		</div>
