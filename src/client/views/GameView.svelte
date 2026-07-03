@@ -11,8 +11,6 @@
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
-	import CoinDisplay from "../components/CoinDisplay.svelte";
-	import TimerDisplay from "../components/TimerDisplay.svelte";
 	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
@@ -24,8 +22,10 @@
 	import LevelPathOverlay from "../components/LevelPathOverlay.svelte";
 	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
+	import Flame from "lucide-svelte/icons/flame";
 	import Megaphone from "lucide-svelte/icons/megaphone";
 	import Settings from "lucide-svelte/icons/settings";
+	import Timer from "lucide-svelte/icons/timer";
 
 	// ─── Grouped Props Types ─────────────────────────────────────────────────────
 	// Props are grouped by domain for better API design, type safety, and testing.
@@ -189,8 +189,6 @@
 		return () => clearTimeout(timer);
 	});
 	let showModPreview = $state(false);
-	let showChallengeConfirm = $state(false);
-	let pendingChallengeTitle = $state("");
 	let showVictoryCommentConfirm = $state(false);
 	let showLevelPath = $state(false);
 	let commentingVictory = $state(false);
@@ -277,13 +275,7 @@
 	}
 
 	function requestChallenge(customTitle?: string): void {
-		pendingChallengeTitle = customTitle?.trim() ?? "";
-		showChallengeConfirm = true;
-	}
-
-	function confirmChallenge(): void {
-		showChallengeConfirm = false;
-		onChallenge(pendingChallengeTitle.length > 0 ? pendingChallengeTitle : undefined);
+		onChallenge(customTitle);
 	}
 
 	function buildChallengePostTitle(): string {
@@ -496,13 +488,35 @@
 		/>
 	{/if}
 
+	<!-- Unified top bar: streak + timer in a single pill -->
 	{#if !isCompleted}
-		<TimerDisplay elapsedSeconds={liveElapsedSeconds ?? 0} />
-	{/if}
-
-	<!-- Streak progress sits above the puzzle as one centered status row. -->
-	{#if loginGate.showWallet}
-		<CoinDisplay streak={streakData.currentStreak} />
+		<div class="flex w-full items-center justify-center px-1 pt-3 pb-3">
+			<div
+				class="flex items-center gap-5 rounded-full bg-theme-bg-secondary/85 border border-theme-border/70 px-4 py-2 shadow-sm"
+				aria-label="{liveElapsedSeconds ?? 0} seconds elapsed"
+			>
+				{#if loginGate.showWallet}
+					<div class="flex items-center gap-2">
+						<Flame class="size-6 text-[#E54E3E] fill-[#E54E3E]" />
+						<span
+							class="text-base font-medium leading-none text-theme-text-primary"
+							>{streakData.currentStreak}
+							{streakData.currentStreak === 1
+								? "Day"
+								: "Days"}</span
+						>
+					</div>
+				{/if}
+				<div class="flex items-center gap-2">
+					<Timer class="size-6 text-amber-400" />
+					<span
+						class="text-base font-medium leading-none text-theme-text-secondary"
+					>
+						{liveElapsedSeconds ?? 0}s
+					</span>
+				</div>
+			</div>
+		</div>
 	{/if}
 
 	<!-- Logged-out sign-in banner — sits where the progression strip would be
@@ -563,9 +577,7 @@
 
 	<!-- Challenger strip — shown below the board on challenge posts -->
 	{#if isChallenge && challengerInfo && !isCompleted}
-		<div
-			class="flex-none flex items-center justify-center gap-3 px-4 pb-2"
-		>
+		<div class="flex-none flex items-center justify-center gap-3 px-4 pb-2">
 			{#if challengerInfo.avatarUrl}
 				<img
 					src={challengerInfo.avatarUrl}
@@ -674,18 +686,6 @@
 <!-- Confetti effect -->{#if showConfetti}
 	<ConfettiEffect />
 {/if}
-
-<!-- Challenge confirmation dialog -->
-<ConfirmDialog
-	isOpen={showChallengeConfirm}
-	title="Create Rival Challenge?"
-	message="This posts a public challenge to Reddit{username
-		? ` as u/${username}`
-		: ' as your Reddit account'} with the title shown above. Others will see it."
-	confirmLabel="Create"
-	onConfirm={confirmChallenge}
-	onCancel={() => (showChallengeConfirm = false)}
-/>
 
 <!-- Victory comment confirmation dialog -->
 <ConfirmDialog
