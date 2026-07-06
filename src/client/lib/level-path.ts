@@ -14,15 +14,19 @@ const MIN_VISIBLE_LEVELS = 3;
 
 export const buildLevelPath = ({
 	currentLevel,
-	visibleLevels = 7,
+	visibleLevels = 3,
 }: BuildLevelPathInput): LevelPathNode[] => {
 	const safeCurrentLevel = Math.max(1, Math.floor(currentLevel));
 	const safeVisibleLevels = Math.max(
 		MIN_VISIBLE_LEVELS,
 		Math.floor(visibleLevels),
 	);
+	const startLevel = Math.max(
+		1,
+		safeCurrentLevel - Math.floor(safeVisibleLevels / 2),
+	);
 	return Array.from({ length: safeVisibleLevels }, (_, index) => {
-		const level = safeCurrentLevel + index;
+		const level = startLevel + index;
 		return {
 			level,
 			state: getLevelState(level, safeCurrentLevel),

@@ -20,4 +20,21 @@ describe("App.svelte path level plumbing", () => {
 	it("passes pathLevel into GameView", () => {
 		expect(appSource).toMatch(/@const gameProps = \{[\s\S]*\n\s+pathLevel,/);
 	});
+
+	it("advances to the next game after a successful challenge post", () => {
+		const start = appSource.indexOf(
+			"async function handleChallenge(customTitle?: string) {",
+		);
+		const end = appSource.indexOf(
+			"/**\n\t * Handle \"Next Challenge\" button.",
+			start,
+		);
+
+		expect(start).toBeGreaterThan(-1);
+		expect(end).toBeGreaterThan(start);
+
+		const handleChallengeBody = appSource.slice(start, end);
+		expect(handleChallengeBody).toContain('showToast("Challenge post created!");');
+		expect(handleChallengeBody).toContain("await handleNextChallenge();");
+	});
 });

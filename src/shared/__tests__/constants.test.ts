@@ -5,6 +5,7 @@ import {
     isValidGridSize,
     getGridLevelConfig,
     DAILY_LOGIN_BONUS,
+    DEFAULT_CHALLENGE_TITLE,
     PER_GRID_LADDER,
     PER_GRID_MAX_LEVEL,
     PER_GRID_MIN_LEVEL,
@@ -81,3 +82,8 @@ describe('DAILY_LOGIN_BONUS constant', () => {
     })
 })
 
+describe('DEFAULT_CHALLENGE_TITLE constant', () => {
+    it('falls back to a simple challenge title', () => {
+        expect(DEFAULT_CHALLENGE_TITLE).toBe('Urjo Challenge')
+    })
+})

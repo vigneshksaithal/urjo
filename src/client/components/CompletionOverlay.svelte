@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade } from "svelte/transition";
   import MessageSquare from "lucide-svelte/icons/message-square";
+  import ChallengeComposer from "./ChallengeComposer.svelte";
 
   type Props = {
     /** Whether the overlay is visible */
@@ -24,9 +25,6 @@
     /** Called when Comment Your Victory button is clicked (optional) */
     onCommentVictory?: () => void;
 
-    /** Whether the victory comment has already been posted in this session */
-    hasCommentedVictory?: boolean;
-
     /** Whether the victory comment is being posted */
     commentingVictory?: boolean;
 
@@ -35,9 +33,6 @@
 
     /** Whether a challenge post has already been created this session */
     hasChallenged?: boolean;
-
-    /** Editable title seeded into the challenge post field */
-    defaultChallengeTitle?: string;
 
     /** Personal challenge beat info (if user beat a challenge) */
     personalChallengeBeat?: {
@@ -60,35 +55,28 @@
     loginGate,
     onContinue,
     onCommentVictory,
-    hasCommentedVictory = false,
     commentingVictory = false,
     onChallenge,
     hasChallenged = false,
-    defaultChallengeTitle = "",
     personalChallengeBeat = null,
     puzzleColors = "",
     gridSize = 4,
     puzzleNumber = 0,
   }: Props = $props();
 
-  let showChallengeModal = $state(false);
-  let challengeTitle = $state("");
+  let showChallengeComposer = $state(false);
 
-  function openChallengeModal(): void {
-    challengeTitle = "";
-    showChallengeModal = true;
+  function openChallengeComposer(): void {
+    showChallengeComposer = true;
   }
 
-  function closeChallengeModal(): void {
-    showChallengeModal = false;
+  function closeChallengeComposer(): void {
+    showChallengeComposer = false;
   }
 
-  function submitChallenge(): void {
-    const trimmed = challengeTitle.trim();
-    onChallenge?.(
-      trimmed.length > 0 ? trimmed : defaultChallengeTitle || undefined,
-    );
-    showChallengeModal = false;
+  function submitChallenge(customTitle?: string): void {
+    onChallenge?.(customTitle);
+    showChallengeComposer = false;
   }
 </script>
 
@@ -133,14 +121,12 @@
       {#if onCommentVictory && loginGate.showSocialActions}
         <button
           onclick={onCommentVictory}
-          disabled={commentingVictory || hasCommentedVictory}
+          disabled={commentingVictory}
           class="w-full px-4 py-4 bg-urjo-blue text-white font-bold rounded-2xl text-base hover:opacity-90 active:scale-95 transition-all disabled:opacity-60 disabled:active:scale-100 flex items-center justify-center gap-2.5"
         >
           <MessageSquare class="w-5 h-5" />
           {#if commentingVictory}
             Commenting...
-          {:else if hasCommentedVictory}
-            Victory Commented
           {:else}
             Comment Your Victory
           {/if}
@@ -157,7 +143,7 @@
 
         {#if onChallenge && loginGate.showSocialActions}
           <button
-            onclick={openChallengeModal}
+            onclick={openChallengeComposer}
             disabled={hasChallenged}
             class="w-full px-4 py-4 bg-yellow-500 text-yellow-950 font-bold rounded-2xl text-base hover:bg-yellow-400 active:scale-95 transition-all disabled:opacity-60 disabled:active:scale-100"
           >
@@ -174,40 +160,9 @@
     </div>
   </div>
 
-  <!-- Challenge title modal -->
-  {#if showChallengeModal}
-    <div
-      transition:fade={{ duration: 150 }}
-      class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-5"
-      role="dialog"
-      aria-label="Challenge title"
-    >
-      <div
-        class="w-full max-w-sm rounded-2xl bg-[#2a2a2a] p-5 flex flex-col gap-4"
-      >
-        <h2 class="text-lg font-bold text-white">Challenge Title</h2>
-        <input
-          type="text"
-          bind:value={challengeTitle}
-          maxlength="120"
-          placeholder="Beat my time if you can!"
-          class="w-full rounded-xl border border-white/20 bg-[#1a1a1a] px-4 py-3 text-sm font-medium text-white outline-none placeholder:text-white/40 focus:border-yellow-400 transition-colors"
-        />
-        <div class="grid grid-cols-2 gap-3">
-          <button
-            onclick={closeChallengeModal}
-            class="px-4 py-3 border border-white/40 text-white font-semibold rounded-xl text-sm hover:bg-white/10 active:scale-95 transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            onclick={submitChallenge}
-            class="px-4 py-3 bg-yellow-500 text-yellow-950 font-bold rounded-xl text-sm hover:bg-yellow-400 active:scale-95 transition-all"
-          >
-            Post Challenge
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <ChallengeComposer
+    isOpen={showChallengeComposer}
+    onClose={closeChallengeComposer}
+    onSubmit={submitChallenge}
+  />
 {/if}

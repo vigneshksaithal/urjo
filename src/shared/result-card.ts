@@ -29,6 +29,19 @@ export const serializeResultCard = (data: ResultCardData): string => {
     return [header, ...gridRows, stats, FOOTER].join('\n')
 }
 
+/**
+ * Build the full Reddit comment text for a victory share.
+ * Keeps the auto-generated result card appended below the user's custom intro.
+ */
+export const serializeResultComment = (
+    data: ResultCardData,
+    customMessage?: string,
+): string => {
+    const message = customMessage?.trim()
+    if (!message) return serializeResultCard(data)
+    return `${message}\n\n${serializeResultCard(data)}`
+}
+
 // ─── Parsing ───────────────────────────────────────────────────────────────────
 
 const HEADER_REGEX = /^Urjo #(\d+) 🧩 (\d+)×(\d+) ⭐(\d+)$/
@@ -56,7 +69,17 @@ const parseGridRow = (row: string, expectedSize: number): ('red' | 'blue')[] | n
 
 /** Parse a result card string back into structured data, or null if invalid */
 export const parseResultCard = (text: string): ResultCardData | null => {
-    const lines = text.split('\n')
+    const rawLines = text.split('\n')
+
+    // serializeResultComment prepends an optional custom message (plus a
+    // blank line) before the card. Locate the header line instead of
+    // assuming it's line 0, so parsing tolerates that prefix and still
+    // round-trips serializeResultCard output (where the header is line 0).
+    const headerIndex = rawLines.findIndex((line) => HEADER_REGEX.test(line))
+    if (headerIndex === -1) {
+        return null
+    }
+    const lines = rawLines.slice(headerIndex)
 
     // Minimum lines: header + at least 1 grid row + stats + footer = 4
     if (lines.length < 4) {

@@ -7,11 +7,17 @@ export type Difficulty = 'easy' | 'medium' | 'hard' | 'diabolical'
 /** Default skill level for new users */
 export const DEFAULT_SKILL_LEVEL = 1
 
+/** Fallback title for blank challenge posts */
+export const DEFAULT_CHALLENGE_TITLE = 'Urjo Challenge'
+
 /** Minimum skill level */
 export const MIN_SKILL_LEVEL = 1
 
 /** Number of recent games to consider for level adjustment. Must be >= PROMOTE_WINDOW. */
 export const HISTORY_SIZE = 20
+
+/** Number of adaptive issuance outcomes to retain for grid-size selection. */
+export const ADAPTIVE_HISTORY_SIZE = 30
 
 /**
  * Per-level promotion thresholds.

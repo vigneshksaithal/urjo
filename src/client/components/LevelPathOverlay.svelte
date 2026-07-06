@@ -4,10 +4,7 @@
 	import Flame from "lucide-svelte/icons/flame";
 	import Lock from "lucide-svelte/icons/lock";
 	import Play from "lucide-svelte/icons/play";
-	import {
-		buildLevelPath,
-		type LevelPathNode,
-	} from "../lib/level-path";
+	import { buildLevelPath, type LevelPathNode } from "../lib/level-path";
 
 	type Props = {
 		isOpen: boolean;
@@ -20,32 +17,33 @@
 
 	let props: Props = $props();
 
-	const levels = $derived(
-		buildLevelPath({
-			currentLevel: props.currentLevel,
-			visibleLevels: 7,
-		}),
-	);
-
 	type NodePosition = {
 		left: string;
 		top: string;
 	};
 
 	const fallbackNodePosition: NodePosition = {
-		left: "36%",
-		top: "14%",
+		left: "50%",
+		top: "50%",
 	};
 
-	const nodePositions: NodePosition[] = [
-		{ left: "15%", top: "82%" },
-		{ left: "48%", top: "72%" },
-		{ left: "27%", top: "58%" },
-		{ left: "66%", top: "47%" },
-		{ left: "35%", top: "33%" },
-		{ left: "70%", top: "20%" },
-		{ left: "36%", top: "10%" },
+	// Hand-tuned positions along the SVG path — one per rendered node. The
+	// path artwork below is drawn for exactly this many stops, so the level
+	// window is sized to match rather than hardcoded separately: passing a
+	// visibleLevels count larger than this array would stack extra nodes on
+	// the fallback position with no path to sit on.
+	const nodePositions: readonly NodePosition[] = [
+		{ left: "26%", top: "70%" },
+		{ left: "50%", top: "52%" },
+		{ left: "74%", top: "33%" },
 	] as const;
+
+	const levels = $derived(
+		buildLevelPath({
+			currentLevel: props.currentLevel,
+			visibleLevels: nodePositions.length,
+		}),
+	);
 
 	const nextPuzzleLabel = $derived(
 		(props.puzzleNumber ?? 0) > 0
@@ -79,10 +77,14 @@
 		>
 			<div class="flex items-center justify-between gap-3">
 				<div class="flex min-w-0 flex-col">
-					<p class="text-xs font-black uppercase tracking-[0.12em] text-cyan-100">
+					<p
+						class="text-xs font-black uppercase tracking-[0.12em] text-cyan-100"
+					>
 						{nextPuzzleLabel}
 					</p>
-					<h2 class="text-3xl font-black leading-tight text-white drop-shadow">
+					<h2
+						class="text-3xl font-black leading-tight text-white drop-shadow"
+					>
 						Level {props.currentLevel}
 					</h2>
 				</div>
@@ -153,20 +155,28 @@
 					aria-label="Level path"
 				>
 					<path
-						d="M4 93 C51 86 20 77 46 68 S17 52 64 43 S34 28 73 17 S34 11 46 4"
+						d="M14 74 C31 71 37 61 44 57 S60 49 67 42 S77 33 86 24"
 						fill="none"
-						stroke="rgba(50,111,126,0.36)"
-						stroke-width="9"
+						stroke="rgba(50,111,126,0.48)"
+						stroke-width="10"
 						stroke-linecap="round"
-						stroke-dasharray="1 6"
+						stroke-linejoin="round"
 					/>
 					<path
-						d="M4 93 C51 86 20 77 46 68 S17 52 64 43 S34 28 73 17 S34 11 46 4"
+						d="M14 74 C31 71 37 61 44 57 S60 49 67 42 S77 33 86 24"
 						fill="none"
-						stroke="rgba(225,245,247,0.78)"
+						stroke="rgba(225,245,247,0.9)"
 						stroke-width="5"
 						stroke-linecap="round"
-						stroke-dasharray="1 6"
+						stroke-linejoin="round"
+					/>
+					<path
+						d="M14 74 C31 71 37 61 44 57 S60 49 67 42 S77 33 86 24"
+						fill="none"
+						stroke="rgba(255,255,255,0.26)"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
 					/>
 				</svg>
 			</div>
@@ -188,7 +198,9 @@
 							<Play
 								class="h-10 w-10 fill-current transition-transform group-active:scale-95"
 							/>
-							<span class="text-xl leading-none">{level.level}</span>
+							<span class="text-xl leading-none"
+								>{level.level}</span
+							>
 						</button>
 					{:else}
 						<div
@@ -198,12 +210,13 @@
 							aria-label="Level {level.level} {level.state}"
 						>
 							<Lock class="h-7 w-7" />
-							<span class="text-lg leading-none">{level.level}</span>
+							<span class="text-lg leading-none"
+								>{level.level}</span
+							>
 						</div>
 					{/if}
 				</div>
 			{/each}
 		</div>
-
 	</div>
 {/if}

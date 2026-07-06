@@ -4,6 +4,7 @@
  */
 
 import type { EngagementCompletionData, MysteryBoxReward } from './engagement-types'
+import type { GridSize } from './constants'
 
 export type CellColor = 'red' | 'blue' | null
 
@@ -174,6 +175,19 @@ export type GameRecord = {
 	timeTaken: number
 	timestamp: number
 	skipped?: boolean
+	mistakes?: number
+	gridSize?: GridSize
+	source?: 'adaptive' | 'manual' | 'challenge' | 'post'
+}
+
+export type AdaptiveHistoryRecord = {
+	gridSize: GridSize
+	level: number
+	timeTaken: number
+	mistakes: number
+	skipped: boolean
+	source: 'adaptive' | 'manual' | 'challenge' | 'post'
+	timestamp: number
 }
 
 /** User streak data */

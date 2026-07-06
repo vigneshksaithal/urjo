@@ -4,6 +4,7 @@ import { runWithContext } from '@devvit/server'
 import { expect, vi } from 'vitest'
 
 import { app } from '../index'
+import { DEFAULT_CHALLENGE_TITLE } from '../../shared/constants'
 import { REFERRAL_BONUS } from '../../shared/engagement-constants'
 
 // ─── Shared test context ──────────────────────────────────────────────────────
@@ -485,7 +486,37 @@ challengeTest('challenge route: uses a trimmed custom title when provided', asyn
     )
 })
 
-challengeTest('challenge route: ignores overlong custom titles and uses a generated title', async () => {
+challengeTest('challenge route: uses the default title when custom title is omitted', async () => {
+    const sourcePostId = 't3_sourcepost_default_title'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+
+    const submitSpy = vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_defaulttitle' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_default') as never)
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({
+            timeTaken: 45,
+            skillLevel: 3,
+            mistakes: 0,
+        })
+    )
+
+    expect(res.status).toBe(200)
+    expect(submitSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+            title: DEFAULT_CHALLENGE_TITLE,
+            userGeneratedContent: {
+                text: DEFAULT_CHALLENGE_TITLE,
+            },
+        }),
+    )
+})
+
+challengeTest('challenge route: ignores overlong custom titles and falls back to the default title', async () => {
     const sourcePostId = 't3_sourcepost_long_title'
     await redis.hSet(`game:${sourcePostId}:puzzle`, {
         colors: 'rbrb', numbers: '----', solution: 'rbrb',
@@ -508,9 +539,9 @@ challengeTest('challenge route: ignores overlong custom titles and uses a genera
     expect(res.status).toBe(200)
     expect(submitSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-            title: expect.not.stringContaining('a'.repeat(121)),
+            title: DEFAULT_CHALLENGE_TITLE,
             userGeneratedContent: {
-                text: expect.not.stringContaining('a'.repeat(121)),
+                text: DEFAULT_CHALLENGE_TITLE,
             },
         }),
     )

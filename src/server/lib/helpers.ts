@@ -4,9 +4,9 @@
  */
 
 import { redis, reddit } from '@devvit/web/server'
-import { DEFAULT_SKILL_LEVEL, DEFAULT_GRID_SIZE, isValidGridSize } from '../../shared/constants'
+import { ADAPTIVE_HISTORY_SIZE, DEFAULT_SKILL_LEVEL, DEFAULT_GRID_SIZE, isValidGridSize } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
-import type { GameRecord } from '../../shared/types'
+import type { AdaptiveHistoryRecord, GameRecord } from '../../shared/types'
 
 /**
  * Parse a value read from Redis into an integer, returning a fallback when the
@@ -200,6 +200,31 @@ export const setGridSizePreference = async (userId: string, gridSize: GridSize):
 	await redis.set(`user:${userId}:gridSizePreference`, gridSize.toString())
 }
 
+/**
+ * Get the user's explicit manual grid-size override, if they have one.
+ * Undefined means the adaptive selector is in control.
+ */
+export const getGridSizeOverride = async (userId: string): Promise<GridSize | undefined> => {
+	const value = await redis.get(`user:${userId}:gridSizeOverride`)
+	if (value === undefined) return undefined
+	const parsed = parseInt(value, 10)
+	return isValidGridSize(parsed) ? parsed : undefined
+}
+
+/**
+ * Persist an explicit manual grid-size override.
+ */
+export const setGridSizeOverride = async (userId: string, gridSize: GridSize): Promise<void> => {
+	await redis.set(`user:${userId}:gridSizeOverride`, gridSize.toString())
+}
+
+/**
+ * Clear the explicit manual grid-size override, returning control to the adaptive selector.
+ */
+export const clearGridSizeOverride = async (userId: string): Promise<void> => {
+	await redis.del(`user:${userId}:gridSizeOverride`)
+}
+
 // ─── Per-Grid Skill Level ───────────────────────────────────────────────────
 
 /**
@@ -261,4 +286,45 @@ export const getGridHistory = async (userId: string, gridSize: GridSize): Promis
  */
 export const setGridHistory = async (userId: string, gridSize: GridSize, history: GameRecord[]): Promise<void> => {
 	await redis.set(`user:${userId}:history:${gridSize}`, JSON.stringify(history))
+}
+
+// ─── Adaptive Puzzle History ─────────────────────────────────────────────────
+
+const ADAPTIVE_HISTORY_KEY = (userId: string): string => `user:${userId}:history:adaptive`
+
+/**
+ * Read the rolling adaptive issuance history used by the grid-size selector.
+ */
+export const getAdaptiveHistory = async (userId: string): Promise<AdaptiveHistoryRecord[]> => {
+	const value = await redis.get(ADAPTIVE_HISTORY_KEY(userId))
+	if (value === undefined) return []
+
+	try {
+		const parsed: unknown = JSON.parse(value)
+		if (!Array.isArray(parsed)) return []
+
+		return parsed.filter((item): item is AdaptiveHistoryRecord =>
+			typeof item === 'object' &&
+			item !== null &&
+			typeof (item as AdaptiveHistoryRecord).gridSize === 'number' &&
+			typeof (item as AdaptiveHistoryRecord).level === 'number' &&
+			typeof (item as AdaptiveHistoryRecord).timeTaken === 'number' &&
+			typeof (item as AdaptiveHistoryRecord).mistakes === 'number' &&
+			typeof (item as AdaptiveHistoryRecord).skipped === 'boolean' &&
+			typeof (item as AdaptiveHistoryRecord).source === 'string' &&
+			typeof (item as AdaptiveHistoryRecord).timestamp === 'number'
+		)
+	} catch {
+		return []
+	}
+}
+
+/**
+ * Persist the rolling adaptive issuance history, capped to ADAPTIVE_HISTORY_SIZE.
+ */
+export const setAdaptiveHistory = async (userId: string, history: AdaptiveHistoryRecord[]): Promise<void> => {
+	const capped = history.length > ADAPTIVE_HISTORY_SIZE
+		? history.slice(history.length - ADAPTIVE_HISTORY_SIZE)
+		: history
+	await redis.set(ADAPTIVE_HISTORY_KEY(userId), JSON.stringify(capped))
 }

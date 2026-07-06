@@ -142,6 +142,16 @@ test('POST /api/game/grid-size persists preference to Redis', async () => {
     expect(stored).toBe('6')
 })
 
+test('POST /api/game/grid-size stores an explicit manual override', async () => {
+    const postId = 't3_gs_override'
+    await seedPuzzle(postId, 8)
+
+    await withContext(postId, 't2_griduser', () => gridSizeRequest({ gridSize: 8 }))
+
+    const override = await redis.get('user:t2_griduser:gridSizeOverride')
+    expect(override).toBe('8')
+})
+
 // ─── GET /api/game/state — migration for old users ────────────────────────────
 
 test('GET /api/game/state triggers migration for old users without gridMigrated flag', async () => {
@@ -160,10 +170,6 @@ test('GET /api/game/state triggers migration for old users without gridMigrated 
     // Migration should have run
     const migrated = await redis.get('user:t2_griduser:gridMigrated')
     expect(migrated).toBe('true')
-
-    // Grid size preference should be set to 6 (old level 5 → 6×6)
-    const pref = await redis.get('user:t2_griduser:gridSizePreference')
-    expect(pref).toBe('6')
 
     // Per-grid skill level should be set to 2 (old level 5 → 6×6 level 2)
     const perGridLevel = await redis.get('user:t2_griduser:skillLevel:6')
@@ -206,6 +212,30 @@ test('GET /api/game/state includes persisted path level separately from skill le
     const body = await res.json() as { skillLevel: number; pathLevel: number }
     expect(body.skillLevel).toBe(1)
     expect(body.pathLevel).toBe(8)
+})
+
+test('GET /api/game/state uses adaptive size selection by default when no manual override exists', async () => {
+    const postId = 't3_state_adaptive_default'
+
+    await seedPuzzle(postId, 4)
+    await redis.set('user:t2_griduser:gridMigrated', 'true')
+    await redis.set('user:t2_griduser:gridSizePreference', '4')
+    await redis.set('user:t2_griduser:pathLevel', '2')
+    await redis.set('user:t2_griduser:skillLevel:4', '1')
+    await redis.set('user:t2_griduser:skillLevel:6', '1')
+    await redis.set('user:t2_griduser:skillLevel:8', '1')
+
+    vi.spyOn(Math, 'random').mockReturnValue(0.55)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'griduser' } as never)
+
+    const res = await withContext(postId, 't2_griduser', gameStateRequest)
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { puzzle: { gridSize: number }; gridSizePreference: number }
+    expect(body.puzzle.gridSize).toBe(6)
+    expect(body.gridSizePreference).toBe(6)
+
+    vi.restoreAllMocks()
 })
 
 test('GET /api/game/state uses baked-in grid size for challenge posts', async () => {
@@ -356,12 +386,13 @@ test('POST /api/game/complete records speed to grid-size-scoped leaderboard', as
 
 // ─── POST /api/game/next-challenge — uses grid size preference ────────────────
 
-test('POST /api/game/next-challenge uses grid size preference', async () => {
+test('POST /api/game/next-challenge respects an explicit manual override', async () => {
     const postId = 't3_next_grid'
     const userId = 't2_griduser'
 
-    // Set preference to 8×8
+    // Explicit manual override to 8×8
     await redis.set(`user:${userId}:gridSizePreference`, '8')
+    await redis.set(`user:${userId}:gridSizeOverride`, '8')
     await redis.set(`user:${userId}:skillLevel:8`, '2')
 
     await seedPuzzle(postId, 8)

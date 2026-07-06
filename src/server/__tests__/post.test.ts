@@ -1,7 +1,12 @@
 import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis, reddit } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
-import { createPost, URJO_PUZZLE_POST_TYPE, URJO_POST_TYPE_KEY } from '../post'
+import {
+	createPost,
+	getPublicPostPuzzleConfig,
+	URJO_PUZZLE_POST_TYPE,
+	URJO_POST_TYPE_KEY,
+} from '../post'
 
 // ─── createPost — happy path ──────────────────────────────────────────────────
 
@@ -31,8 +36,8 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 	const puzzle = await redis.hGetAll('game:t3_abc123:puzzle')
 	expect(puzzle.colors).toBeDefined()
 	expect(puzzle.solution).toBeDefined()
-	expect(puzzle.difficulty).toBe('easy')
-	expect(puzzle.gridSize).toBe('4')
+	expect(['easy', 'medium']).toContain(puzzle.difficulty)
+	expect(['4', '6', '8']).toContain(puzzle.gridSize)
 
 	expect(reddit.submitComment).toHaveBeenCalledWith({
 		id: 't3_abc123',
@@ -53,4 +58,16 @@ const testNoSubreddit = createDevvitTest({
 
 testNoSubreddit('createPost throws when subredditName is missing', async () => {
 	await expect(createPost(undefined, { subredditName: undefined })).rejects.toThrow('subredditName is required')
+})
+
+test('getPublicPostPuzzleConfig rotates through the authored weekly grid-size loop', () => {
+	const start = new Date('2026-07-06T00:00:00.000Z')
+	const week = Array.from({ length: 7 }, (_, index) => {
+		const date = new Date(start)
+		date.setUTCDate(start.getUTCDate() + index)
+		return getPublicPostPuzzleConfig(date)
+	})
+
+	expect(week.map((entry) => entry.gridSize)).toEqual([6, 6, 8, 6, 4, 8, 6])
+	expect(week.every((entry) => entry.difficulty === 'easy' || entry.difficulty === 'medium')).toBe(true)
 })

@@ -41,33 +41,30 @@ describe("GameView.svelte continue button flow", () => {
 	});
 
 	it("wires victory comments through explicit confirmation before posting", () => {
-		const actionButtonsStart = completionOverlaySource.indexOf("<!-- Action buttons -->");
-		const actionButtonsSource = completionOverlaySource.slice(actionButtonsStart);
-
+		expect(gameViewSource).toContain('import VictoryCommentComposer from "../components/VictoryCommentComposer.svelte";');
+		expect(gameViewSource).toContain("let showVictoryCommentComposer = $state(false);");
+		expect(gameViewSource).toContain(
+			"onCommentVictory={() => (showVictoryCommentComposer = true)}",
+		);
+		expect(gameViewSource).toContain('<VictoryCommentComposer');
+		expect(gameViewSource).toContain('isOpen={showVictoryCommentComposer}');
+		expect(gameViewSource).toContain('onClose={() => (showVictoryCommentComposer = false)}');
+		expect(gameViewSource).toContain('onSubmit={submitVictoryComment}');
+		expect(gameViewSource).toContain('fetch("/api/game/result-comment"');
+		expect(gameViewSource).toContain('commentMessage');
+		expect(gameViewSource).not.toContain("showVictoryCommentConfirm");
+		expect(gameViewSource).not.toContain("ConfirmDialog");
 		expect(completionOverlaySource).toContain("Comment Your Victory");
 		expect(completionOverlaySource).toContain("onCommentVictory");
 		expect(completionOverlaySource).toContain("onChallenge");
 		expect(completionOverlaySource).not.toContain("onChallengeAndContinue");
-		expect(actionButtonsSource.indexOf("Comment Your Victory")).toBeLessThan(
-			actionButtonsSource.indexOf("Continue"),
-		);
-
-		expect(gameViewSource).toContain("showVictoryCommentConfirm");
-		expect(gameViewSource).toContain(
-			"onCommentVictory={() => (showVictoryCommentConfirm = true)}",
-		);
-		expect(gameViewSource).toContain('fetch("/api/game/result-comment"');
-		expect(gameViewSource).toContain("puzzleNumber,");
-		expect(gameViewSource).toContain("timeTaken: Math.max(timeTaken ?? 0, 1)");
-		expect(gameViewSource).toContain("Posts your victory publicly");
-		expect(gameViewSource).toContain("as your Reddit account");
 	});
 
 	it("keeps Continue and Challenge together in the second success-screen row", () => {
 		expect(completionOverlaySource).toContain('class="grid grid-cols-2 gap-3 w-full"');
 		// Button text is conditional: {#if hasChallenged}✓ Challenge Created{:else}Challenge{/if}
 		expect(completionOverlaySource).toMatch(/\{:else\}\s*Challenge\s*\{\/if\}/);
-		expect(completionOverlaySource).toContain("border-white/70 text-white");
+		expect(completionOverlaySource).toContain("border-white/60 text-white");
 		expect(completionOverlaySource).toContain("bg-yellow-500 text-yellow-950");
 		expect(gameViewSource).toContain("onChallenge={requestChallenge}");
 		expect(gameViewSource).not.toContain("showChallengeAndContinueConfirm");
@@ -75,12 +72,15 @@ describe("GameView.svelte continue button flow", () => {
 	});
 
 	it("makes challenge post consent clear before posting as the user", () => {
-		expect(gameViewSource).toContain("This posts a public challenge to Reddit");
-		expect(gameViewSource).toContain("as u/");
-		expect(gameViewSource).toContain("with the title shown above");
-		expect(completionOverlaySource).toContain("Challenge title");
-		expect(completionOverlaySource).toContain("Write your challenge title");
-		expect(completionOverlaySource).toContain("maxlength=\"120\"");
+		expect(completionOverlaySource).toContain('import ChallengeComposer from "./ChallengeComposer.svelte";');
+		expect(completionOverlaySource).toContain("<ChallengeComposer");
+		expect(completionOverlaySource).toContain("isOpen={showChallengeComposer}");
+		expect(completionOverlaySource).toContain('onClose={closeChallengeComposer}');
+		expect(completionOverlaySource).toContain("onSubmit={submitChallenge}");
+		expect(completionOverlaySource).not.toContain("Challenge title");
+		expect(completionOverlaySource).not.toContain("Beat my time if you can!");
+		expect(completionOverlaySource).not.toContain("maxlength=\"120\"");
+		expect(gameViewSource).toContain("onChallenge={requestChallenge}");
 	});
 
 	it("does not render the mystery box bonus reward modal after completion", () => {

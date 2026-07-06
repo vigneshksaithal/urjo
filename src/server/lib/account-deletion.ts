@@ -37,8 +37,10 @@ const USER_KEY_SUFFIXES = [
     'history:4',
     'history:6',
     'history:8',
+    'history:adaptive',
     // Preferences + onboarding
     'gridSizePreference',
+    'gridSizeOverride',
     'gridMigrated',
     'tutorialCompleted',
     // Username cache

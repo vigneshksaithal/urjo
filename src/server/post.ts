@@ -1,4 +1,5 @@
 import { context, reddit, redis } from '@devvit/web/server'
+import type { Difficulty, GridSize } from '../shared/constants'
 import { generatePuzzle } from './lib/generator'
 
 export const URJO_POST_TYPE_KEY = 'postType'
@@ -10,6 +11,19 @@ When you finish the puzzle, use **Comment Your Victory** in the game to reply wi
 
 type CreatePostOptions = {
 	stickyCommentText?: string
+}
+
+const PUBLIC_POST_GRID_LOOP: readonly GridSize[] = [6, 6, 8, 6, 4, 8, 6] as const
+
+export const getPublicPostPuzzleConfig = (
+	date: Date,
+): { gridSize: GridSize; difficulty: Extract<Difficulty, 'easy' | 'medium'> } => {
+	const dayIndex = (date.getUTCDay() + 6) % 7
+	const gridSize = PUBLIC_POST_GRID_LOOP[dayIndex] ?? 6
+	return {
+		gridSize,
+		difficulty: gridSize === 8 ? 'medium' : 'easy',
+	}
 }
 
 export const createStickyComment = async (
@@ -40,9 +54,10 @@ export const createPost = async (
 		throw new Error('subredditName is required')
 	}
 
-	// Generate puzzle with easy 4x4 difficulty for shared post puzzle
-	// Individual users get adaptive difficulty via their own puzzle override
-	const puzzle = generatePuzzle('easy', 4)
+	// Rotate the public post puzzle across the authored weekly loop so the
+	// top-of-funnel experience is not permanently anchored to 4x4.
+	const publicPostConfig = getPublicPostPuzzleConfig(new Date())
+	const puzzle = generatePuzzle(publicPostConfig.difficulty, publicPostConfig.gridSize)
 
 	// Create post with custom title or default
 	const title = customTitle || 'Urjo Puzzle - Can you solve it?'

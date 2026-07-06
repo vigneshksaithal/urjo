@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
-import { serializeResultCard, parseResultCard } from '../result-card'
+import {
+    serializeResultCard,
+    serializeResultComment,
+    parseResultCard,
+} from '../result-card'
 import type { ResultCardData } from '../growth-types'
 
 describe('result-card', () => {
@@ -76,6 +80,57 @@ describe('result-card', () => {
             expect(lines).toHaveLength(8 + 3) // header + 8 rows + stats + footer
             expect(lines[9]).toBe('⏱️ 9999s | 🎯 99 mistakes | 🔥 9999 streak')
             expect(lines[10]).toBe('Play at r/urjo')
+        })
+    })
+
+    describe('serializeResultComment', () => {
+        it('prepends a custom message above the generated card', () => {
+            const data: ResultCardData = {
+                puzzleNumber: 42,
+                gridSize: 4,
+                skillLevel: 3,
+                colorGrid: [
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                ],
+                timeTaken: 23,
+                mistakes: 0,
+                streak: 5,
+            }
+
+            const result = serializeResultComment(data, 'Big win today!')
+
+            expect(result).toBe(
+                'Big win today!\n\n' +
+                'Urjo #42 🧩 4×4 ⭐3\n' +
+                '🟥🟦🟥🟦\n' +
+                '🟦🟥🟦🟥\n' +
+                '🟥🟦🟥🟦\n' +
+                '🟦🟥🟦🟥\n' +
+                '⏱️ 23s | 🎯 0 mistakes | 🔥 5 streak\n' +
+                'Play at r/urjo'
+            )
+        })
+
+        it('falls back to the plain result card when the message is blank', () => {
+            const data: ResultCardData = {
+                puzzleNumber: 5,
+                gridSize: 4,
+                skillLevel: 1,
+                colorGrid: [
+                    ['red', 'red', 'blue', 'blue'],
+                    ['blue', 'blue', 'red', 'red'],
+                    ['red', 'red', 'blue', 'blue'],
+                    ['blue', 'blue', 'red', 'red'],
+                ],
+                timeTaken: 9,
+                mistakes: 1,
+                streak: 2,
+            }
+
+            expect(serializeResultComment(data, '   ')).toBe(serializeResultCard(data))
         })
     })
 
@@ -252,6 +307,49 @@ describe('result-card', () => {
             const text = 'Urjo #1 🧩 4×4 ⭐1\n🟥🟦🟥🟦'
             expect(parseResultCard(text)).toBeNull()
         })
+
+        it('parses a card preceded by a custom message (as produced by serializeResultComment)', () => {
+            const text =
+                'Big win today!\n\n' +
+                'Urjo #42 🧩 4×4 ⭐3\n' +
+                '🟥🟦🟥🟦\n' +
+                '🟦🟥🟦🟥\n' +
+                '🟥🟦🟥🟦\n' +
+                '🟦🟥🟦🟥\n' +
+                '⏱️ 23s | 🎯 0 mistakes | 🔥 5 streak\n' +
+                'Play at r/urjo'
+
+            const result = parseResultCard(text)
+
+            expect(result).toStrictEqual({
+                puzzleNumber: 42,
+                gridSize: 4,
+                skillLevel: 3,
+                colorGrid: [
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                ],
+                timeTaken: 23,
+                mistakes: 0,
+                streak: 5,
+            })
+        })
+
+        it('parses a card preceded by a multi-line custom message', () => {
+            const text =
+                'Line one\nLine two\n\n' +
+                'Urjo #1 🧩 4×4 ⭐1\n' +
+                '🟥🟦🟥🟦\n' +
+                '🟦🟥🟦🟥\n' +
+                '🟥🟦🟥🟦\n' +
+                '🟦🟥🟦🟥\n' +
+                '⏱️ 10s | 🎯 0 mistakes | 🔥 1 streak\n' +
+                'Play at r/urjo'
+
+            expect(parseResultCard(text)?.puzzleNumber).toBe(1)
+        })
     })
 
     // ─── Round-trip ────────────────────────────────────────────────────────────
@@ -314,6 +412,28 @@ describe('result-card', () => {
             }
 
             const serialized = serializeResultCard(data)
+            const parsed = parseResultCard(serialized)
+
+            expect(parsed).toStrictEqual(data)
+        })
+
+        it('serialize then parse recovers the original data when a custom message is included', () => {
+            const data: ResultCardData = {
+                puzzleNumber: 7,
+                gridSize: 4,
+                skillLevel: 2,
+                colorGrid: [
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                ],
+                timeTaken: 15,
+                mistakes: 1,
+                streak: 3,
+            }
+
+            const serialized = serializeResultComment(data, 'What a puzzle!')
             const parsed = parseResultCard(serialized)
 
             expect(parsed).toStrictEqual(data)

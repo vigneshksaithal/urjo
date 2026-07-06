@@ -12,19 +12,25 @@ import {
     MIN_SKILL_LEVEL,
     HISTORY_SIZE,
     CONSECUTIVE_SKIP_THRESHOLD,
-    PROMOTE_WINDOW,
-    DEMOTE_WINDOW,
     PER_GRID_MAX_LEVEL,
 } from '../../../shared/constants'
 import type { GameRecord } from '../../../shared/types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const makeRecord = (level: number, timeTaken: number, skipped = false): GameRecord => ({
+const makeRecord = (
+    level: number,
+    timeTaken: number,
+    skipped = false,
+    mistakes = 0,
+    gridSize: 4 | 6 | 8 = 4,
+): GameRecord => ({
     level,
     timeTaken,
     timestamp: Date.now(),
     skipped,
+    mistakes,
+    gridSize,
 })
 
 const fastHistory = (level: number, count: number): GameRecord[] =>
@@ -112,27 +118,47 @@ describe('determineSkillLevel', () => {
         expect(determineSkillLevel(3, [])).toBe(3)
     })
 
-    it('promotes (currentLevel + 1) when sustained fast solves exceed PROMOTE_WINDOW', () => {
-        // Need PROMOTE_WINDOW (15) fast solves to trigger promotion at level 1
-        expect(determineSkillLevel(1, fastHistory(1, PROMOTE_WINDOW))).toBe(2)
+    it('promotes after 8 comfortable solves at the current level', () => {
+        expect(determineSkillLevel(1, fastHistory(1, 8))).toBe(2)
     })
 
-    it('does NOT promote with fewer than PROMOTE_WINDOW games', () => {
-        // Only 5 fast solves — not enough to promote
-        expect(determineSkillLevel(1, fastHistory(1, 5))).toBe(1)
+    it('does NOT promote with only 7 comfortable solves', () => {
+        expect(determineSkillLevel(1, fastHistory(1, 7))).toBe(1)
     })
 
-    it('demotes (currentLevel - 1) when last DEMOTE_WINDOW games are very slow', () => {
-        // Need DEMOTE_WINDOW (5) very slow solves to trigger demotion at level 3
-        expect(determineSkillLevel(3, slowHistory(3, DEMOTE_WINDOW))).toBe(2)
+    it('demotes when the last 4 solves are sustained struggles', () => {
+        expect(determineSkillLevel(3, slowHistory(3, 4))).toBe(2)
+    })
+
+    it('demotes immediately after 2 consecutive skips', () => {
+        const history = [
+            makeRecord(3, 10, false),
+            makeRecord(3, 0, true),
+            makeRecord(3, 0, true),
+        ]
+        expect(determineSkillLevel(3, history)).toBe(2)
+    })
+
+    it('does NOT promote if recent mistakes drag the weighted average below the comfort threshold', () => {
+        const history = [
+            makeRecord(2, 0, false, 0),
+            makeRecord(2, 0, false, 0),
+            makeRecord(2, 0, false, 0),
+            makeRecord(2, 0, false, 0),
+            makeRecord(2, 0, false, 0),
+            makeRecord(2, 105, false, 1),
+            makeRecord(2, 105, false, 1),
+            makeRecord(2, 105, false, 1),
+        ]
+        expect(determineSkillLevel(2, history)).toBe(2)
     })
 
     it('does NOT demote beyond MAX_SKILL_LEVEL (level 9)', () => {
-        expect(determineSkillLevel(9, fastHistory(9, PROMOTE_WINDOW))).toBe(9)
+        expect(determineSkillLevel(9, fastHistory(9, 8))).toBe(9)
     })
 
     it('does NOT demote below MIN_SKILL_LEVEL (level 1)', () => {
-        expect(determineSkillLevel(1, slowHistory(1, DEMOTE_WINDOW))).toBe(1)
+        expect(determineSkillLevel(1, slowHistory(1, 4))).toBe(1)
     })
 })
 
@@ -421,18 +447,18 @@ describe('determineSkillLevel — capped at PER_GRID_MAX_LEVEL (4)', () => {
      */
     it('does NOT promote beyond PER_GRID_MAX_LEVEL=4', () => {
         // At level 4 with many fast solves, should stay at 4
-        const result = determineSkillLevel(4, fastHistory(4, 15))
+        const result = determineSkillLevel(4, fastHistory(4, 8))
         expect(result).toBe(4)
         expect(result).toBeLessThanOrEqual(PER_GRID_MAX_LEVEL)
     })
 
     it('promotes from level 3 to level 4 with sustained fast solves', () => {
-        const result = determineSkillLevel(3, fastHistory(3, 15))
+        const result = determineSkillLevel(3, fastHistory(3, 8))
         expect(result).toBe(4)
     })
 
     it('demotes from level 4 to level 3 with sustained slow solves', () => {
-        const result = determineSkillLevel(4, slowHistory(4, DEMOTE_WINDOW))
+        const result = determineSkillLevel(4, slowHistory(4, 4))
         expect(result).toBe(3)
     })
 })

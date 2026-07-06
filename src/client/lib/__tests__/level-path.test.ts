@@ -6,32 +6,28 @@ import {
 } from "../level-path";
 
 describe("level path model", () => {
-	it("builds a compact forward path with one current node and locked future nodes", () => {
+	it("builds a three-node window with the previous level, current level, and next locked level", () => {
 		const path = buildLevelPath({
 			currentLevel: 12,
-			visibleLevels: 7,
+			visibleLevels: 3,
 		});
 
-		expect(path.map((level) => level.level)).toEqual([12, 13, 14, 15, 16, 17, 18]);
+		expect(path.map((level) => level.level)).toEqual([11, 12, 13]);
 		expect(path.map((level) => level.state)).toEqual([
+			"completed",
 			"current",
-			"locked",
-			"locked",
-			"locked",
-			"locked",
-			"locked",
 			"locked",
 		]);
 		expect(path.find((level) => level.state === "current")?.level).toBe(12);
 	});
 
-	it("keeps early players anchored at level one", () => {
+	it("clamps the previous level at one for early players", () => {
 		const path = buildLevelPath({
 			currentLevel: 1,
-			visibleLevels: 5,
+			visibleLevels: 3,
 		});
 
-		expect(path.map((level) => level.level)).toEqual([1, 2, 3, 4, 5]);
+		expect(path.map((level) => level.level)).toEqual([1, 2, 3]);
 		expect(path[0]?.state).toBe("current");
 		expect(path.slice(1).every((level) => level.state === "locked")).toBe(true);
 	});
@@ -39,7 +35,7 @@ describe("level path model", () => {
 	it("returns the single playable node users must tap to continue", () => {
 		const path = buildLevelPath({
 			currentLevel: 4,
-			visibleLevels: 6,
+			visibleLevels: 3,
 		});
 
 		expect(getNextPlayableLevel(path)).toMatchObject({

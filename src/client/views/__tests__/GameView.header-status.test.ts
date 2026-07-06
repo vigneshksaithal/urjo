@@ -101,7 +101,7 @@ describe("GameView header status", () => {
 		expect(
 			document.querySelector('[aria-label="12 seconds elapsed"]'),
 		).not.toBeNull();
-		expect(document.body.textContent).toContain("3 Days");
+		expect(document.body.textContent).toMatch(/3\s*Days/);
 		expect(document.body.textContent).toContain("12s");
 	});
 });

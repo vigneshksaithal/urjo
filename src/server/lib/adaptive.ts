@@ -13,10 +13,6 @@
 import type { GameRecord } from '../../shared/types'
 import {
 	HISTORY_SIZE,
-	PROMOTE_THRESHOLDS,
-	PROMOTE_WINDOWS,
-	DEMOTE_WINDOW,
-	DEMOTE_THRESHOLD,
 	SKIP_BASE_PENALTY,
 	SKIP_MAX_EXTRA_PENALTY,
 	CONSECUTIVE_SKIP_THRESHOLD,
@@ -77,12 +73,40 @@ export const calculateAverageScore = (history: GameRecord[]): number => {
 
 	const total = history.reduce((sum, record) => {
 		const score = record.skipped
-			? calculateSkipScore(record.timeTaken, record.level)
-			: calculatePerformanceScore(record.timeTaken, record.level)
+			? calculateSkipScore(record.timeTaken, record.level, record.gridSize ?? 4)
+			: calculatePerformanceScore(
+				record.timeTaken,
+				record.level,
+				record.mistakes ?? 0,
+				record.gridSize ?? 4,
+			)
 		return sum + score
 	}, 0)
 
 	return total / history.length
+}
+
+const calculateWeightedAverageScore = (history: GameRecord[]): number => {
+	if (history.length === 0) return 0.5
+
+	let weightedTotal = 0
+	let totalWeight = 0
+	for (let index = 0; index < history.length; index++) {
+		const record = history[index]!
+		const weight = index >= history.length - 3 ? 2 : 1
+		const score = record.skipped
+			? calculateSkipScore(record.timeTaken, record.level, record.gridSize ?? 4)
+			: calculatePerformanceScore(
+				record.timeTaken,
+				record.level,
+				record.mistakes ?? 0,
+				record.gridSize ?? 4,
+			)
+		weightedTotal += score * weight
+		totalWeight += weight
+	}
+
+	return totalWeight === 0 ? 0.5 : weightedTotal / totalWeight
 }
 
 /**
@@ -100,22 +124,26 @@ export const calculateAverageScore = (history: GameRecord[]): number => {
 export const determineSkillLevel = (currentLevel: number, history: GameRecord[]): number => {
 	if (history.length === 0) return currentLevel
 
-	// Check demotion first (short window)
-	if (history.length >= DEMOTE_WINDOW) {
-		const recentShort = history.slice(-DEMOTE_WINDOW)
-		const avgShort = calculateAverageScore(recentShort)
-		if (avgShort <= DEMOTE_THRESHOLD && currentLevel > PER_GRID_MIN_LEVEL) {
+	const recent4 = history.slice(-4)
+	if (
+		currentLevel > PER_GRID_MIN_LEVEL &&
+		recent4.length >= 2 &&
+		recent4.slice(-2).every((record) => record?.skipped === true)
+	) {
+		return currentLevel - 1
+	}
+
+	if (currentLevel > PER_GRID_MIN_LEVEL && recent4.length === 4) {
+		const recent4Average = calculateWeightedAverageScore(recent4)
+		if (recent4Average <= 0.28) {
 			return currentLevel - 1
 		}
 	}
 
-	// Check promotion (longer window - per level)
-	const promoteWindow = PROMOTE_WINDOWS[currentLevel - 1] ?? 15
-	if (history.length >= promoteWindow) {
-		const recentLong = history.slice(-promoteWindow)
-		const avgLong = calculateAverageScore(recentLong)
-		const promoteThreshold = PROMOTE_THRESHOLDS[currentLevel - 1] ?? 0.55
-		if (avgLong >= promoteThreshold && currentLevel < PER_GRID_MAX_LEVEL) {
+	const recent8 = history.slice(-8)
+	if (currentLevel < PER_GRID_MAX_LEVEL && recent8.length === 8) {
+		const recent8Average = calculateWeightedAverageScore(recent8)
+		if (recent8Average >= 0.58) {
 			return currentLevel + 1
 		}
 	}

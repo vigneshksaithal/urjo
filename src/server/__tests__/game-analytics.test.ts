@@ -10,6 +10,7 @@ import { redis, reddit as webReddit, runWithContext } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
 import { app } from '../index'
 import { getCurrentSeason } from '../lib/seasons'
+import { serializeResultComment } from '../../shared/result-card'
 
 // ─── Helper: run with Devvit context ──────────────────────────────────────────
 
@@ -317,6 +318,78 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
     vi.restoreAllMocks()
 })
 
+testResultComment('POST /api/game/result-comment prepends a custom message when provided', async () => {
+    vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
+
+    await withCtx(CTX, () => seedStickyComment('t3_testpost'))
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/result-comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...RESULT_BODY,
+                commentMessage: 'Big win today!',
+            }),
+        }),
+    )
+    expect(res.status).toBe(200)
+
+    expect(webReddit.submitComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+            id: 't1_sticky123',
+            runAs: 'USER',
+            text: serializeResultComment(RESULT_BODY, 'Big win today!'),
+        }),
+    )
+
+    vi.restoreAllMocks()
+})
+
+testResultComment('POST /api/game/result-comment returns 400 when commentMessage exceeds 400 characters', async () => {
+    vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
+
+    await withCtx(CTX, () => seedStickyComment('t3_testpost'))
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/result-comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...RESULT_BODY,
+                commentMessage: 'x'.repeat(401),
+            }),
+        }),
+    )
+    expect(res.status).toBe(400)
+
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Comment message must be 400 characters or fewer')
+    expect(webReddit.submitComment).not.toHaveBeenCalled()
+
+    vi.restoreAllMocks()
+})
+
+testResultComment('POST /api/game/result-comment accepts commentMessage at exactly 400 characters', async () => {
+    vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
+
+    await withCtx(CTX, () => seedStickyComment('t3_testpost'))
+
+    const res = await withCtx(CTX, () =>
+        app.request('/api/game/result-comment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...RESULT_BODY,
+                commentMessage: 'x'.repeat(400),
+            }),
+        }),
+    )
+    expect(res.status).toBe(200)
+
+    vi.restoreAllMocks()
+})
+
 testResultComment('POST /api/game/result-comment creates missing sticky comment before replying', async () => {
     const distinguishSticky = vi.fn().mockResolvedValue(undefined)
     vi.spyOn(webReddit, 'submitComment')
@@ -357,32 +430,46 @@ testResultComment('POST /api/game/result-comment creates missing sticky comment 
     vi.restoreAllMocks()
 })
 
-testResultComment('POST /api/game/result-comment returns 400 on duplicate', async () => {
+testResultComment('POST /api/game/result-comment allows repeated comments on the same post', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 
     await withCtx(CTX, () => seedStickyComment('t3_testpost'))
 
     // First call — succeeds
-    await withCtx(CTX, () =>
+    const firstRes = await withCtx(CTX, () =>
         app.request('/api/game/result-comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(RESULT_BODY),
         }),
     )
+    expect(firstRes.status).toBe(200)
 
-    // Second call — should return 400
-    const res = await withCtx(CTX, () =>
+    // Second call — also succeeds on the same post
+    const secondRes = await withCtx(CTX, () =>
         app.request('/api/game/result-comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(RESULT_BODY),
         }),
     )
-    expect(res.status).toBe(400)
+    expect(secondRes.status).toBe(200)
 
-    const body = await res.json() as { error: string }
-    expect(body.error).toBe('Result already shared on this post')
+    expect(webReddit.submitComment).toHaveBeenCalledTimes(2)
+    expect(webReddit.submitComment).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+            id: 't1_sticky123',
+            runAs: 'USER',
+        }),
+    )
+    expect(webReddit.submitComment).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+            id: 't1_sticky123',
+            runAs: 'USER',
+        }),
+    )
 
     vi.restoreAllMocks()
 })

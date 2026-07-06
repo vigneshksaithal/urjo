@@ -17,10 +17,10 @@
 
 	import TutorialView from "../views/TutorialView.svelte";
 	import ModPreviewPanel from "../components/ModPreviewPanel.svelte";
-	import ConfirmDialog from "../components/ConfirmDialog.svelte";
 	import CompletionOverlay from "../components/CompletionOverlay.svelte";
 	import LevelPathOverlay from "../components/LevelPathOverlay.svelte";
 	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
+	import VictoryCommentComposer from "../components/VictoryCommentComposer.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
 	import Flame from "lucide-svelte/icons/flame";
 	import Megaphone from "lucide-svelte/icons/megaphone";
@@ -189,10 +189,9 @@
 		return () => clearTimeout(timer);
 	});
 	let showModPreview = $state(false);
-	let showVictoryCommentConfirm = $state(false);
+	let showVictoryCommentComposer = $state(false);
 	let showLevelPath = $state(false);
 	let commentingVictory = $state(false);
-	let hasCommentedVictory = $state(false);
 	let dismissedMilestoneKey = $state<string | null>(null);
 	let showOptInTutorial = $state(false);
 	let showAchievements = $state(false);
@@ -202,6 +201,7 @@
 	$effect(() => {
 		if (!isCompleted) {
 			showLevelPath = false;
+			showVictoryCommentComposer = false;
 		}
 	});
 
@@ -278,13 +278,6 @@
 		onChallenge(customTitle);
 	}
 
-	function buildChallengePostTitle(): string {
-		const seconds = Math.max(timeTaken ?? 0, 1);
-		const perfectTag = mistakes === 0 ? " (zero mistakes)" : "";
-		const challenger = username ? ` from u/${username}` : "";
-		return `Urjo ${gridSize}×${gridSize} challenge${challenger}: ${seconds}s target${perfectTag}`;
-	}
-
 	function handlePrimaryCta(): void {
 		showLevelPath = true;
 	}
@@ -292,12 +285,12 @@
 	function handleLevelSelect(): void {
 		void fireOnce(postId ?? "", "next-puzzle");
 		showLevelPath = false;
-		hasCommentedVictory = false;
+		showVictoryCommentComposer = false;
 		onNextChallenge();
 	}
 
-	async function confirmVictoryComment(): Promise<void> {
-		if (commentingVictory || hasCommentedVictory) return;
+	async function submitVictoryComment(commentMessage: string): Promise<void> {
+		if (commentingVictory) return;
 		if (!puzzleNumber) {
 			showToast("Puzzle not ready yet — try again in a moment.");
 			return;
@@ -316,6 +309,7 @@
 					timeTaken: Math.max(timeTaken ?? 0, 1),
 					mistakes,
 					streak: streakData.currentStreak,
+					commentMessage,
 					colorGrid: buildVictoryColorGrid(
 						puzzleColors ?? "",
 						gridSize,
@@ -332,8 +326,7 @@
 				throw new Error(message);
 			}
 
-			hasCommentedVictory = true;
-			showVictoryCommentConfirm = false;
+			showVictoryCommentComposer = false;
 			showToast("Victory commented!");
 		} catch (error) {
 			showToast(
@@ -660,12 +653,10 @@
 	{coins}
 	{loginGate}
 	onContinue={handlePrimaryCta}
-	onCommentVictory={() => (showVictoryCommentConfirm = true)}
-	{hasCommentedVictory}
+	onCommentVictory={() => (showVictoryCommentComposer = true)}
 	{commentingVictory}
 	onChallenge={requestChallenge}
 	{hasChallenged}
-	defaultChallengeTitle={buildChallengePostTitle()}
 	{puzzleColors}
 	{gridSize}
 	{puzzleNumber}
@@ -687,16 +678,18 @@
 	<ConfettiEffect />
 {/if}
 
-<!-- Victory comment confirmation dialog -->
-<ConfirmDialog
-	isOpen={showVictoryCommentConfirm}
-	title="Comment Your Victory?"
-	message="Posts your victory publicly{username
-		? ` as u/${username}`
-		: ' as your Reddit account'} as a reply to the pinned comment on this post. Others will see it."
-	confirmLabel={commentingVictory ? "Commenting..." : "Comment"}
-	onConfirm={confirmVictoryComment}
-	onCancel={() => (showVictoryCommentConfirm = false)}
+<!-- Victory comment composer -->
+<VictoryCommentComposer
+	isOpen={showVictoryCommentComposer}
+	{commentingVictory}
+	{puzzleNumber}
+	{gridSize}
+	{skillLevel}
+	{timeTaken}
+	{mistakes}
+	streak={streakData.currentStreak}
+	onClose={() => (showVictoryCommentComposer = false)}
+	onSubmit={submitVictoryComment}
 />
 
 <!-- Leaderboard modal -->

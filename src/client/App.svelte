@@ -597,6 +597,7 @@
 				hasChallenged = true;
 				challengeUrl = data.postUrl ?? null;
 				showToast("Challenge post created!");
+				await handleNextChallenge();
 			} else {
 				const reason: string =
 					typeof data?.error === "string"
