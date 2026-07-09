@@ -20,7 +20,6 @@
 	import CompletionOverlay from "../components/CompletionOverlay.svelte";
 	import LevelPathOverlay from "../components/LevelPathOverlay.svelte";
 	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
-	import VictoryCommentComposer from "../components/VictoryCommentComposer.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
 	import Flame from "lucide-svelte/icons/flame";
 	import Megaphone from "lucide-svelte/icons/megaphone";
@@ -61,6 +60,7 @@
 
 	type ChallengeProps = {
 		isChallenge?: boolean;
+		allowsGridSizeChange?: boolean;
 		hasChallenged: boolean;
 		challengeUrl: string | null;
 		challengePromptEligible?: boolean;
@@ -149,6 +149,7 @@
 		username,
 		isLoggedIn = true,
 		isChallenge = false,
+		allowsGridSizeChange = true,
 		onGridSizeChange,
 		engagement,
 		puzzleColors,
@@ -189,7 +190,6 @@
 		return () => clearTimeout(timer);
 	});
 	let showModPreview = $state(false);
-	let showVictoryCommentComposer = $state(false);
 	let showLevelPath = $state(false);
 	let commentingVictory = $state(false);
 	let dismissedMilestoneKey = $state<string | null>(null);
@@ -201,7 +201,6 @@
 	$effect(() => {
 		if (!isCompleted) {
 			showLevelPath = false;
-			showVictoryCommentComposer = false;
 		}
 	});
 
@@ -285,7 +284,6 @@
 	function handleLevelSelect(): void {
 		void fireOnce(postId ?? "", "next-puzzle");
 		showLevelPath = false;
-		showVictoryCommentComposer = false;
 		onNextChallenge();
 	}
 
@@ -297,6 +295,7 @@
 		}
 		void fireOnce(postId ?? "", "result-comment");
 		commentingVictory = true;
+		const normalizedCommentMessage = commentMessage.trim();
 
 		try {
 			const response = await fetch("/api/game/result-comment", {
@@ -309,7 +308,10 @@
 					timeTaken: Math.max(timeTaken ?? 0, 1),
 					mistakes,
 					streak: streakData.currentStreak,
-					commentMessage,
+					commentMessage:
+						normalizedCommentMessage.length > 0
+							? normalizedCommentMessage
+							: undefined,
 					colorGrid: buildVictoryColorGrid(
 						puzzleColors ?? "",
 						gridSize,
@@ -326,8 +328,8 @@
 				throw new Error(message);
 			}
 
-			showVictoryCommentComposer = false;
 			showToast("Victory commented!");
+			handlePrimaryCta();
 		} catch (error) {
 			showToast(
 				error instanceof Error
@@ -531,7 +533,7 @@
 	{/if}
 
 	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
-	{#if !isChallenge && onGridSizeChange}
+	{#if !isChallenge && allowsGridSizeChange && onGridSizeChange}
 		<div class="flex-none flex justify-center px-3 pb-2">
 			<GridSizeSelector
 				{gridSize}
@@ -653,7 +655,7 @@
 	{coins}
 	{loginGate}
 	onContinue={handlePrimaryCta}
-	onCommentVictory={() => (showVictoryCommentComposer = true)}
+	onCommentVictory={submitVictoryComment}
 	{commentingVictory}
 	onChallenge={requestChallenge}
 	{hasChallenged}
@@ -677,20 +679,6 @@
 <!-- Confetti effect -->{#if showConfetti}
 	<ConfettiEffect />
 {/if}
-
-<!-- Victory comment composer -->
-<VictoryCommentComposer
-	isOpen={showVictoryCommentComposer}
-	{commentingVictory}
-	{puzzleNumber}
-	{gridSize}
-	{skillLevel}
-	{timeTaken}
-	{mistakes}
-	streak={streakData.currentStreak}
-	onClose={() => (showVictoryCommentComposer = false)}
-	onSubmit={submitVictoryComment}
-/>
 
 <!-- Leaderboard modal -->
 <LeaderboardModal

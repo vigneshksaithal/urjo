@@ -11,19 +11,25 @@ When you finish the puzzle, use **Comment Your Victory** in the game to reply wi
 
 type CreatePostOptions = {
 	stickyCommentText?: string
+	gridSize?: GridSize
+	lockGridSize?: boolean
 }
 
 const PUBLIC_POST_GRID_LOOP: readonly GridSize[] = [6, 6, 8, 6, 4, 8, 6] as const
+
+const getPuzzleConfigForGridSize = (
+	gridSize: GridSize,
+): { gridSize: GridSize; difficulty: Extract<Difficulty, 'easy' | 'medium'> } => ({
+	gridSize,
+	difficulty: gridSize === 8 ? 'medium' : 'easy',
+})
 
 export const getPublicPostPuzzleConfig = (
 	date: Date,
 ): { gridSize: GridSize; difficulty: Extract<Difficulty, 'easy' | 'medium'> } => {
 	const dayIndex = (date.getUTCDay() + 6) % 7
 	const gridSize = PUBLIC_POST_GRID_LOOP[dayIndex] ?? 6
-	return {
-		gridSize,
-		difficulty: gridSize === 8 ? 'medium' : 'easy',
-	}
+	return getPuzzleConfigForGridSize(gridSize)
 }
 
 export const createStickyComment = async (
@@ -47,7 +53,7 @@ export const createPost = async (
 	customTitle?: string,
 	ctxOverride?: any,
 	options: CreatePostOptions = {},
-): Promise<{ id: string }> => {
+): Promise<{ id: string; gridSize: GridSize }> => {
 	const currentContext = ctxOverride || context
 	const { subredditName } = currentContext
 	if (!subredditName) {
@@ -56,7 +62,9 @@ export const createPost = async (
 
 	// Rotate the public post puzzle across the authored weekly loop so the
 	// top-of-funnel experience is not permanently anchored to 4x4.
-	const publicPostConfig = getPublicPostPuzzleConfig(new Date())
+	const publicPostConfig = options.gridSize !== undefined
+		? getPuzzleConfigForGridSize(options.gridSize)
+		: getPublicPostPuzzleConfig(new Date())
 	const puzzle = generatePuzzle(publicPostConfig.difficulty, publicPostConfig.gridSize)
 
 	// Create post with custom title or default
@@ -77,10 +85,12 @@ export const createPost = async (
 		difficulty: puzzle.difficulty,
 		gridSize: puzzle.gridSize.toString(),
 		created: new Date().toISOString(),
+		...(options.lockGridSize ? { lockedGridSize: puzzle.gridSize.toString() } : {}),
 	})
 
 	await redis.hSet(`game:${post.id}:meta`, {
 		[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
+		...(options.lockGridSize ? { lockedGridSize: puzzle.gridSize.toString() } : {}),
 	})
 
 	await createStickyComment(post.id, options.stickyCommentText)
@@ -88,5 +98,8 @@ export const createPost = async (
 	// Increment global stats
 	await redis.incrBy('stats:totalGames', 1)
 
-	return post
+	return {
+		id: post.id,
+		gridSize: puzzle.gridSize as GridSize,
+	}
 }

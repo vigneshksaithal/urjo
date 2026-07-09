@@ -17,11 +17,25 @@ const withCtx = <T>(fn: () => Promise<T>): Promise<T> =>
         fn,
     ) as Promise<T>
 
-const schedulerRequest = async (): Promise<Response> =>
+type SchedulerTaskBody = {
+    data?: {
+        gridSize: 6 | 8
+        slotKey: string
+    }
+}
+
+const schedulerRequest = async (
+    body: SchedulerTaskBody = {
+        data: {
+            gridSize: 6,
+            slotKey: '6x6-1400',
+        },
+    },
+): Promise<Response> =>
     app.request('/internal/scheduler/daily-puzzle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
     })
 
 const mockRedditApis = (postId = 't3_sched1') => {
@@ -60,7 +74,7 @@ test('POST /internal/scheduler/daily-puzzle creates a post with puzzle number in
 
     expect(reddit.submitCustomPost).toHaveBeenCalledWith(
         expect.objectContaining({
-            title: expect.stringMatching(/Urjo Puzzle #\d+/),
+            title: expect.stringMatching(/6x6 Puzzle #\d+/),
         })
     )
 })
@@ -122,11 +136,38 @@ test('scheduler stores daily preview data in Redis after post creation', async (
 
     const parsed = JSON.parse(previewMeta.data!)
     expect(parsed.puzzleNumber).toBeGreaterThan(0)
-    expect(parsed.gridSize).toBe(4)
+    expect(parsed.gridSize).toBe(6)
     expect(parsed.completionsToday).toBe(0)
     expect(parsed.activeNow).toBe(0)
     expect(parsed.fastestTime).toBeNull()
     expect(parsed.fastestUsername).toBeNull()
+})
+
+test('scheduler stores locked 8x8 metadata for 8x8 tasks', async () => {
+    mockRedditApis('t3_sched8x8')
+
+    await withCtx(() => schedulerRequest({
+        data: {
+            gridSize: 8,
+            slotKey: '8x8-2000',
+        },
+    }))
+
+    expect(reddit.submitCustomPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+            title: expect.stringMatching(/8x8 Puzzle #\d+/),
+        }),
+    )
+
+    const puzzle = await withCtx(() => redis.hGetAll('game:t3_sched8x8:puzzle'))
+    expect(puzzle.gridSize).toBe('8')
+
+    const meta = await withCtx(() => redis.hGetAll('game:t3_sched8x8:meta'))
+    expect(meta.lockedGridSize).toBe('8')
+
+    const previewMeta = await withCtx(() => redis.hGetAll('game:t3_sched8x8:preview'))
+    const parsed = JSON.parse(previewMeta.data!)
+    expect(parsed.gridSize).toBe(8)
 })
 
 test('scheduler stores roadmap:startDate on first run', async () => {

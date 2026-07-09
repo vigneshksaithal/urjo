@@ -129,6 +129,7 @@
 	>(undefined);
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
+	let allowsGridSizeChange = $state(true);
 	let puzzleSolution = $state("");
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
 	let puzzleNumber = $state(0);
@@ -245,6 +246,7 @@
 			pathLevel = data.pathLevel;
 			gridSizePreference = data.gridSizePreference ?? 4;
 			isChallenge = data.isChallenge ?? false;
+			allowsGridSizeChange = data.allowsGridSizeChange ?? !isChallenge;
 			isFirstTimeUser = data.isFirstTimeUser ?? false;
 			challengerInfo = data.challengerInfo;
 			puzzleNumber = data.puzzleNumber ?? 0;
@@ -810,6 +812,7 @@
 			onOpenAnalytics: () => (showAnalytics = true),
 			isMod,
 			onGridSizeChange: handleGridSizeChange,
+			allowsGridSizeChange,
 			puzzleColors,
 			skillLevel,
 			pathLevel,

@@ -79,13 +79,27 @@ describe('buildLoggedOutGameState', () => {
             puzzle: PUZZLE,
             postId: 't3_abc',
             isChallenge: true,
+            allowsGridSizeChange: false,
             puzzleNumber: 42,
             weekendEvent: ACTIVE_WEEKEND,
         })
 
         expect(state.isChallenge).toBe(true)
+        expect(state.allowsGridSizeChange).toBe(false)
         expect(state.puzzleNumber).toBe(42)
         expect(state.weekendEvent).toEqual(ACTIVE_WEEKEND)
+    })
+
+    it('uses the post grid size as the effective preference when the post is locked', () => {
+        const state = buildLoggedOutGameState({
+            puzzle: { ...PUZZLE, gridSize: 8 },
+            postId: 't3_locked',
+            isChallenge: false,
+            allowsGridSizeChange: false,
+        })
+
+        expect(state.gridSizePreference).toBe(8)
+        expect(state.allowsGridSizeChange).toBe(false)
     })
 })
 

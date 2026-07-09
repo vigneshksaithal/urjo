@@ -29,12 +29,7 @@ import { getTodayUTC, getISOWeek, getYesterdayUTC } from './lib/helpers'
 import { runDriftCheck, formatDriftLogLine } from './lib/drift'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
-import {
-  claimGrowthPostSlot,
-  getGrowthPostSlot,
-  isGrowthPostSlotEnabled,
-  type GrowthPostSlot,
-} from './lib/growth-safety'
+import { isValidGridSize, type GridSize } from '../shared/constants'
 import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
 import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-types'
 
@@ -65,7 +60,15 @@ type AccountDeletePayload = {
   user?: { id?: string }
 }
 
+type SchedulerTaskBody = TaskRequest & {
+  data?: {
+    gridSize?: number
+    slotKey?: string
+  }
+}
+
 const REDDIT_GAMES_SUBREDDIT = 'RedditGames'
+const SCHEDULED_POST_TTL_SECONDS = 48 * 3600
 
 const normalizePostId = (postId: string): `t3_${string}` =>
   postId.startsWith('t3_') ? postId as `t3_${string}` : `t3_${postId}`
@@ -243,15 +246,26 @@ const formatLeaderboardSection = (
   ]
 }
 
-const buildGrowthPostTitle = (
-  slot: GrowthPostSlot,
+const buildScheduledPostTitle = (
   puzzleNumber: number,
-  brandingEmoji: string
-): string => {
-  if (slot === 'evening_puzzle') {
-    return `${brandingEmoji} Urjo Evening Puzzle #${puzzleNumber} - unwind with a board`
+  brandingEmoji: string,
+  gridSize: GridSize,
+): string => `${brandingEmoji} Urjo ${gridSize}x${gridSize} Puzzle #${puzzleNumber} - Beat today's board`
+
+const claimScheduledPostSlot = async (
+  date: string,
+  subredditId: string,
+  slotKey: string,
+): Promise<boolean> => {
+  const dedupKey = `scheduled-post:${date}:${subredditId}:${slotKey}`
+  const existing = await redis.get(dedupKey)
+  if (existing !== undefined) {
+    return false
   }
-  return `${brandingEmoji} Urjo Puzzle #${puzzleNumber} - Beat today's board`
+
+  await redis.set(dedupKey, '1')
+  await redis.expire(dedupKey, SCHEDULED_POST_TTL_SECONDS)
+  return true
 }
 
 // Build a stats comment for the daily puzzle post.
@@ -401,8 +415,17 @@ const buildSeasonRecapComment = async (previousSeasonId: string): Promise<string
 
 // Scheduler endpoint for capped r/urjo growth-slot puzzle posts
 app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
-  await c.req.json<TaskRequest>()
+  const input = await c.req.json<SchedulerTaskBody>().catch(() => null)
   try {
+    const rawGridSize = input?.data?.gridSize
+    const slotKey = input?.data?.slotKey
+    if (!isValidGridSize(rawGridSize) || (rawGridSize !== 6 && rawGridSize !== 8)) {
+      return c.json<TaskResponse>({ status: 'error', message: 'gridSize must be 6 or 8' }, 400)
+    }
+    if (typeof slotKey !== 'string' || slotKey.length === 0) {
+      return c.json<TaskResponse>({ status: 'error', message: 'slotKey is required' }, 400)
+    }
+
     // Store roadmap:startDate on first run if not already set
     const existingStartDate = await redis.get('roadmap:startDate')
     const today = getTodayUTC()
@@ -410,22 +433,17 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       await redis.set('roadmap:startDate', today)
     }
 
-    // Read subreddit config for branding/frequency and gate the active slot.
+    // Read subreddit config for branding.
     const subredditConfig = await getSubredditConfig(context.subredditId)
-    const slot = getGrowthPostSlot(new Date())
-    if (!isGrowthPostSlotEnabled(subredditConfig.postFrequency, slot)) {
-      return c.json<TaskResponse>({ status: 'success', message: `${slot} disabled by config` }, 200)
-    }
-
-    const slotClaimed = await claimGrowthPostSlot(today, context.subredditId, slot)
+    const slotClaimed = await claimScheduledPostSlot(today, context.subredditId, slotKey)
     if (!slotClaimed) {
-      return c.json<TaskResponse>({ status: 'success', message: `${slot} already posted today` }, 200)
+      return c.json<TaskResponse>({ status: 'success', message: `${slotKey} already posted today` }, 200)
     }
 
     const brandingEmoji = subredditConfig.brandingEmoji
 
     const puzzleNumber = await redis.incrBy('stats:puzzleCounter', 1)
-    const title = buildGrowthPostTitle(slot, puzzleNumber, brandingEmoji)
+    const title = buildScheduledPostTitle(puzzleNumber, brandingEmoji, rawGridSize)
     let stickyCommentText: string | undefined
     try {
       stickyCommentText = await buildStatsComment(puzzleNumber)
@@ -435,13 +453,17 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
 
     console.log(`[Scheduler] Creating post: ${title}`)
 
-    const post = await createPost(title, undefined, stickyCommentText ? { stickyCommentText } : undefined)
+    const post = await createPost(title, undefined, {
+      ...(stickyCommentText ? { stickyCommentText } : {}),
+      gridSize: rawGridSize,
+      lockGridSize: true,
+    })
 
     // ─── Custom post preview for feed engagement (non-blocking) ────────────
     try {
       const previewData: DailyPreviewData = {
         puzzleNumber,
-        gridSize: 4,
+        gridSize: post.gridSize,
         completionsToday: 0,
         activeNow: 0,
         fastestTime: null,

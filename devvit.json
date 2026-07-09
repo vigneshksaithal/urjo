@@ -44,9 +44,69 @@
   },
   "scheduler": {
     "tasks": {
-      "daily-puzzle": {
+      "puzzle-6x6-1400": {
         "endpoint": "/internal/scheduler/daily-puzzle",
-        "cron": "0 16,23 * * *"
+        "cron": "0 14 * * *",
+        "data": {
+          "gridSize": 6,
+          "slotKey": "6x6-1400"
+        }
+      },
+      "puzzle-8x8-1600": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "0 16 * * *",
+        "data": {
+          "gridSize": 8,
+          "slotKey": "8x8-1600"
+        }
+      },
+      "puzzle-6x6-1800": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "0 18 * * *",
+        "data": {
+          "gridSize": 6,
+          "slotKey": "6x6-1800"
+        }
+      },
+      "puzzle-8x8-2000": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "0 20 * * *",
+        "data": {
+          "gridSize": 8,
+          "slotKey": "8x8-2000"
+        }
+      },
+      "puzzle-6x6-2200": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "0 22 * * *",
+        "data": {
+          "gridSize": 6,
+          "slotKey": "6x6-2200"
+        }
+      },
+      "puzzle-8x8-2330": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "30 23 * * *",
+        "data": {
+          "gridSize": 8,
+          "slotKey": "8x8-2330"
+        }
+      },
+      "puzzle-6x6-0100": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "0 1 * * *",
+        "data": {
+          "gridSize": 6,
+          "slotKey": "6x6-0100"
+        }
+      },
+      "puzzle-8x8-0230": {
+        "endpoint": "/internal/scheduler/daily-puzzle",
+        "cron": "30 2 * * *",
+        "data": {
+          "gridSize": 8,
+          "slotKey": "8x8-0230"
+        }
       },
       "drift-check": {
         "endpoint": "/internal/scheduler/drift-check",

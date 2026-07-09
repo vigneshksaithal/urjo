@@ -22,7 +22,7 @@ export type SerializedPuzzle = {
 	numbers: string // "2-31--5-..." (digit or - for no number)
 	solution: string // Complete solution (rbbrrbbrrbbrrbbb)
 	difficulty: 'easy' | 'medium' | 'hard' | 'diabolical'
-	gridSize: number // 4 or 6
+	gridSize: number // 4, 6, or 8
 }
 
 export type CommunityStats = {
@@ -53,6 +53,7 @@ export type GameState = {
 	isLoggedIn?: boolean
 	postId?: string
 	isChallenge?: boolean
+	allowsGridSizeChange?: boolean
 	streak?: StreakData
 	username?: string
 	isFirstTimeUser?: boolean

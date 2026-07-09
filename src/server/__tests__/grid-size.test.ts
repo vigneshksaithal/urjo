@@ -272,6 +272,50 @@ test('GET /api/game/state uses baked-in grid size for challenge posts', async ()
     expect(body.gridSizePreference).toBe(4)
 })
 
+test('GET /api/game/state disables size changes for locked scheduled posts', async () => {
+    const postId = 't3_state_locked_post'
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: 'r'.repeat(36),
+        numbers: '-'.repeat(36),
+        solution: 'r'.repeat(36),
+        difficulty: 'easy',
+        gridSize: '6',
+        lockedGridSize: '6',
+    })
+    await redis.set('user:t2_griduser:gridSizePreference', '4')
+    await redis.set('user:t2_griduser:gridMigrated', 'true')
+    await redis.set('user:t2_griduser:skillLevel:6', '2')
+
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'griduser' } as never)
+
+    const res = await withContext(postId, 't2_griduser', gameStateRequest)
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as {
+        puzzle: { gridSize: number }
+        gridSizePreference: number
+        allowsGridSizeChange: boolean
+    }
+    expect(body.puzzle.gridSize).toBe(6)
+    expect(body.gridSizePreference).toBe(6)
+    expect(body.allowsGridSizeChange).toBe(false)
+})
+
+test('POST /api/game/grid-size returns 400 for locked scheduled posts', async () => {
+    const postId = 't3_gs_locked'
+    await seedPuzzle(postId, 6)
+    await redis.hSet(`game:${postId}:puzzle`, {
+        lockedGridSize: '6',
+    })
+
+    const res = await withContext(postId, 't2_griduser', () => gridSizeRequest({ gridSize: 8 }))
+    expect(res.status).toBe(400)
+
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('fixed-size')
+})
+
 // ─── POST /api/game/complete — per-grid skill level update ────────────────────
 
 test('POST /api/game/complete updates per-grid skill level only', async () => {
@@ -428,6 +472,49 @@ test('POST /api/game/next-challenge records skip in per-grid history', async () 
     expect(history4).toBeUndefined()
 })
 
+
+test('POST /api/game/next-challenge keeps locked scheduled posts on the same grid size', async () => {
+    const postId = 't3_next_locked_post'
+    const userId = 't2_griduser'
+    const colors = 'r'.repeat(64)
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors,
+        numbers: '-'.repeat(64),
+        solution: colors,
+        difficulty: 'medium',
+        gridSize: '8',
+        lockedGridSize: '8',
+    })
+    await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+        colors,
+        numbers: '-'.repeat(64),
+        solution: colors,
+        difficulty: 'medium',
+        gridSize: '8',
+        instanceId: 'locked-post-puzzle',
+        source: 'post',
+    })
+    await redis.set(`user:${userId}:gridMigrated`, 'true')
+    await redis.set(`user:${userId}:gridSizePreference`, '4')
+    await redis.set(`user:${userId}:skillLevel:8`, '2')
+    await redis.set(`user:${userId}:pathLevel`, '6')
+
+    const res = await withContext(postId, userId, () => nextChallengeRequest({ timeSpent: 10 }))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as {
+        puzzle: { gridSize: number; solution: string }
+        gridSizePreference: number
+    }
+    expect(body.puzzle.gridSize).toBe(8)
+    expect(body.gridSizePreference).toBe(8)
+
+    const stored = await redis.hGetAll(`user:${userId}:game:${postId}:currentPuzzle`)
+    expect(stored.gridSize).toBe('8')
+    expect(stored.solution).toBe(body.puzzle.solution)
+})
+
 // ─── GET /api/game/leaderboard — speed scoped by grid size ───────────────────
 
 test('GET /api/game/leaderboard speed type returns entries for user grid size preference', async () => {
@@ -457,6 +544,32 @@ test('GET /api/game/leaderboard speed type returns entries for user grid size pr
 
     // Should NOT contain 4×4-only entries
     expect(memberIds).not.toContain('t2_another')
+})
+
+test('GET /api/game/leaderboard speed type uses locked grid size for fixed scheduled posts', async () => {
+    const postId = 't3_lb_locked_speed'
+    const userId = 't2_griduser'
+    const today = new Date().toISOString().split('T')[0]!
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: 'r'.repeat(36),
+        numbers: '-'.repeat(36),
+        solution: 'r'.repeat(36),
+        difficulty: 'easy',
+        gridSize: '6',
+        lockedGridSize: '6',
+    })
+    await redis.set(`user:${userId}:gridSizePreference`, '4')
+    await redis.zAdd(`leaderboard:speed:${today}:6`, { member: userId, score: 45 })
+    await redis.zAdd(`leaderboard:speed:${today}:4`, { member: 't2_wrong_grid', score: 30 })
+
+    const res = await withContext(postId, userId, () => leaderboardRequest('speed'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { entries: Array<{ userId: string }> }
+    const memberIds = body.entries.map((entry) => entry.userId)
+    expect(memberIds).toContain(userId)
+    expect(memberIds).not.toContain('t2_wrong_grid')
 })
 
 test('GET /api/game/leaderboard streak type remains global (not grid-scoped)', async () => {

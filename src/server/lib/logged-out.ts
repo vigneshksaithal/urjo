@@ -29,6 +29,7 @@ type LoggedOutStateInput = {
     puzzle: SerializedPuzzle
     postId: string
     isChallenge: boolean
+    allowsGridSizeChange?: boolean
     puzzleNumber?: number
     weekendEvent?: WeekendEvent
 }
@@ -41,7 +42,17 @@ type LoggedOutStateInput = {
  * attached.
  */
 export const buildLoggedOutGameState = (input: LoggedOutStateInput): GameState => {
-    const { puzzle, postId, isChallenge, puzzleNumber, weekendEvent } = input
+    const {
+        puzzle,
+        postId,
+        isChallenge,
+        allowsGridSizeChange = true,
+        puzzleNumber,
+        weekendEvent,
+    } = input
+    const effectiveGridSizePreference = allowsGridSizeChange
+        ? LOGGED_OUT_GRID_SIZE
+        : puzzle.gridSize
 
     return {
         puzzle,
@@ -52,9 +63,10 @@ export const buildLoggedOutGameState = (input: LoggedOutStateInput): GameState =
         isFirstTimeUser: false,
         skillLevel: LOGGED_OUT_SKILL_LEVEL,
         pathLevel: LOGGED_OUT_PATH_LEVEL,
-        gridSizePreference: LOGGED_OUT_GRID_SIZE,
+        gridSizePreference: effectiveGridSizePreference,
         postId,
         isChallenge,
+        allowsGridSizeChange,
         isMod: false,
         notifyOptIn: false,
         hintsDismissed: { numberConstraint: false, adjacencyViolation: false },

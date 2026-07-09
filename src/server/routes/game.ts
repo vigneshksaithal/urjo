@@ -126,6 +126,15 @@ const redditCommentsUrl = (postId: string): string =>
 const formatMistakeCount = (mistakes: number): string =>
 	mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`
 
+const MAX_REPEAT_AVOIDANCE_ATTEMPTS = 5
+
+const getLockedGridSize = (postPuzzle: Record<string, string>): GridSize | undefined => {
+	const rawGridSize = postPuzzle.lockedGridSize !== undefined
+		? parseInt(postPuzzle.lockedGridSize, 10)
+		: NaN
+	return isValidGridSize(rawGridSize) ? rawGridSize : undefined
+}
+
 const buildChallengeTargetLine = (
 	scoreSeconds: string | undefined,
 	mistakes: string | undefined,
@@ -323,6 +332,27 @@ const postChallengeBeatReply = async (
 const generatePuzzleForGridLevel = (gridSize: GridSize, level: number): SerializedPuzzle => {
 	const config = getGridLevelConfig(gridSize, level)
 	return generatePuzzle(config.difficulty, config.gridSize)
+}
+
+const isSamePuzzleSolution = (
+	candidate: SerializedPuzzle,
+	currentPuzzle: { solution: string; gridSize: string } | null,
+): boolean =>
+	currentPuzzle !== null &&
+	candidate.gridSize.toString() === currentPuzzle.gridSize &&
+	candidate.solution === currentPuzzle.solution
+
+const generatePuzzleForGridLevelAvoidingRepeat = (
+	gridSize: GridSize,
+	level: number,
+	currentPuzzle: { solution: string; gridSize: string } | null,
+): SerializedPuzzle => {
+	let candidate = generatePuzzleForGridLevel(gridSize, level)
+	for (let attempt = 1; attempt < MAX_REPEAT_AVOIDANCE_ATTEMPTS; attempt++) {
+		if (!isSamePuzzleSolution(candidate, currentPuzzle)) return candidate
+		candidate = generatePuzzleForGridLevel(gridSize, level)
+	}
+	return candidate
 }
 
 /**
@@ -699,6 +729,7 @@ gameRouter.get('/api/game/state', async (c) => {
 				gridSize: parseInt(postPuzzle.gridSize ?? '4', 10),
 			}
 			const isChallenge = Boolean(postPuzzle.challengeBy)
+			const lockedGridSize = getLockedGridSize(postPuzzle)
 
 			let puzzleNumber: number | undefined
 			try {
@@ -713,6 +744,7 @@ gameRouter.get('/api/game/state', async (c) => {
 					puzzle: serializedPuzzle,
 					postId,
 					isChallenge,
+					allowsGridSizeChange: lockedGridSize === undefined,
 					weekendEvent: getActiveWeekendEvent(new Date()),
 					...(puzzleNumber !== undefined && { puzzleNumber }),
 				}),
@@ -753,12 +785,13 @@ gameRouter.get('/api/game/state', async (c) => {
 		// Determine if this is a challenge post (has baked-in grid size)
 		const postPuzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
 		const isChallenge = Boolean(postPuzzleMeta?.challengeBy)
+		const lockedGridSize = getLockedGridSize(postPuzzleMeta)
 		const pathLevel = await getPathLevel(userId)
 		const streak = await getStreakData(userId)
 
 		// For normal posts, either honor the user's explicit manual override or
 		// issue an adaptive puzzle the first time they open the post.
-		if (!isChallenge) {
+		if (!isChallenge && lockedGridSize === undefined) {
 			const manualOverride = await getGridSizeOverride(userId)
 			const puzzleGridSize = parseInt(puzzle.gridSize, 10)
 
@@ -784,6 +817,7 @@ gameRouter.get('/api/game/state', async (c) => {
 		const skillLevel = await getGridSkillLevel(userId, effectiveGridSize)
 		const tutorialCompleted = (await redis.get(`user:${userId}:tutorialCompleted`)) === 'true'
 		const gridSizePreference = isChallenge ? storedGridSizePreference : effectiveGridSize
+		const allowsGridSizeChange = !isChallenge && lockedGridSize === undefined
 
 		// Fetch username for consent dialog display
 		let username: string | undefined
@@ -977,6 +1011,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			gridSizePreference,
 			postId,
 			isChallenge,
+			allowsGridSizeChange,
 			streak,
 			...(username !== undefined && { username }),
 			isFirstTimeUser,
@@ -1026,6 +1061,10 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 		}
 
 		const gridSize: GridSize = parsed
+		const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
+		if (getLockedGridSize(postPuzzle) !== undefined) {
+			return c.json({ error: 'This is a fixed-size puzzle post.' }, 400)
+		}
 
 		// ─── Logged-out path ─────────────────────────────────────────────
 		// Serve a fresh puzzle at the requested size without persisting the
@@ -1720,16 +1759,19 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 	const { postId, userId } = context
 
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
+	const postPuzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
+	const lockedGridSize = getLockedGridSize(postPuzzleMeta)
 
 	// ─── Logged-out path ─────────────────────────────────────────────────
 	// Serve a fresh puzzle at the floor difficulty without touching skill
 	// level / history (nothing to persist for an anonymous viewer).
 	if (!userId) {
-		const newPuzzle = generatePuzzleForGridLevel(DEFAULT_GRID_SIZE, MIN_SKILL_LEVEL)
+		const nextGridSize = lockedGridSize ?? DEFAULT_GRID_SIZE
+		const newPuzzle = generatePuzzleForGridLevel(nextGridSize, MIN_SKILL_LEVEL)
 		const response: NextChallengeResponse = {
 			puzzle: newPuzzle,
 			skillLevel: MIN_SKILL_LEVEL,
-			gridSizePreference: DEFAULT_GRID_SIZE,
+			gridSizePreference: nextGridSize,
 		}
 		return c.json(response)
 	}
@@ -1745,10 +1787,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 			// No body or invalid JSON — treat as instant skip (timeSpent = 0)
 		}
 
-		const [currentPuzzle, postPuzzleMeta] = await Promise.all([
-			getCurrentPuzzle(postId, userId),
-			redis.hGetAll(`game:${postId}:puzzle`),
-		])
+		const currentPuzzle = await getCurrentPuzzle(postId, userId)
 		const isChallengePost = Boolean(postPuzzleMeta?.challengeBy)
 		const rawGridSize = currentPuzzle ? parseInt(currentPuzzle.gridSize, 10) : await getGridSizePreference(userId)
 		const currentGridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
@@ -1788,7 +1827,17 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 
 		let newPuzzle: SerializedPuzzle
 		let responseGridSizePreference: GridSize
-		if (isChallengePost && postPuzzleMeta?.colors) {
+
+		if (lockedGridSize !== undefined) {
+			const lockedLevel = await getGridSkillLevel(userId, lockedGridSize)
+			newPuzzle = generatePuzzleForGridLevelAvoidingRepeat(
+				lockedGridSize,
+				lockedLevel,
+				currentPuzzle,
+			)
+			await persistIssuedPuzzle(postId, userId, newPuzzle, 'manual')
+			responseGridSizePreference = lockedGridSize
+		} else if (isChallengePost && postPuzzleMeta?.colors) {
 			newPuzzle = {
 				colors: postPuzzleMeta.colors,
 				numbers: postPuzzleMeta.numbers ?? '',
@@ -1835,7 +1884,7 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 // ─── GET /api/game/leaderboard ───────────────────────────────────────────────
 
 gameRouter.get('/api/game/leaderboard', async (c) => {
-	const { userId } = context
+	const { postId, userId } = context
 	const type = (c.req.query('type') || 'streak') as 'streak' | 'speed'
 
 	try {
@@ -1861,7 +1910,11 @@ gameRouter.get('/api/game/leaderboard', async (c) => {
 		} else if (type === 'speed') {
 			const today = getTodayUTC()
 			// Speed leaderboard is scoped by the user's grid size preference
-			const gridSizePreference = userId ? await getGridSizePreference(userId) : 4
+			const lockedGridSizeForPost = postId
+				? getLockedGridSize(await redis.hGetAll(`game:${postId}:puzzle`))
+				: undefined
+			const gridSizePreference = lockedGridSizeForPost
+				?? (userId ? await getGridSizePreference(userId) : 4)
 			const topUsers = await redis.zRange(`leaderboard:speed:${today}:${gridSizePreference}`, 0, 9, { by: 'rank' })
 
 			const entriesPromises = topUsers.map(async (item, i) => {
