@@ -21,7 +21,7 @@ describe("App.svelte path level plumbing", () => {
 		expect(appSource).toMatch(/@const gameProps = \{[\s\S]*\n\s+pathLevel,/);
 	});
 
-	it("advances to the next game after a successful challenge post", () => {
+	it("keeps a created rival available for explicit open or share actions", () => {
 		const start = appSource.indexOf(
 			"async function handleChallenge(customTitle?: string) {",
 		);
@@ -35,6 +35,14 @@ describe("App.svelte path level plumbing", () => {
 
 		const handleChallengeBody = appSource.slice(start, end);
 		expect(handleChallengeBody).toContain('showToast("Challenge post created!");');
-		expect(handleChallengeBody).toContain("await handleNextChallenge();");
+		expect(handleChallengeBody).toContain("challengePostId = data.postId ?? null;");
+		expect(handleChallengeBody).toContain("async function handleShareChallenge");
+		expect(handleChallengeBody).not.toContain("await handleNextChallenge();");
+	});
+
+	it("keeps skill level-up copy distinct from journey progression copy", () => {
+		expect(appSource).toContain("Skill Up!");
+		expect(appSource).toContain("Skill Level {levelUpNewLevel}");
+		expect(appSource).not.toContain("You're now <strong>Level {levelUpNewLevel}</strong>");
 	});
 });

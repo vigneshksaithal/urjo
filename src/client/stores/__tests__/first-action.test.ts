@@ -4,7 +4,17 @@ import * as fc from 'fast-check'
 
 // ─── Module under test ────────────────────────────────────────────────────────
 // Imported after mocking fetch so the module sees the mock
-import { firstActionLatchStore, fireOnce, resetLatch } from '../first-action'
+import {
+    firstActionLatchStore,
+    fireOnce,
+    resetLatch,
+    setFirstActionContentId,
+} from '../first-action'
+import {
+    ATTEMPT_ID_HEADER,
+    CONTENT_ID_HEADER,
+    EVENT_ID_HEADER,
+} from '../../../shared/measurement-contract'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -19,6 +29,7 @@ const mockFetch = (): ReturnType<typeof vi.fn> => {
 
 beforeEach(() => {
     resetLatch()
+    setFirstActionContentId('t3_testpost_puzzle-1')
 })
 
 afterEach(() => {
@@ -95,6 +106,17 @@ describe('fireOnce', () => {
         const [, init] = spy.mock.calls[0] as [string, RequestInit]
         const body = JSON.parse(init.body as string) as Record<string, unknown>
         expect(body['source']).toBe('play')
+    })
+
+    it('attributes the action to the current content and attempt', async () => {
+        const spy = mockFetch()
+        await fireOnce('t3_xyz789', 'cell')
+
+        const [, init] = spy.mock.calls[0] as [string, RequestInit]
+        const headers = new Headers(init.headers)
+        expect(headers.get(CONTENT_ID_HEADER)).toBe('t3_testpost_puzzle-1')
+        expect(headers.get(ATTEMPT_ID_HEADER)).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+        expect(headers.get(EVENT_ID_HEADER)).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
     })
 })
 

@@ -1,201 +1,217 @@
-/**
- * Integration tests for POST /api/game/migrate-logged-out-score.
- *
- * When a logged-out player signs in, the client replays the score it stashed
- * in localStorage so the freshly-created account gets credit for the solve
- * (streak + coins + season). The endpoint must be idempotent and gated to
- * logged-in users.
- */
-
 import { createDevvitTest } from '@devvit/test/server/vitest'
-import { redis, reddit as webReddit, runWithContext } from '@devvit/web/server'
-import { expect, vi } from 'vitest'
+import { redis, runWithContext } from '@devvit/web/server'
+import { expect } from 'vitest'
+
 import { app } from '../index'
+import { getTodayUTC } from '../lib/helpers'
 
-const withCtx = <T>(
-    overrides: { userId?: string; postId?: string; subredditId?: string; subredditName?: string },
-    fn: () => Promise<T>,
-): Promise<T> =>
-    runWithContext(
-        {
-            userId: overrides.userId,
-            postId: overrides.postId ?? 't3_migrate_post',
-            subredditId: overrides.subredditId ?? 't5_testsub',
-            subredditName: overrides.subredditName ?? 'testsub',
-        } as Parameters<typeof runWithContext>[0],
-        fn,
-    )
+type TestContext = {
+    userId?: string
+    postId: string
+    subredditId: string
+    subredditName: string
+}
 
-const CTX = {
-    userId: 't2_returning',
-    postId: 't3_migrate_post',
+const POST_ID = 't3_migratepost'
+const SESSION_ID = 'session_migrate_123'
+const ATTEMPT_ID = 'attempt_migrate_123'
+const LOGGED_OUT_CONTEXT: TestContext = {
+    postId: POST_ID,
     subredditId: 't5_testsub',
     subredditName: 'testsub',
 }
+const LOGGED_IN_CONTEXT: TestContext = {
+    ...LOGGED_OUT_CONTEXT,
+    userId: 't2_returning',
+}
 
-const seedPuzzle = async (): Promise<void> => {
-    await redis.hSet(`game:${CTX.postId}:puzzle`, {
+const withContext = <T>(ctx: TestContext, callback: () => Promise<T>): Promise<T> =>
+    runWithContext(ctx as Parameters<typeof runWithContext>[0], callback)
+
+const stateHeaders = (): Record<string, string> => ({
+    'x-urjo-session': SESSION_ID,
+})
+
+const attemptHeaders = (contentId: string): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    'x-urjo-session': SESSION_ID,
+    'x-urjo-content': contentId,
+    'x-urjo-attempt': ATTEMPT_ID,
+    'x-urjo-event': 'event_migrate_123',
+})
+
+const seedPuzzle = async (scheduledDate?: string): Promise<void> => {
+    await redis.hSet(`game:${POST_ID}:puzzle`, {
         colors: 'rrbbrrbbrrbbrrbb',
         numbers: '----------------',
         solution: 'rrbbrrbbrrbbrrbb',
         difficulty: 'easy',
         gridSize: '4',
+        ...(scheduledDate === undefined ? {} : {
+            scheduledDate,
+            scheduledSlotKey: '6x6-1400',
+            scheduledGridSize: '4',
+        }),
     })
 }
 
-const VALID_BODY = { timeTaken: 30, mistakes: 0, board: 'rrbbrrbbrrbbrrbb' }
+const issueMigrationToken = async (scheduledDate?: string): Promise<{
+    migrationToken: string
+    timeTaken: number
+}> => {
+    await withContext(LOGGED_OUT_CONTEXT, () => seedPuzzle(scheduledDate))
+    const state = await withContext(LOGGED_OUT_CONTEXT, () => app.request('/api/game/state', {
+        headers: stateHeaders(),
+    }))
+    const { contentId } = await state.json() as { contentId: string }
+    await withContext(LOGGED_OUT_CONTEXT, () => app.request('/api/game/timer-start', {
+        method: 'POST',
+        headers: attemptHeaders(contentId),
+    }))
+    const complete = await withContext(LOGGED_OUT_CONTEXT, () => app.request('/api/game/complete', {
+        method: 'POST',
+        headers: attemptHeaders(contentId),
+        body: JSON.stringify({
+            timeTaken: 999,
+            mistakes: 999,
+            board: 'rrbbrrbbrrbbrrbb',
+        }),
+    }))
+    const body = await complete.json() as { migrationToken?: string; timeTaken: number }
+    if (body.migrationToken === undefined) throw new Error('Expected a migration token')
+    return { migrationToken: body.migrationToken, timeTaken: body.timeTaken }
+}
 
-const testMigrate = createDevvitTest({
+const testMigration = createDevvitTest({
     userId: 't2_returning',
     subredditName: 'testsub',
     subredditId: 't5_testsub',
-    postId: 't3_migrate_post',
+    postId: POST_ID,
 })
 
-testMigrate('credits streak + coins for a returning user', async () => {
-    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'returning' } as never)
-    await withCtx(CTX, seedPuzzle)
-
-    const res = await withCtx(CTX, () =>
+testMigration('credits only server-derived current-day scheduled completion data', async () => {
+    const receipt = await issueMigrationToken(getTodayUTC())
+    const response = await withContext(LOGGED_IN_CONTEXT, () =>
         app.request('/api/game/migrate-logged-out-score', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(VALID_BODY),
+            body: JSON.stringify({
+                migrationToken: receipt.migrationToken,
+                timeTaken: 999,
+                mistakes: 999,
+                board: 'forged-client-data',
+            }),
         }),
     )
-    expect(res.status).toBe(200)
+    const body = await response.json() as {
+        migrated: boolean
+        credited: boolean
+        coinReward?: { total: number }
+    }
 
-    const body = await res.json() as { migrated: boolean; coinReward?: { total: number } }
-    expect(body.migrated).toBe(true)
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ migrated: true, credited: true })
     expect(body.coinReward?.total).toBeGreaterThan(0)
-
-    const streak = await withCtx(CTX, () => redis.get(`user:${CTX.userId}:streak:current`))
-    expect(streak).toBe('1')
-
-    vi.restoreAllMocks()
+    expect(await redis.get(`user:${LOGGED_IN_CONTEXT.userId}:streak:current`)).toBe('1')
+    expect(await redis.zScore(
+        `leaderboard:speed:${getTodayUTC()}:4`,
+        LOGGED_IN_CONTEXT.userId ?? '',
+    )).toBe(receipt.timeTaken)
 })
 
-testMigrate('is idempotent — second call does not double-credit', async () => {
-    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'returning' } as never)
-    await withCtx(CTX, seedPuzzle)
-
-    await withCtx(CTX, () =>
+testMigration('is idempotent and never double-credits a token', async () => {
+    const receipt = await issueMigrationToken(getTodayUTC())
+    const request = (): Promise<Response> => withContext(LOGGED_IN_CONTEXT, () =>
         app.request('/api/game/migrate-logged-out-score', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(VALID_BODY),
+            body: JSON.stringify({ migrationToken: receipt.migrationToken }),
         }),
     )
-    const coinsAfterFirst = await withCtx(CTX, () => redis.hGet(`user:${CTX.userId}:economy`, 'totalCoins'))
 
-    const res = await withCtx(CTX, () =>
-        app.request('/api/game/migrate-logged-out-score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(VALID_BODY),
-        }),
+    const first = await request()
+    const coinsAfterFirst = await redis.hGet(
+        `user:${LOGGED_IN_CONTEXT.userId}:economy`,
+        'totalCoins',
     )
-    expect(res.status).toBe(200)
-    const body = await res.json() as { migrated: boolean }
-    expect(body.migrated).toBe(false)
+    const second = await request()
+    const secondBody = await second.json() as { migrated: boolean; credited: boolean }
 
-    const coinsAfterSecond = await withCtx(CTX, () => redis.hGet(`user:${CTX.userId}:economy`, 'totalCoins'))
-    expect(coinsAfterSecond).toBe(coinsAfterFirst)
-
-    vi.restoreAllMocks()
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(secondBody).toEqual({ migrated: false, credited: true })
+    expect(await redis.hGet(
+        `user:${LOGGED_IN_CONTEXT.userId}:economy`,
+        'totalCoins',
+    )).toBe(coinsAfterFirst)
 })
 
-testMigrate('rejects invalid timeTaken', async () => {
-    await withCtx(CTX, seedPuzzle)
-    const res = await withCtx(CTX, () =>
+testMigration('consumes but does not competitively credit unscheduled content', async () => {
+    const receipt = await issueMigrationToken()
+    const response = await withContext(LOGGED_IN_CONTEXT, () =>
         app.request('/api/game/migrate-logged-out-score', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeTaken: 0, mistakes: 0 }),
+            body: JSON.stringify({ migrationToken: receipt.migrationToken }),
         }),
     )
-    expect(res.status).toBe(400)
+    const body = await response.json() as { migrated: boolean; credited: boolean }
+
+    expect(response.status).toBe(200)
+    expect(body).toEqual({ migrated: true, credited: false })
+    expect(await redis.get(`user:${LOGGED_IN_CONTEXT.userId}:streak:current`)).toBeUndefined()
+    expect(await redis.hGet(
+        `user:${LOGGED_IN_CONTEXT.userId}:economy`,
+        'totalCoins',
+    )).toBeUndefined()
+    expect(await redis.zScore(
+        `leaderboard:speed:${getTodayUTC()}:4`,
+        LOGGED_IN_CONTEXT.userId ?? '',
+    )).toBeUndefined()
 })
 
-testMigrate('rejects a board that is not the solution and does not consume the one-shot key', async () => {
-    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'returning' } as never)
-    await withCtx(CTX, seedPuzzle)
-
-    // Forged replay — wrong board.
-    const forged = await withCtx(CTX, () =>
+testMigration('does not credit stale scheduled content', async () => {
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    const receipt = await issueMigrationToken(yesterday)
+    const response = await withContext(LOGGED_IN_CONTEXT, () =>
         app.request('/api/game/migrate-logged-out-score', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeTaken: 1, mistakes: 0, board: 'bbbbrrrrbbbbrrrr' }),
+            body: JSON.stringify({ migrationToken: receipt.migrationToken }),
         }),
     )
-    expect(forged.status).toBe(400)
-    // Nothing credited.
-    const coins = await withCtx(CTX, () => redis.hGet(`user:${CTX.userId}:economy`, 'totalCoins'))
-    expect(coins).toBeUndefined()
+    const body = await response.json() as { migrated: boolean; credited: boolean }
 
-    // The one-shot migrate key was NOT burned, so a legitimate replay still works.
-    const ok = await withCtx(CTX, () =>
-        app.request('/api/game/migrate-logged-out-score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(VALID_BODY),
-        }),
-    )
-    expect(ok.status).toBe(200)
-    const body = await ok.json() as { migrated: boolean }
-    expect(body.migrated).toBe(true)
-
-    vi.restoreAllMocks()
+    expect(response.status).toBe(200)
+    expect(body).toEqual({ migrated: true, credited: false })
+    expect(await redis.get(`user:${LOGGED_IN_CONTEXT.userId}:streak:current`)).toBeUndefined()
 })
 
-testMigrate('verifies against the post puzzle even when a stale per-user puzzle exists', async () => {
-    vi.spyOn(webReddit, 'getUserById').mockResolvedValue({ username: 'returning' } as never)
-    await withCtx(CTX, seedPuzzle) // post puzzle solution = 'rrbbrrbbrrbbrrbb'
-
-    // Simulate a returning user whose /state regenerated a DIFFERENT per-user
-    // puzzle (e.g. a 6×6 preference) before migrate runs. The logged-out solve
-    // was the post puzzle, so migrate must verify against that, not this.
-    await withCtx(CTX, () =>
-        redis.hSet(`user:${CTX.userId}:game:${CTX.postId}:currentPuzzle`, {
-            colors: 'r'.repeat(36),
-            numbers: '-'.repeat(36),
-            solution: 'r'.repeat(36),
-            difficulty: 'easy',
-            gridSize: '6',
-            instanceId: 'inst-stale',
-        }),
-    )
-
-    const res = await withCtx(CTX, () =>
+testMigration('rejects missing or expired migration tokens', async () => {
+    const response = await withContext(LOGGED_IN_CONTEXT, () =>
         app.request('/api/game/migrate-logged-out-score', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(VALID_BODY), // board = post solution
+            body: JSON.stringify({ migrationToken: 'missing_token_123' }),
         }),
     )
-    expect(res.status).toBe(200)
-    const body = await res.json() as { migrated: boolean }
-    expect(body.migrated).toBe(true)
 
-    vi.restoreAllMocks()
+    expect(response.status).toBe(400)
 })
-
-const testMigrateNoUser = createDevvitTest({
+const testNoUser = createDevvitTest({
     subredditName: 'testsub',
     subredditId: 't5_testsub',
-    postId: 't3_migrate_post',
+    postId: POST_ID,
 })
 
-testMigrateNoUser('returns 400 when logged out', async () => {
-    const res = await runWithContext(
-        { postId: 't3_migrate_post', subredditId: 't5_testsub', subredditName: 'testsub' } as Parameters<typeof runWithContext>[0],
-        () =>
-            app.request('/api/game/migrate-logged-out-score', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(VALID_BODY),
-            }),
+testNoUser('keeps migration gated to logged-in users', async () => {
+    const response = await withContext(LOGGED_OUT_CONTEXT, () =>
+        app.request('/api/game/migrate-logged-out-score', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ migrationToken: 'migration_token_123' }),
+        }),
     )
-    expect(res.status).toBe(400)
+
+    expect(response.status).toBe(400)
 })

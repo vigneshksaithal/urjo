@@ -457,3 +457,40 @@ testRewardsStoresResults('awardSeasonRewards stores season results in Redis', as
     expect(results.seasonId).toBe('2025-W03')
     expect(results.totalParticipants).toBe(1)
 })
+
+const testRewardsExactlyOnce = createDevvitTest({ userId: 't2_testuser' })
+
+testRewardsExactlyOnce('awardSeasonRewards awards each season/player exactly once', async () => {
+    await redis.zAdd('season:2025-W03:leaderboard', { member: 't2_first', score: 300 })
+    await redis.hSet('user:t2_first:economy', { coins: '10', totalCoins: '20' })
+
+    await Promise.all([
+        awardSeasonRewards('2025-W03'),
+        awardSeasonRewards('2025-W03'),
+    ])
+    await awardSeasonRewards('2025-W03')
+
+    expect(await redis.hGet('user:t2_first:economy', 'coins')).toBe(
+        String(10 + SEASON_TOP_REWARDS[0]!.coins),
+    )
+    expect(await redis.hGet('user:t2_first:economy', 'totalCoins')).toBe(
+        String(20 + SEASON_TOP_REWARDS[0]!.coins),
+    )
+    expect(await redis.hGet('season:2025-W03:rewarded', 't2_first')).toBe(
+        String(SEASON_TOP_REWARDS[0]!.coins),
+    )
+})
+
+const testLegacyResults = createDevvitTest({ userId: 't2_testuser' })
+
+testLegacyResults('awardSeasonRewards treats legacy season results as already paid', async () => {
+    await redis.zAdd('season:2025-W03:leaderboard', { member: 't2_first', score: 300 })
+    await redis.hSet('user:t2_first:economy', { coins: '10', totalCoins: '20' })
+    await redis.set('season:2025-W03:results', JSON.stringify({ seasonId: '2025-W03' }))
+
+    await awardSeasonRewards('2025-W03')
+
+    expect(await redis.hGet('user:t2_first:economy', 'coins')).toBe('10')
+    expect(await redis.hGet('user:t2_first:economy', 'totalCoins')).toBe('20')
+    expect(await redis.hGet('season:2025-W03:rewarded', 't2_first')).toBeUndefined()
+})

@@ -13,7 +13,6 @@
 	} from "../lib/tutorial-walkthrough";
 	import { computeTutorialLayout } from "../lib/tutorial-layout";
 	import Cell from "../components/Cell.svelte";
-	import manicule from "../assets/manicule.svg";
 
 	type Props = {
 		onComplete: () => void;
@@ -67,23 +66,13 @@
 		computeTutorialLayout(availableWidth, availableHeight),
 	);
 	const boardSize = $derived(tutorialLayout.boardSize);
-	const handWidth = $derived(tutorialLayout.handWidth);
-	const handOffset = $derived(tutorialLayout.handOffset);
 
 	const step = $derived(WALKTHROUGH_STEPS[stepIndex]!);
 	const activeIndex = $derived(phase === "playing" ? step.targetIndex : -1);
+	const isIntroStep = $derived(phase === "playing" && stepIndex === 0);
 	const progressPct = $derived(
 		phase === "done" ? 100 : (stepIndex / TOTAL_WALKTHROUGH_STEPS) * 100,
 	);
-
-	// Determine if the tooltip should be above or below the target cell.
-	// Top row cells (row 0-1) get tooltip below to avoid going off-screen.
-	const tooltipPosition = $derived.by((): "above" | "below" => {
-		if (phase !== "playing") return "above";
-		const row = Math.floor(step.targetIndex / size);
-		// If cell is in top half of the board, show tooltip below
-		return row < size / 2 ? "below" : "above";
-	});
 
 	function handleCellChange(index: number, newColor: CellColor): void {
 		if (phase !== "playing" || index !== activeIndex) return;
@@ -111,17 +100,30 @@
 	}
 </script>
 
-<div class="h-full w-full flex flex-col bg-theme-bg-primary overflow-hidden">
-	<!-- Progress bar -->
-	<div class="flex-none h-1 bg-theme-bg-secondary w-full relative">
+<div
+	class="relative h-full w-full flex flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#16384a_0%,#0a1822_46%,#04090f_100%)] text-white"
+>
+	<div class="pointer-events-none absolute inset-0">
 		<div
-			class="absolute inset-y-0 left-0 bg-urjo-blue transition-all duration-500 ease-out"
+			class="absolute left-1/2 top-[-14%] h-60 w-60 -translate-x-1/2 rounded-full bg-[#66d2ff]/18 blur-3xl"
+		></div>
+		<div
+			class="absolute left-[-10%] bottom-[18%] h-40 w-40 rounded-full bg-[#3997d7]/14 blur-3xl"
+		></div>
+		<div
+			class="absolute right-[-6%] top-[24%] h-32 w-32 rounded-full bg-white/8 blur-3xl"
+		></div>
+	</div>
+	<!-- Progress bar -->
+	<div class="relative z-10 flex-none h-1 w-full bg-white/10">
+		<div
+			class="absolute inset-y-0 left-0 bg-[linear-gradient(90deg,#6ad4ff_0%,#3997d7_100%)] transition-all duration-500 ease-out"
 			style="width: {progressPct}%"
 		></div>
 		{#if canSkip && phase === "playing"}
 			<button
 				onclick={onDismiss ?? onComplete}
-				class="absolute right-2 top-2 text-xs text-theme-text-muted px-2 py-1 rounded-lg hover:bg-theme-hover transition-colors z-10"
+				class="absolute right-3 top-3 z-10 rounded-full bg-white/7 px-3 py-1 text-xs font-semibold text-white/72 transition-colors hover:bg-white/12"
 			>
 				Skip
 			</button>
@@ -129,8 +131,55 @@
 	</div>
 
 	{#if phase === "playing"}
-		<!-- Playing phase: instruction above/below target cell, board centered, dots at bottom -->
-		<div class="flex-1 min-h-0 flex flex-col px-4 pt-3 sm:px-6">
+		<!-- Playing phase: top instruction, board centered, dots at bottom -->
+		<div class="relative z-10 flex flex-1 min-h-0 flex-col px-4 pt-3 sm:px-6">
+			<div
+				data-tutorial-instruction="top"
+				class="pointer-events-none flex flex-none flex-col items-center justify-center gap-2 pt-2 pb-2"
+			>
+				{#key stepIndex}
+					<div
+						data-tutorial-headline="compact"
+						in:fly={{ y: -8, duration: 220 }}
+						class="w-full max-w-[18rem] rounded-[1.65rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.14),rgba(255,255,255,0.06))] px-4 py-3 text-center shadow-[0_18px_50px_rgba(0,0,0,0.28)] ring-1 ring-white/10 backdrop-blur-sm"
+					>
+						<p
+							class="mb-1 text-[0.62rem] font-black uppercase tracking-[0.28em] text-[#9edfff]/72"
+						>
+							Step {stepIndex + 1} of {TOTAL_WALKTHROUGH_STEPS}
+						</p>
+						{#if isIntroStep}
+							<p
+								class="text-[1.42rem] font-extrabold leading-[1.1] tracking-[-0.03em] text-white"
+							>
+								Tap the <span class="text-[#8fdcff]">glowing</span>
+								dot to turn it blue.
+							</p>
+						{:else}
+							<p
+								class="text-[1.18rem] font-extrabold leading-[1.16] tracking-[-0.02em] text-white"
+							>
+								{step.instruction}
+							</p>
+						{/if}
+					</div>
+				{/key}
+				<svg
+					aria-hidden="true"
+					viewBox="0 0 24 24"
+					class="h-4 w-4 text-white/45"
+				>
+					<path
+						d="M 6 9 L 12 15 L 18 9"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2.5"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</div>
+
 			<!-- Board container - takes remaining space -->
 			<div
 				class="flex-1 min-h-0 flex items-center justify-center py-2"
@@ -141,9 +190,23 @@
 					class="relative"
 					style="width: {boardSize}px; height: {boardSize}px"
 				>
+					<div
+						data-tutorial-spotlight="true"
+						class="absolute left-1/2 top-[-18%] h-[72%] w-[76%] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(122,215,255,0.28)_0%,rgba(122,215,255,0.12)_48%,rgba(122,215,255,0)_74%)] blur-2xl"
+					></div>
+					<div
+						data-tutorial-stage="true"
+						class="absolute inset-[-1.1rem] rounded-[2rem] bg-[linear-gradient(180deg,rgba(18,53,70,0.96)_0%,rgba(8,27,38,0.94)_100%)] shadow-[0_22px_50px_rgba(0,0,0,0.38)] ring-1 ring-white/8"
+					></div>
+					<div
+						class="absolute inset-x-[12%] bottom-[-0.55rem] h-6 rounded-full bg-[#071018]/90 blur-md"
+					></div>
+					<div
+						class="absolute inset-[-0.3rem] rounded-[1.7rem] bg-[radial-gradient(circle_at_top,rgba(150,224,255,0.17)_0%,rgba(150,224,255,0.08)_28%,rgba(150,224,255,0)_62%)]"
+					></div>
 					<!-- Cells grid -->
 					<div
-						class="grid gap-0.5 w-full h-full"
+						class="relative z-10 grid h-full w-full gap-0.5 rounded-[1.45rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.02))] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
 						style="grid-template-columns: repeat({size}, 1fr)"
 					>
 						{#each cells as cell, i (i)}
@@ -160,42 +223,6 @@
 									isTutorialTarget={isActive}
 									onChange={(c) => handleCellChange(i, c)}
 								/>
-								{#if isActive}
-									<!-- Instruction tooltip positioned based on cell location -->
-									<div
-										class="pointer-events-none absolute z-20 w-max left-1/2 -translate-x-1/2
-											{tooltipPosition === 'above' ? 'bottom-full mb-2' : 'top-full mt-2'}"
-										style="max-width: min(180px, calc(100vw - 4rem))"
-									>
-										{#key stepIndex}
-											<p
-												in:fly={{
-													y:
-														tooltipPosition ===
-														"above"
-															? 6
-															: -6,
-													duration: 220,
-												}}
-												class="text-center text-sm font-bold text-theme-text-primary leading-snug bg-theme-bg-primary/95 px-2 py-1.5 rounded-lg shadow-lg border border-theme-border"
-											>
-												{step.instruction}
-											</p>
-										{/key}
-									</div>
-									<!-- Pointing hand -->
-									<span
-										class="pointer-events-none absolute left-full top-1/2 z-20"
-										style="transform: translate(-{handOffset}px, calc(-50% - 8px))"
-									>
-										<img
-											src={manicule}
-											alt=""
-											class="max-w-none animate-point drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
-											style="width: {handWidth}px"
-										/>
-									</span>
-								{/if}
 							</div>
 						{/each}
 					</div>
@@ -209,10 +236,10 @@
 						<div
 							class="h-1.5 rounded-full transition-all duration-300
 								{i === stepIndex
-								? 'w-5 bg-theme-text-primary'
+								? 'w-5 bg-[#8fdcff]'
 								: i < stepIndex
-									? 'w-1.5 bg-theme-text-primary/50'
-									: 'w-1.5 bg-theme-text-primary/20'}"
+									? 'w-1.5 bg-white/45'
+									: 'w-1.5 bg-white/18'}"
 						></div>
 					{/each}
 				</div>
@@ -335,18 +362,3 @@
 		</div>
 	{/if}
 </div>
-
-<style>
-	@keyframes point {
-		0%,
-		100% {
-			transform: translateX(0) scaleX(-1);
-		}
-		50% {
-			transform: translateX(-6px) scaleX(-1);
-		}
-	}
-	.animate-point {
-		animation: point 0.9s ease-in-out infinite;
-	}
-</style>

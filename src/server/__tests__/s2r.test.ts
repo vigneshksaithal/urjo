@@ -13,11 +13,13 @@ import {
     bucketKey,
     computeS2RPure,
     isDifficulty,
+    markS2RFirstCompletion,
     markS2REligible,
     readS2RBucket,
     readS2RGlobal,
     S2R_ELIGIBILITY_WINDOW_MS,
     skillToBucket,
+    tryConvertS2RFirstAction,
     tryConvertS2R,
 } from '../lib/s2r'
 
@@ -117,6 +119,135 @@ describe('computeS2RPure', () => {
 // ─── Redis: mark + convert flow ──────────────────────────────────────────────
 
 const test = createDevvitTest(CTX)
+
+test('v2 counts only the first verified completion in a page session', async () => {
+    const input = {
+        sessionId: 'session_s2r-first',
+        date: '2026-07-15',
+        skillLevel: 5,
+        difficulty: 'medium' as const,
+        postId: 't3_post1',
+        contentId: 'content_s2r-one',
+        attemptId: 'attempt_s2r-one',
+        now: 1_000,
+    }
+
+    expect(await withCtx(() => markS2RFirstCompletion(input))).toBe(true)
+    expect(await withCtx(() => markS2RFirstCompletion({
+        ...input,
+        contentId: 'content_s2r-two',
+        attemptId: 'attempt_s2r-two',
+        now: 2_000,
+    }))).toBe(false)
+
+    expect(await withCtx(() => readS2RBucket('2026-07-15', 'mid:medium'))).toMatchObject({
+        eligible: 1,
+        converted: 0,
+    })
+    expect(await withCtx(() => redis.get('s2r:2026-07-15:mid:medium:eligible'))).toBe('1')
+    expect(await withCtx(() => redis.get('s2r:v2:2026-07-15:mid:medium:eligible'))).toBe('1')
+})
+
+test('v2 does not convert another action from the completed attempt', async () => {
+    const sessionId = 'session_s2r-same-attempt'
+    await withCtx(() => markS2RFirstCompletion({
+        sessionId,
+        date: '2026-07-15',
+        skillLevel: 5,
+        difficulty: 'medium',
+        postId: 't3_post1',
+        contentId: 'content_s2r-one',
+        attemptId: 'attempt_s2r-one',
+        now: 1_000,
+    }))
+
+    expect(await withCtx(() => tryConvertS2RFirstAction({
+        sessionId,
+        postId: 't3_post1',
+        contentId: 'content_s2r-one',
+        attemptId: 'attempt_s2r-one',
+        now: 2_000,
+    }))).toBe(false)
+})
+
+test('v2 converts the first action of attempt two on the same post', async () => {
+    const sessionId = 'session_s2r-same-post'
+    await withCtx(() => markS2RFirstCompletion({
+        sessionId,
+        date: '2026-07-15',
+        skillLevel: 5,
+        difficulty: 'medium',
+        postId: 't3_post1',
+        contentId: 'content_s2r-one',
+        attemptId: 'attempt_s2r-one',
+        now: 1_000,
+    }))
+
+    expect(await withCtx(() => tryConvertS2RFirstAction({
+        sessionId,
+        postId: 't3_post1',
+        contentId: 'content_s2r-two',
+        attemptId: 'attempt_s2r-two',
+        now: 2_000,
+    }))).toBe(true)
+    expect(await withCtx(() => tryConvertS2RFirstAction({
+        sessionId,
+        postId: 't3_post1',
+        contentId: 'content_s2r-three',
+        attemptId: 'attempt_s2r-three',
+        now: 3_000,
+    }))).toBe(false)
+
+    expect(await withCtx(() => readS2RBucket('2026-07-15', 'mid:medium'))).toMatchObject({
+        eligible: 1,
+        converted: 1,
+        rate: 1,
+    })
+})
+
+test('v2 converts the first action of attempt two on a different post', async () => {
+    const sessionId = 'session_s2r-new-post'
+    await withCtx(() => markS2RFirstCompletion({
+        sessionId,
+        date: '2026-07-15',
+        skillLevel: 2,
+        difficulty: 'easy',
+        postId: 't3_post1',
+        contentId: 'content_s2r-one',
+        attemptId: 'attempt_s2r-one',
+        now: 1_000,
+    }))
+
+    expect(await withCtx(() => tryConvertS2RFirstAction({
+        sessionId,
+        postId: 't3_post2',
+        contentId: 'content_s2r-two',
+        attemptId: 'attempt_s2r-two',
+        now: 2_000,
+    }))).toBe(true)
+})
+
+test('v2 expires eligibility sixty seconds after completion', async () => {
+    const sessionId = 'session_s2r-expired-v2'
+    await withCtx(() => markS2RFirstCompletion({
+        sessionId,
+        date: '2026-07-15',
+        skillLevel: 5,
+        difficulty: 'medium',
+        postId: 't3_post1',
+        contentId: 'content_s2r-one',
+        attemptId: 'attempt_s2r-one',
+        now: 1_000,
+    }))
+
+    expect(await withCtx(() => tryConvertS2RFirstAction({
+        sessionId,
+        postId: 't3_post2',
+        contentId: 'content_s2r-two',
+        attemptId: 'attempt_s2r-two',
+        now: 1_000 + S2R_ELIGIBILITY_WINDOW_MS + 1,
+    }))).toBe(false)
+})
 
 test('markS2REligible increments the bucket eligible counter', async () => {
     await withCtx(() =>

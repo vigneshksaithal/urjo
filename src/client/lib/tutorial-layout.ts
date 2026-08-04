@@ -2,8 +2,6 @@ import { computeBoardSize } from "./board-layout";
 
 type TutorialLayout = {
 	boardSize: number;
-	handWidth: number;
-	handOffset: number;
 };
 
 const clamp = (value: number, min: number, max: number): number => {
@@ -25,7 +23,5 @@ export const computeTutorialLayout = (
 
 	return {
 		boardSize,
-		handWidth: clamp(Math.round(boardSize * 0.42), 108, 152),
-		handOffset: clamp(Math.round(boardSize * 0.09), 18, 28),
 	};
 };

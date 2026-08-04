@@ -10,10 +10,12 @@ const composerPath = join(
 const composerSource = readFileSync(composerPath, "utf-8");
 
 describe("ChallengeComposer.svelte", () => {
-	it("renders as a fullscreen challenge composer with a bare title field and submit bar", () => {
+	it("renders a fullscreen challenge preview with explicit Reddit consent", () => {
 		expect(composerSource).toContain("fixed inset-0 z-[60]");
-		expect(composerSource).toContain("CHALLENGE TITLE");
-		expect(composerSource).toContain('placeholder=""');
+		expect(composerSource).toContain("CHALLENGE A PLAYER");
+		expect(composerSource).toContain("Creates a Reddit challenge post");
+		expect(composerSource).toContain("Puzzle #{puzzleNumber}");
+		expect(composerSource).toContain("Solved in {timeTaken}s");
 		expect(composerSource).toContain('maxlength="120"');
 		expect(composerSource).toContain("POST CHALLENGE");
 		expect(composerSource).toContain("onClose");
@@ -21,7 +23,6 @@ describe("ChallengeComposer.svelte", () => {
 		expect(composerSource).toContain("input");
 		expect(composerSource).toContain("focusTrap");
 		expect(composerSource).not.toContain("Create a challenge title");
-		expect(composerSource).not.toContain("Challenge title");
 		expect(composerSource).not.toContain("Added automatically:");
 		expect(composerSource).not.toContain("Beat my time if you can!");
 		expect(composerSource).not.toContain("defaultChallengeTitle");
@@ -29,13 +30,13 @@ describe("ChallengeComposer.svelte", () => {
 		expect(composerSource).not.toContain("bg-white/8");
 	});
 
-	it("clears the draft title on open and falls back to the default title when blank", () => {
+	it("prefills a fresh default title whenever the composer opens", () => {
 		// onMount only fires once per component instance, so re-opening the
 		// composer without unmounting it would show stale text left over from a
 		// previous open. Resetting must be reactive to `isOpen`.
 		expect(composerSource).not.toContain("onMount");
 		expect(composerSource).toMatch(
-			/\$effect\(\(\) => \{\s*if \(isOpen\) \{\s*challengeTitle = "";/,
+			/\$effect\(\(\) => \{\s*if \(isOpen\) \{\s*challengeTitle = DEFAULT_CHALLENGE_TITLE;/,
 		);
 		expect(composerSource).toContain("DEFAULT_CHALLENGE_TITLE");
 		expect(composerSource).toContain(

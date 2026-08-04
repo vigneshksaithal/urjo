@@ -17,26 +17,14 @@ describe("computeTutorialSideInset", () => {
 
 describe("computeTutorialLayout", () => {
 	it("keeps the tutorial board inside a padded mobile viewport", () => {
-		expect(computeTutorialLayout(343, 430)).toEqual({
-			boardSize: 274,
-			handOffset: 25,
-			handWidth: 115,
-		});
+		expect(computeTutorialLayout(343, 430)).toEqual({ boardSize: 274 });
 	});
 
 	it("uses the available height when it is the limiting dimension", () => {
-		expect(computeTutorialLayout(768, 360)).toEqual({
-			boardSize: 360,
-			handOffset: 28,
-			handWidth: 151,
-		});
+		expect(computeTutorialLayout(768, 360)).toEqual({ boardSize: 360 });
 	});
 
 	it("never returns negative sizes", () => {
-		expect(computeTutorialLayout(0, 0)).toEqual({
-			boardSize: 0,
-			handOffset: 18,
-			handWidth: 108,
-		});
+		expect(computeTutorialLayout(0, 0)).toEqual({ boardSize: 0 });
 	});
 });

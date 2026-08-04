@@ -23,8 +23,11 @@
 
 import { redis } from '@devvit/web/server'
 
+import { isMeasurementId } from '../../shared/measurement-contract'
 import type { SimpleMetrics } from '../../shared/metrics-types'
+import { registerUserDynamicKey } from './account-deletion'
 import { computeReturnRateForDate } from './analytics'
+import { buildMeasurementKey } from './measurement-schema'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -36,6 +39,7 @@ const DEDUP_TTL_SECONDS = 2 * 86400
 
 /** Upper bound on a single play-time tick (seconds) — client values are untrusted. */
 const MAX_TICK_SECONDS = 10
+const REDDIT_USER_ID_PATTERN = /^t2_[a-zA-Z0-9_]{1,64}$/
 
 // ─── Pure Functions ─────────────────────────────────────────────────────────
 
@@ -68,6 +72,12 @@ const playtimeKey = (date: string): string =>
 
 const playtimeSessionKey = (date: string, sessionId: string): string =>
     `metrics:pt-counted:${date}:${sessionId}`
+
+const anonymousPlaytimeKey = (date: string): string =>
+    buildMeasurementKey('metrics', 'v2', date, 'anonymous-playtime')
+
+const anonymousPlaytimeSessionKey = (date: string, sessionId: string): string =>
+    buildMeasurementKey('metrics', 'v2', date, 'anonymous-playtime-counted', sessionId)
 
 // ─── Redis Helpers ────────────────────────────────────────────────────────────
 
@@ -102,7 +112,11 @@ export const trackOpen = async (
     postId: string,
     identity: string,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(openDedupKey(date, postId, identity), DEDUP_TTL_SECONDS)
+    const key = openDedupKey(date, postId, identity)
+    if (REDDIT_USER_ID_PATTERN.test(identity)) {
+        await registerUserDynamicKey(identity, key)
+    }
+    const isNew = await trySetDedup(key, DEDUP_TTL_SECONDS)
     if (!isNew) return false
 
     await redis.incrBy(opensKey(date), 1)
@@ -135,6 +149,32 @@ export const recordPlaytimeTick = async (
     await redis.expire(key, COUNTER_TTL_SECONDS)
 }
 
+/**
+ * Add anonymous active-foreground seconds to a separate aggregate. The
+ * page-session id is retained only as a short-lived dedup key and is never
+ * added to retention, qualified-player, or user-level datasets.
+ */
+export const recordAnonymousPlaytimeTick = async (
+    date: string,
+    sessionId: string,
+    tickSeconds: number,
+): Promise<void> => {
+    const clamped = clampTick(tickSeconds)
+    if (clamped === 0 || !isMeasurementId(sessionId)) return
+
+    const key = anonymousPlaytimeKey(date)
+    await redis.hIncrBy(key, 'totalSeconds', clamped)
+
+    const firstTickForSession = await trySetDedup(
+        anonymousPlaytimeSessionKey(date, sessionId),
+        DEDUP_TTL_SECONDS,
+    )
+    if (firstTickForSession) {
+        await redis.hIncrBy(key, 'sessions', 1)
+    }
+    await redis.expire(key, COUNTER_TTL_SECONDS)
+}
+
 // ─── Reads ──────────────────────────────────────────────────────────────────
 
 export type Playtime = {
@@ -149,9 +189,8 @@ const parseField = (raw: string | undefined): number => {
     return Number.isNaN(parsed) || parsed < 0 ? 0 : parsed
 }
 
-/** Read the day's play-time aggregate. */
-export const readPlaytime = async (date: string): Promise<Playtime> => {
-    const raw = await redis.hGetAll(playtimeKey(date))
+const readPlaytimeAggregate = async (key: string): Promise<Playtime> => {
+    const raw = await redis.hGetAll(key)
     const totalSeconds = parseField(raw.totalSeconds)
     const sessions = parseField(raw.sessions)
     return {
@@ -160,6 +199,14 @@ export const readPlaytime = async (date: string): Promise<Playtime> => {
         averageSeconds: sessions > 0 ? totalSeconds / sessions : null,
     }
 }
+
+/** Read the day's play-time aggregate. */
+export const readPlaytime = async (date: string): Promise<Playtime> =>
+    readPlaytimeAggregate(playtimeKey(date))
+
+/** Read the anonymous-only active-foreground aggregate. */
+export const readAnonymousPlaytime = async (date: string): Promise<Playtime> =>
+    readPlaytimeAggregate(anonymousPlaytimeKey(date))
 
 /**
  * Assemble the six simplified metrics for a UTC date.

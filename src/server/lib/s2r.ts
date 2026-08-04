@@ -6,7 +6,7 @@
  *   within 60 seconds. Bucketed by (skillLevel × difficulty).
  *
  * Storage:
- *   - s2r:session:{sessionId}            HASH {bucket, eligibleAtMs, userId, postId}
+ *   - s2r:session:{sessionId}            HASH {bucket, eligibleAtMs, postId}
  *                                        TTL 90s — slightly larger than the 60s
  *                                        eligibility window so a /state call at
  *                                        ~58s still finds the key.
@@ -25,6 +25,14 @@
 
 import { redis } from '@devvit/web/server'
 
+import { isMeasurementId } from '../../shared/measurement-contract'
+import {
+    buildMeasurementKey,
+    selectMeasurementReadVersion,
+    selectMeasurementWriteVersions,
+} from './measurement-schema'
+import type { MeasurementVersion } from './measurement-schema'
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Eligibility window for a "started puzzle 2" event (ms). */
@@ -36,6 +44,10 @@ const S2R_SESSION_TTL_SECONDS = 90
 
 /** TTL on per-day bucket counters — 35 days for D7 read horizon. */
 const S2R_COUNTER_TTL_SECONDS = 35 * 86400
+
+/** A page session should never span two days; keep the first-completion
+ * marker for two days so retries cannot create a second denominator. */
+const S2R_FIRST_COMPLETION_TTL_SECONDS = 2 * 86400
 
 // ─── Pure: bucketing ──────────────────────────────────────────────────────────
 
@@ -85,10 +97,39 @@ export const computeS2RPure = (eligible: number, converted: number): number | nu
 // ─── Redis Keys ───────────────────────────────────────────────────────────────
 
 const sessionKey = (sessionId: string): string => `s2r:session:${sessionId}`
-const eligibleCounterKey = (date: string, bucket: string): string =>
-    `s2r:${date}:${bucket}:eligible`
-const convertedCounterKey = (date: string, bucket: string): string =>
-    `s2r:${date}:${bucket}:converted`
+const v2SessionKey = (sessionId: string): string => `s2r:v2:session:${sessionId}`
+const v2FirstCompletionKey = (sessionId: string): string =>
+    `s2r:v2:first-completion:${sessionId}`
+const v2ConversionKey = (sessionId: string): string => `s2r:v2:converted:${sessionId}`
+const eligibleCounterKey = (
+    date: string,
+    bucket: string,
+    version: MeasurementVersion = 'v1',
+): string => buildMeasurementKey('s2r', version, date, bucket, 'eligible')
+const convertedCounterKey = (
+    date: string,
+    bucket: string,
+    version: MeasurementVersion = 'v1',
+): string => buildMeasurementKey('s2r', version, date, bucket, 'converted')
+
+const incrementCounter = async (key: string): Promise<void> => {
+    await redis.incrBy(key, 1)
+    await redis.expire(key, S2R_COUNTER_TTL_SECONDS)
+}
+
+const incrementVersionedCounters = async (
+    date: string,
+    bucket: string,
+    type: 'eligible' | 'converted',
+): Promise<void> => {
+    const versions = selectMeasurementWriteVersions(date)
+    await Promise.all(versions.map((version) => {
+        const key = type === 'eligible'
+            ? eligibleCounterKey(date, bucket, version)
+            : convertedCounterKey(date, bucket, version)
+        return incrementCounter(key)
+    }))
+}
 
 // ─── Redis Mutators ───────────────────────────────────────────────────────────
 
@@ -111,7 +152,7 @@ export const markS2REligible = async (
     date: string,
     skillLevel: number,
     difficulty: Difficulty,
-    userId: string,
+    _userId: string,
     postId: string,
 ): Promise<void> => {
     const bucket = bucketKey(skillLevel, difficulty)
@@ -124,7 +165,6 @@ export const markS2REligible = async (
     await redis.hSet(sessionKey(sessionId), {
         bucket,
         eligibleAtMs: Date.now().toString(),
-        userId,
         postId,
         date,
     })
@@ -179,6 +219,138 @@ export const tryConvertS2R = async (
     return true
 }
 
+// ─── V2: first-completion → next-attempt action ─────────────────────────────
+
+export type MarkS2RFirstCompletionInput = {
+    sessionId: string
+    date: string
+    skillLevel: number
+    difficulty: Difficulty
+    postId: string
+    contentId: string
+    attemptId: string
+    now?: number
+}
+
+export type ConvertS2RFirstActionInput = {
+    sessionId: string
+    postId: string
+    contentId: string
+    attemptId: string
+    now?: number
+}
+
+const hasValidMeasurementIds = (values: string[]): boolean =>
+    values.every((value) => isMeasurementId(value))
+
+const isValidFirstCompletion = (input: MarkS2RFirstCompletionInput): boolean =>
+    Number.isFinite(input.now ?? Date.now())
+    && isDifficulty(input.difficulty)
+    && hasValidMeasurementIds([
+        input.sessionId,
+        input.postId,
+        input.contentId,
+        input.attemptId,
+    ])
+
+const isValidFirstAction = (input: ConvertS2RFirstActionInput): boolean =>
+    Number.isFinite(input.now ?? Date.now())
+    && hasValidMeasurementIds([
+        input.sessionId,
+        input.postId,
+        input.contentId,
+        input.attemptId,
+    ])
+
+const claimOnce = async (key: string): Promise<boolean> => {
+    const expiration = new Date(Date.now() + S2R_FIRST_COMPLETION_TTL_SECONDS * 1000)
+    return await redis.set(key, '1', { nx: true, expiration }) !== ''
+}
+
+const writeV2EligibilityState = async (
+    input: MarkS2RFirstCompletionInput,
+    bucket: string,
+): Promise<void> => {
+    const key = v2SessionKey(input.sessionId)
+    await redis.hSet(key, {
+        bucket,
+        date: input.date,
+        eligibleAtMs: (input.now ?? Date.now()).toString(),
+        initialAttemptId: input.attemptId,
+        initialContentId: input.contentId,
+        postId: input.postId,
+    })
+    await redis.expire(key, S2R_SESSION_TTL_SECONDS)
+}
+
+/**
+ * Count the first verified completion in a page session. During the rollout
+ * window the aggregate is written to both schemas, while state stays v2-only.
+ */
+export const markS2RFirstCompletion = async (
+    input: MarkS2RFirstCompletionInput,
+): Promise<boolean> => {
+    if (!isValidFirstCompletion(input)) return false
+    selectMeasurementWriteVersions(input.date)
+
+    const claimed = await claimOnce(v2FirstCompletionKey(input.sessionId))
+    if (!claimed) return false
+
+    const bucket = bucketKey(input.skillLevel, input.difficulty)
+    await writeV2EligibilityState(input, bucket)
+    await incrementVersionedCounters(input.date, bucket, 'eligible')
+    return true
+}
+
+type V2EligibilityState = {
+    bucket: string
+    date: string
+    eligibleAtMs: string
+    initialAttemptId: string
+}
+
+const readV2EligibilityState = async (
+    sessionId: string,
+): Promise<V2EligibilityState | null> => {
+    const record = await redis.hGetAll(v2SessionKey(sessionId))
+    if (
+        record.bucket === undefined
+        || record.date === undefined
+        || record.eligibleAtMs === undefined
+        || record.initialAttemptId === undefined
+    ) return null
+    return {
+        bucket: record.bucket,
+        date: record.date,
+        eligibleAtMs: record.eligibleAtMs,
+        initialAttemptId: record.initialAttemptId,
+    }
+}
+
+/** Record the first action from the first distinct attempt within 60 seconds. */
+export const tryConvertS2RFirstAction = async (
+    input: ConvertS2RFirstActionInput,
+): Promise<boolean> => {
+    if (!isValidFirstAction(input)) return false
+
+    const record = await readV2EligibilityState(input.sessionId)
+    if (record === null || record.initialAttemptId === input.attemptId) return false
+
+    const eligibleAtMs = Number(record.eligibleAtMs)
+    const elapsedMs = (input.now ?? Date.now()) - eligibleAtMs
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > S2R_ELIGIBILITY_WINDOW_MS) {
+        if (elapsedMs > S2R_ELIGIBILITY_WINDOW_MS) await redis.del(v2SessionKey(input.sessionId))
+        return false
+    }
+
+    const claimed = await claimOnce(v2ConversionKey(input.sessionId))
+    if (!claimed) return false
+
+    await incrementVersionedCounters(record.date, record.bucket, 'converted')
+    await redis.del(v2SessionKey(input.sessionId))
+    return true
+}
+
 // ─── Reads ────────────────────────────────────────────────────────────────────
 
 const readCounter = async (key: string): Promise<number> => {
@@ -202,9 +374,10 @@ export const readS2RBucket = async (
     date: string,
     bucket: string,
 ): Promise<S2RBucketSnapshot> => {
+    const version = selectMeasurementReadVersion(date)
     const [eligible, converted] = await Promise.all([
-        readCounter(eligibleCounterKey(date, bucket)),
-        readCounter(convertedCounterKey(date, bucket)),
+        readCounter(eligibleCounterKey(date, bucket, version)),
+        readCounter(convertedCounterKey(date, bucket, version)),
     ])
     return { bucket, eligible, converted, rate: computeS2RPure(eligible, converted) }
 }

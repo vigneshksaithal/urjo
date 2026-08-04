@@ -9,6 +9,7 @@
  * key anywhere in the server, add the corresponding deletion entry here.
  */
 import { redis } from '@devvit/web/server'
+import { deleteCompletionSnapshotsForUser } from './completion-snapshot'
 import { getCurrentSeason } from './seasons'
 
 // ─── Fixed-pattern keys ───────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ const USER_KEY_SUFFIXES = [
     'streak:current',
     'streak:longest',
     'streak:lastDate',
+    'streak:freeFreezeTier',
     // Economy + social
     'economy',
     'social',
@@ -43,8 +45,17 @@ const USER_KEY_SUFFIXES = [
     'gridSizeOverride',
     'gridMigrated',
     'tutorialCompleted',
+    'communityJoined',
+    'pathLevel',
+    // Adaptive skips + persistent hint dismissals
+    'consecutiveSkips:4',
+    'consecutiveSkips:6',
+    'consecutiveSkips:8',
+    'hint:numberConstraint',
+    'hint:adjacencyViolation',
     // Username cache
     'username',
+    'display',
     // Login streak (hash)
     'loginStreak',
 ] as const
@@ -53,7 +64,49 @@ const userFixedKeys = (userId: string): string[] => [
     ...USER_KEY_SUFFIXES.map(suffix => `user:${userId}:${suffix}`),
     // Analytics key lives outside user:* namespace but is user-scoped
     `analytics:user:${userId}:completion_dates`,
+    `viral:attribution:${userId}`,
 ]
+
+const dynamicKeyIndex = (userId: string): string =>
+    `user:${userId}:dynamicKeys`
+
+const sortedSetMembershipIndex = (userId: string): string =>
+    `user:${userId}:sortedSetMemberships`
+
+/** Register a non-enumerable user-owned key at the same time it is written. */
+export const registerUserDynamicKey = async (
+    userId: string,
+    key: string,
+): Promise<void> => {
+    if (userId.length === 0 || key.length === 0 || !key.includes(userId)) {
+        throw new Error('Dynamic key must contain its user ID')
+    }
+    await redis.zAdd(dynamicKeyIndex(userId), { member: key, score: Date.now() })
+}
+
+/** Register a sorted-set that stores the raw user ID as its member. */
+export const registerUserSortedSetMembership = async (
+    userId: string,
+    key: string,
+): Promise<void> => {
+    if (userId.length === 0 || key.length === 0) {
+        throw new Error('User ID and sorted-set key are required')
+    }
+    await redis.zAdd(sortedSetMembershipIndex(userId), { member: key, score: Date.now() })
+}
+
+const clearDynamicKeys = async (userId: string): Promise<void> => {
+    const entries = await redis.zRange(dynamicKeyIndex(userId), 0, -1, { by: 'rank' })
+    const keys = entries.map(({ member }) => member)
+    if (keys.length > 0) await redis.del(...keys)
+}
+
+const clearSortedSetMemberships = async (userId: string): Promise<void> => {
+    const entries = await redis.zRange(sortedSetMembershipIndex(userId), 0, -1, { by: 'rank' })
+    await Promise.all(
+        entries.map(({ member: key }) => redis.zRem(key, [userId]))
+    )
+}
 
 // ─── Champion attribution cleanup ─────────────────────────────────────────────
 // The championOf reverse index is written in checkChallengeBeat (game.ts)
@@ -73,24 +126,54 @@ const clearChampionEntries = async (userId: string): Promise<void> => {
     )
 }
 
+// ─── Challenge-beat preview cleanup ──────────────────────────────────────────
+// The challengeBeatPreviews reverse index is written whenever a beat preview
+// stores a winner's username. The winnerId field prevents an old account
+// deletion from erasing a newer player's preview on the same post.
+
+const clearChallengeBeatPreviews = async (userId: string): Promise<void> => {
+    const entries = await redis.zRange(
+        `user:${userId}:challengeBeatPreviews`,
+        0,
+        -1,
+        { by: 'rank' },
+    )
+    await Promise.all(entries.map(async ({ member: postId }) => {
+        const winnerId = await redis.hGet(`game:${postId}:preview`, 'winnerId')
+        if (winnerId === userId) await redis.del(`game:${postId}:preview`)
+    }))
+}
+
 // ─── Challenge creator attribution cleanup ────────────────────────────────────
 // The createdChallenges reverse index is written in the challenge creation
 // route (game.ts) whenever a user posts a new challenge.
 
 const clearCreatedChallengeEntries = async (userId: string): Promise<void> => {
     const entries = await redis.zRange(`user:${userId}:createdChallenges`, 0, -1, { by: 'rank' })
-    await Promise.all(
-        entries.map(async ({ member: postId }) => {
-            await Promise.all([
-                redis.hDel(`game:${postId}:meta`, ['challengeCreatorId']),
-                redis.hDel(`game:${postId}:puzzle`, [
-                    'challengeBy',
-                    'challengeByUsername',
-                    'challengeByAvatar',
-                ]),
-            ])
-        })
-    )
+    await Promise.all(entries.map(({ member: postId }) => clearCreatedContentEntry(postId)))
+}
+
+const clearCreatedContentEntry = async (postId: string): Promise<void> => {
+    const contentType = await redis.hGet(`game:${postId}:meta`, 'creatorContentType')
+    if (contentType === 'level') {
+        await redis.del(
+            `game:${postId}:meta`,
+            `game:${postId}:puzzle`,
+            `game:${postId}:stats`,
+            `game:${postId}:preview`,
+        )
+        return
+    }
+
+    await Promise.all([
+        redis.hDel(`game:${postId}:meta`, ['challengeCreatorId']),
+        redis.hDel(`game:${postId}:puzzle`, [
+            'challengeBy',
+            'challengeByUsername',
+            'challengeByAvatar',
+        ]),
+        redis.del(`game:${postId}:preview`),
+    ])
 }
 
 // ─── Season leaderboard cleanup ───────────────────────────────────────────────
@@ -101,11 +184,59 @@ const clearCreatedChallengeEntries = async (userId: string): Promise<void> => {
 const clearSeasonParticipation = async (userId: string): Promise<void> => {
     const entries = await redis.zRange(`user:${userId}:seasonParticipation`, 0, -1, { by: 'rank' })
     await Promise.all(
-        entries.map(({ member: seasonId }) =>
-            redis.zRem(`season:${seasonId}:leaderboard`, [userId])
-        )
+        entries.map(async ({ member: seasonId }) => {
+            await Promise.all([
+                redis.zRem(`season:${seasonId}:leaderboard`, [userId]),
+                redis.hDel(`season:${seasonId}:rewarded`, [userId]),
+                removeUserFromSeasonResults(seasonId, userId),
+            ])
+        })
     )
 }
+
+const removeUserFromSeasonResults = async (
+    seasonId: string,
+    userId: string,
+): Promise<void> => {
+    const key = `season:${seasonId}:results`
+    const raw = await redis.get(key)
+    if (raw === undefined) return
+
+    const results = parseSeasonResults(raw)
+    if (results === null) throw new Error(`Invalid stored results for season ${seasonId}`)
+
+    const filtered = results.topPlayers.filter(
+        (player) => !isStoredSeasonPlayer(player) || player.userId !== userId,
+    )
+    if (filtered.length === results.topPlayers.length) return
+    await redis.set(key, JSON.stringify({ ...results.value, topPlayers: filtered }))
+}
+
+type StoredSeasonPlayer = Readonly<Record<string, unknown> & { userId: string }>
+
+type StoredSeasonResults = Readonly<{
+    value: Record<string, unknown>
+    topPlayers: unknown[]
+}>
+
+const parseSeasonResults = (raw: string): StoredSeasonResults | null => {
+    try {
+        const value = JSON.parse(raw) as unknown
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+
+        const record = value as Record<string, unknown>
+        if (!Array.isArray(record['topPlayers'])) return { value: record, topPlayers: [] }
+        return { value: record, topPlayers: record['topPlayers'] }
+    } catch {
+        return null
+    }
+}
+
+const isStoredSeasonPlayer = (value: unknown): value is StoredSeasonPlayer =>
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>)['userId'] === 'string'
 
 // ─── Global leaderboard removal ───────────────────────────────────────────────
 // Belt-and-suspenders removal from the current season + permanent global sets.
@@ -134,13 +265,9 @@ const removeFromLeaderboards = async (userId: string): Promise<void> => {
  * - Global leaderboard memberships (streak, coins, notify, current season)
  * - All season leaderboards via seasonParticipation reverse index
  * - Challenge champion attribution (reverse-index lookup + hDel)
+ * - Challenge-beat preview identity (reverse-index lookup + ownership check)
  * - Challenge creator attribution (reverse-index lookup + hDel)
- *
- * TTL-managed (not explicitly deleted, expire naturally):
- * - user:{userId}:game:{postId}:currentPuzzle — 30-day TTL set at write time
- * - leaderboard:speed:{date}:{gridSize} — 30-day TTL set at write time
- * - user:{userId}:challenge:count:{date} — 24h TTL set at write time
- * - user:{userId}:seasonSolves:{date} — 2-day TTL set at write time
+ * - Indexed dynamic keys, sorted-set memberships, and completion snapshots
  */
 export const deleteUserData = async (userId: string): Promise<void> => {
     console.log('[AccountDeletion] Starting deletion for:', userId)
@@ -148,8 +275,11 @@ export const deleteUserData = async (userId: string): Promise<void> => {
     const fixedKeys = userFixedKeys(userId)
     const reverseIndexKeys: string[] = [
         `user:${userId}:championOf`,
+        `user:${userId}:challengeBeatPreviews`,
         `user:${userId}:createdChallenges`,
         `user:${userId}:seasonParticipation`,
+        dynamicKeyIndex(userId),
+        sortedSetMembershipIndex(userId),
     ]
 
     // Run all independent cleanup operations in parallel.
@@ -158,11 +288,25 @@ export const deleteUserData = async (userId: string): Promise<void> => {
         redis.del(...fixedKeys),
         removeFromLeaderboards(userId),
         clearChampionEntries(userId),
+        clearChallengeBeatPreviews(userId),
         clearCreatedChallengeEntries(userId),
         clearSeasonParticipation(userId),
+        clearDynamicKeys(userId),
+        clearSortedSetMemberships(userId),
+        deleteCompletionSnapshotsForUser(userId),
     ])
 
-    const opNames = ['fixedKeys', 'leaderboards', 'champion', 'creator', 'seasons']
+    const opNames = [
+        'fixedKeys',
+        'leaderboards',
+        'champion',
+        'challengeBeatPreviews',
+        'creator',
+        'seasons',
+        'dynamicKeys',
+        'sortedSetMemberships',
+        'completions',
+    ]
     for (let i = 0; i < results.length; i++) {
         const result = results[i]!
         if (result.status === 'rejected') {

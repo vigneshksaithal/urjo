@@ -1,6 +1,6 @@
 /**
  * Guided walkthrough tutorial — a single 4×4 board the player solves one cell
- * at a time, led by the pointing hand and a one-line instruction per step.
+ * at a time, led by a curved arrow and a one-line instruction per step.
  *
  * Unlike the old multi-grid lesson flow, the board never changes: each step
  * unlocks exactly one cell, tells the player what to do, and points at it.
@@ -79,7 +79,7 @@ export const WALKTHROUGH_STEPS: readonly WalkStep[] = [
 		expectedColor: 'blue',
 	},
 	{
-		instruction: 'Double-tap to change the color. Make this spot red.',
+		instruction: 'Tap again to change the color. Make this spot red.',
 		targetIndex: 6,
 		expectedColor: 'red',
 	},

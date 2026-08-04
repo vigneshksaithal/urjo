@@ -49,6 +49,13 @@ const nextChallengeRequest = (body: object = {}) =>
         body: JSON.stringify(body),
     })
 
+const onboardingChoiceRequest = (choice: 'warmup' | 'advertised') =>
+    app.request('/api/game/onboarding-choice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice }),
+    })
+
 const leaderboardRequest = (type: string) =>
     app.request(`/api/game/leaderboard?type=${type}`, { method: 'GET' })
 
@@ -180,8 +187,10 @@ test('GET /api/game/state includes gridSizePreference in response', async () => 
     const postId = 't3_state_pref'
     await seedPuzzle(postId, 4)
 
-    // Pre-set preference and migration flag
+    // Pre-set preference and explicit override so the response is
+    // deterministic rather than depending on adaptive random selection.
     await redis.set('user:t2_griduser:gridSizePreference', '6')
+    await redis.set('user:t2_griduser:gridSizeOverride', '6')
     await redis.set('user:t2_griduser:gridMigrated', 'true')
     await redis.set('user:t2_griduser:skillLevel:6', '2')
 
@@ -224,6 +233,19 @@ test('GET /api/game/state uses adaptive size selection by default when no manual
     await redis.set('user:t2_griduser:skillLevel:4', '1')
     await redis.set('user:t2_griduser:skillLevel:6', '1')
     await redis.set('user:t2_griduser:skillLevel:8', '1')
+    await redis.set(
+        'user:t2_griduser:streak:lastDate',
+        new Date().toISOString().slice(0, 10),
+    )
+    await redis.set('user:t2_griduser:history:adaptive', JSON.stringify([{
+        gridSize: 4,
+        level: 1,
+        timeTaken: 30,
+        mistakes: 0,
+        skipped: false,
+        source: 'adaptive',
+        timestamp: 1,
+    }]))
 
     vi.spyOn(Math, 'random').mockReturnValue(0.55)
     vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'griduser' } as never)
@@ -296,10 +318,12 @@ test('GET /api/game/state disables size changes for locked scheduled posts', asy
         puzzle: { gridSize: number }
         gridSizePreference: number
         allowsGridSizeChange: boolean
+		onboardingChoiceRequired?: boolean
     }
     expect(body.puzzle.gridSize).toBe(6)
     expect(body.gridSizePreference).toBe(6)
     expect(body.allowsGridSizeChange).toBe(false)
+	expect(body.onboardingChoiceRequired).toBe(true)
 })
 
 test('POST /api/game/grid-size returns 400 for locked scheduled posts', async () => {
@@ -392,6 +416,41 @@ test('POST /api/game/complete increments persisted path level once per credited 
     expect(await redis.get(`user:${userId}:pathLevel`)).toBe('7')
 })
 
+test('POST /api/game/complete does not increment path level for challenge completions', async () => {
+    const postId = 't3_complete_challenge_path_level'
+    const userId = 't2_griduser'
+    const colors = 'r'.repeat(16)
+
+    await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+        colors,
+        numbers: '-'.repeat(16),
+        solution: colors,
+        difficulty: 'easy',
+        gridSize: '4',
+        instanceId: 'challenge-path-1',
+        source: 'challenge',
+    })
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors,
+        numbers: '-'.repeat(16),
+        solution: colors,
+        difficulty: 'easy',
+        gridSize: '4',
+        challengeBy: 't2_challenger',
+        challengeScore: '45',
+    })
+    await redis.set(`user:${userId}:skillLevel:4`, '1')
+    await redis.set(`user:${userId}:pathLevel`, '6')
+    await seedStartTime(userId, postId, 30)
+
+    const res = await withContext(postId, userId, () => completeRequest({ mistakes: 0, board: colors }))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { pathLevel: number }
+    expect(body.pathLevel).toBe(6)
+    expect(await redis.get(`user:${userId}:pathLevel`)).toBe('6')
+})
+
 test('POST /api/game/complete records speed to grid-size-scoped leaderboard', async () => {
     const postId = 't3_complete_lb'
     const userId = 't2_griduser'
@@ -449,6 +508,49 @@ test('POST /api/game/next-challenge respects an explicit manual override', async
     expect(body.gridSizePreference).toBe(8)
 })
 
+test('POST /api/game/next-challenge avoids immediately reissuing the current puzzle', async () => {
+    const postId = 't3_next_no_repeat'
+    const userId = 't2_griduser'
+    const repeatedPuzzle = {
+        colors: '.r.........rbbrr',
+        numbers: '-3------------32',
+        solution: 'rrbbrbrbbrbrbbrr',
+    }
+
+    await seedPuzzle(postId, 4)
+    await redis.set(`user:${userId}:gridSizePreference`, '4')
+    await redis.set(`user:${userId}:gridSizeOverride`, '4')
+    await redis.set(`user:${userId}:skillLevel:4`, '1')
+    await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+        ...repeatedPuzzle,
+        difficulty: 'easy',
+        gridSize: '4',
+        instanceId: 'existing-puzzle',
+        source: 'manual',
+    })
+
+    let randomCalls = 0
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
+        randomCalls += 1
+        return randomCalls <= 64 ? 0.1 : 0.9
+    })
+
+    try {
+        const res = await withContext(postId, userId, () => nextChallengeRequest({ timeSpent: 10 }))
+        expect(res.status).toBe(200)
+
+		const body = await res.json() as { puzzle: { colors: string; solution?: string } }
+		expect(body.puzzle).not.toHaveProperty('solution')
+		expect(body.puzzle.colors).not.toBe(repeatedPuzzle.colors)
+
+		const stored = await redis.hGetAll(`user:${userId}:game:${postId}:currentPuzzle`)
+		expect(stored.colors).toBe(body.puzzle.colors)
+		expect(stored.solution).not.toBe(repeatedPuzzle.solution)
+    } finally {
+        randomSpy.mockRestore()
+    }
+})
+
 test('POST /api/game/next-challenge records skip in per-grid history', async () => {
     const postId = 't3_next_history'
     const userId = 't2_griduser'
@@ -472,6 +574,54 @@ test('POST /api/game/next-challenge records skip in per-grid history', async () 
     expect(history4).toBeUndefined()
 })
 
+test('POST /api/game/next-challenge exits a borrowed challenge into the user progression flow', async () => {
+    const postId = 't3_next_from_challenge'
+    const userId = 't2_griduser'
+    const challengeColors = 'r'.repeat(16)
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: challengeColors,
+        numbers: '-'.repeat(16),
+        solution: challengeColors,
+        difficulty: 'easy',
+        gridSize: '4',
+        challengeBy: 't2_challenger',
+        challengeScore: '45',
+    })
+    await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+        colors: challengeColors,
+        numbers: '-'.repeat(16),
+        solution: challengeColors,
+        difficulty: 'easy',
+        gridSize: '4',
+        instanceId: 'borrowed-challenge',
+        source: 'challenge',
+    })
+    await redis.set(`user:${userId}:gridMigrated`, 'true')
+    await redis.set(`user:${userId}:pathLevel`, '12')
+    await redis.set(`user:${userId}:gridSizePreference`, '6')
+    await redis.set(`user:${userId}:gridSizeOverride`, '6')
+    await redis.set(`user:${userId}:skillLevel:4`, '1')
+    await redis.set(`user:${userId}:skillLevel:6`, '2')
+    await redis.set(`user:${userId}:skillLevel:8`, '1')
+
+    const res = await withContext(postId, userId, () => nextChallengeRequest({ timeSpent: 10 }))
+    expect(res.status).toBe(200)
+
+	const body = await res.json() as {
+		puzzle: { gridSize: number; solution?: string }
+		gridSizePreference: number
+	}
+	expect(body.puzzle.gridSize).toBe(6)
+	expect(body.gridSizePreference).toBe(6)
+	expect(body.puzzle).not.toHaveProperty('solution')
+
+	const stored = await redis.hGetAll(`user:${userId}:game:${postId}:currentPuzzle`)
+	expect(stored.source).toBe('manual')
+	expect(stored.gridSize).toBe('6')
+	expect(stored.solution).toBeDefined()
+	expect(stored.solution).not.toBe(challengeColors)
+})
 
 test('POST /api/game/next-challenge keeps locked scheduled posts on the same grid size', async () => {
     const postId = 't3_next_locked_post'
@@ -503,19 +653,107 @@ test('POST /api/game/next-challenge keeps locked scheduled posts on the same gri
     const res = await withContext(postId, userId, () => nextChallengeRequest({ timeSpent: 10 }))
     expect(res.status).toBe(200)
 
-    const body = await res.json() as {
-        puzzle: { gridSize: number; solution: string }
-        gridSizePreference: number
-    }
-    expect(body.puzzle.gridSize).toBe(8)
-    expect(body.gridSizePreference).toBe(8)
+	const body = await res.json() as {
+		puzzle: { gridSize: number; solution?: string }
+		gridSizePreference: number
+	}
+	expect(body.puzzle.gridSize).toBe(8)
+	expect(body.gridSizePreference).toBe(8)
+	expect(body.puzzle).not.toHaveProperty('solution')
 
-    const stored = await redis.hGetAll(`user:${userId}:game:${postId}:currentPuzzle`)
-    expect(stored.gridSize).toBe('8')
-    expect(stored.solution).toBe(body.puzzle.solution)
+	const stored = await redis.hGetAll(`user:${userId}:game:${postId}:currentPuzzle`)
+	expect(stored.gridSize).toBe('8')
+	expect(stored.solution).toBeDefined()
 })
 
 // ─── GET /api/game/leaderboard — speed scoped by grid size ───────────────────
+
+test('first-time players can explicitly choose a 4x4 warm-up on an advertised 8x8 post', async () => {
+    const postId = 't3_first_time_warmup'
+    const userId = 't2_griduser'
+    const advertisedColors = 'r'.repeat(64)
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: advertisedColors,
+        numbers: '-'.repeat(64),
+        solution: advertisedColors,
+        difficulty: 'medium',
+        gridSize: '8',
+        lockedGridSize: '8',
+    })
+    await redis.set(`user:${userId}:gridMigrated`, 'true')
+
+    const res = await withContext(postId, userId, () => onboardingChoiceRequest('warmup'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as {
+        puzzle: { gridSize: number; solution?: string }
+        advertisedGridSize: number
+    }
+    expect(body.puzzle.gridSize).toBe(4)
+    expect(body.puzzle).not.toHaveProperty('solution')
+    expect(body.advertisedGridSize).toBe(8)
+    expect(await redis.get(`user:${userId}:game:${postId}:warmupReturnGrid`)).toBe('8')
+})
+
+test('the warm-up path returns the player to the original advertised board', async () => {
+    const postId = 't3_warmup_return'
+    const userId = 't2_griduser'
+    const advertisedColors = 'r'.repeat(36)
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: advertisedColors,
+        numbers: '-'.repeat(36),
+        solution: advertisedColors,
+        difficulty: 'easy',
+        gridSize: '6',
+        lockedGridSize: '6',
+    })
+    await redis.set(`user:${userId}:gridMigrated`, 'true')
+
+    expect((await withContext(postId, userId, () => onboardingChoiceRequest('warmup'))).status).toBe(200)
+    const res = await withContext(postId, userId, () => nextChallengeRequest({ timeSpent: 10 }))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { puzzle: { colors: string; gridSize: number; solution?: string } }
+    expect(body.puzzle.gridSize).toBe(6)
+    expect(body.puzzle.colors).toBe(advertisedColors)
+    expect(body.puzzle).not.toHaveProperty('solution')
+    expect(await redis.get(`user:${userId}:game:${postId}:warmupReturnGrid`)).toBeUndefined()
+})
+
+test('the advertised onboarding choice keeps the scheduled post board unchanged', async () => {
+    const postId = 't3_first_time_advertised'
+    const userId = 't2_griduser'
+    const advertisedColors = 'r'.repeat(64)
+
+    await redis.hSet(`game:${postId}:puzzle`, {
+        colors: advertisedColors,
+        numbers: '-'.repeat(64),
+        solution: advertisedColors,
+        difficulty: 'medium',
+        gridSize: '8',
+        lockedGridSize: '8',
+    })
+    await redis.set(`user:${userId}:gridMigrated`, 'true')
+
+    const res = await withContext(postId, userId, () => onboardingChoiceRequest('advertised'))
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { puzzle: { colors: string; gridSize: number } }
+    expect(body.puzzle.gridSize).toBe(8)
+    expect(body.puzzle.colors).toBe(advertisedColors)
+    expect(await redis.get(`user:${userId}:game:${postId}:warmupReturnGrid`)).toBeUndefined()
+
+	const reloaded = await withContext(postId, userId, gameStateRequest)
+	expect(reloaded.status).toBe(200)
+	const reloadedBody = await reloaded.json() as {
+		puzzle: { gridSize: number }
+		onboardingChoiceRequired?: boolean
+	}
+	expect(reloadedBody.puzzle.gridSize).toBe(8)
+	expect(reloadedBody.onboardingChoiceRequired).toBe(false)
+})
 
 test('GET /api/game/leaderboard speed type returns entries for user grid size preference', async () => {
     const userId = 't2_griduser'

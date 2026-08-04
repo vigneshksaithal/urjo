@@ -20,6 +20,7 @@ import {
     readPerSubDQP,
     SESSION_HEADER,
 } from '../lib/qualified'
+import { readAnonymousPlaytime } from '../lib/metrics'
 
 const CTX = {
     userId: 't2_dwelluser',
@@ -38,6 +39,15 @@ const todayUTC = (): string => {
 }
 
 const test = createDevvitTest(CTX)
+
+const ANONYMOUS_CTX = {
+    subredditId: 't5_dwellsub',
+    subredditName: 'dwellsub',
+    postId: 't3_dwellpost',
+}
+
+const withAnonymousCtx = <T>(fn: () => Promise<T>): Promise<T> =>
+    runWithContext(ANONYMOUS_CTX as Parameters<typeof runWithContext>[0], fn)
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -87,6 +97,34 @@ test('POST /api/dwell/tick accepts but skips zero/negative tickSeconds (200, no-
     // No session-flag hash should have been written.
     const flags = await withCtx(() => redis.hGetAll('qe:session:sess-noop:flags'))
     expect(flags.dwellSeconds).toBeUndefined()
+})
+
+test('POST /api/dwell/tick aggregates anonymous dwell without creating identity or DQP state', async () => {
+    const sessionId = 'session_anonymous-dwell'
+    const date = todayUTC()
+
+    for (let i = 0; i < 2; i++) {
+        const res = await withAnonymousCtx(() =>
+            app.request('/api/dwell/tick', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    [SESSION_HEADER]: sessionId,
+                },
+                body: JSON.stringify({ tickSeconds: 5 }),
+            }),
+        )
+        expect(res.status).toBe(200)
+        expect(await res.json()).toMatchObject({ qualified: false, tickSeconds: 5 })
+    }
+
+    expect(await withAnonymousCtx(() => readAnonymousPlaytime(date))).toEqual({
+        totalSeconds: 10,
+        sessions: 1,
+        averageSeconds: 10,
+    })
+    expect(await withAnonymousCtx(() => redis.hGetAll(`qe:session:${sessionId}:flags`))).toEqual({})
+    expect(await withAnonymousCtx(() => readGlobalDQP(date))).toBe(0)
 })
 
 // ─── Happy path ───────────────────────────────────────────────────────────────

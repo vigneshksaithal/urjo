@@ -225,7 +225,7 @@ testCapture('captureReferrer sets referrer=1 when referer is Reddit-origin', asy
 
     const flags = await withCtx(() => redis.hGetAll(`qe:session:${sessionId}:flags`))
     expect(flags.referrer).toBe('1')
-    expect(flags.userId).toBe('t2_qpuser')
+    expect(flags.userId).toBeUndefined()
     expect(flags.subredditId).toBe('t5_testsub')
 })
 
@@ -237,10 +237,10 @@ testCapture('captureReferrer does NOT set referrer flag for non-Reddit referer',
 
     const flags = await withCtx(() => redis.hGetAll(`qe:session:${sessionId}:flags`))
     expect(flags.referrer).toBeUndefined()
-    expect(flags.userId).toBe('t2_qpuser') // userId still recorded
+    expect(flags.userId).toBeUndefined()
 })
 
-testCapture('captureReferrer is idempotent on userId/subredditId (first-write wins)', async () => {
+testCapture('captureReferrer is idempotent on subredditId (first-write wins)', async () => {
     const sessionId = 'sess-cap-3'
     await withCtx(() =>
         captureReferrer(sessionId, 't2_qpuser', 't5_first', 'https://reddit.com/r/foo'),

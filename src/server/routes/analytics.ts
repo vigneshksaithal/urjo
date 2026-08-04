@@ -9,6 +9,7 @@ import { getDailyMetrics } from '../lib/analytics'
 import { getSimpleMetrics } from '../lib/metrics'
 import { computeDashboard } from '../lib/dashboard'
 import { requireModerator } from '../lib/moderator'
+import { readScheduledSlotMetrics } from '../lib/slot-metrics'
 
 const HTTP_STATUS_INTERNAL_ERROR = 500
 const HTTP_STATUS_BAD_REQUEST = 400
@@ -48,6 +49,24 @@ analyticsRouter.get('/api/analytics/metrics', async (c) => {
         const days = Number.isNaN(daysParam) ? 14 : Math.min(Math.max(daysParam, 1), 30)
         const dates = getLastNDates(days)
         const data = await Promise.all(dates.map((d) => getSimpleMetrics(d)))
+        return c.json({ status: 'success', data })
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+    }
+})
+
+// Signed-in-only, deduplicated funnel counts for each immutable scheduled slot and grid.
+// This is the decision surface for changing cadence; low-volume rates should
+// never be compared without their underlying open counts.
+analyticsRouter.get('/api/analytics/slots', async (c) => {
+    const date = c.req.query('date')
+    if (!isISODate(date)) {
+        return c.json({ status: 'error', message: 'Query param `date` must be YYYY-MM-DD' }, HTTP_STATUS_BAD_REQUEST)
+    }
+
+    try {
+        const data = await readScheduledSlotMetrics(date)
         return c.json({ status: 'success', data })
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
@@ -104,9 +123,9 @@ analyticsRouter.get('/api/analytics/qualified-summary', async (c) => {
 // ─── GET /api/analytics/variants ──────────────────────────────────────────────
 
 /**
- * Per-variant funnel metrics for the A/B/C first-screen experiment.
- * Returns opens, screen_taps (A/B only), first_actions, and completions
- * plus derived rates for a single UTC date (default: today).
+ * Per-variant funnel metrics for directly playable inline onboarding.
+ * A/B are controls and C adds non-blocking guidance. Returns opens,
+ * first_actions, completions, and derived rates for one UTC date.
  */
 analyticsRouter.get('/api/analytics/variants', async (c) => {
     try {

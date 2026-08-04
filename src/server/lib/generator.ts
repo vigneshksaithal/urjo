@@ -931,3 +931,39 @@ export function generatePuzzle(
 
 	throw new Error('Failed to generate puzzle with unique solution')
 }
+
+/** Build a playable, uniquely-solvable puzzle from an authored full solution. */
+export function generatePuzzleFromSolution(
+	solutionColors: string,
+	difficulty: Difficulty,
+	gridSize: 4 | 6 | 8,
+): SerializedPuzzle {
+	const expectedLength = gridSize * gridSize
+	if (solutionColors.length !== expectedLength || !/^[rb]+$/.test(solutionColors)) {
+		throw new Error('Custom level solution is incomplete')
+	}
+
+	const solution = deserializeGrid(
+		solutionColors,
+		'-'.repeat(expectedLength),
+		gridSize,
+		solutionColors,
+	)
+	if (!isBalanced(solution, gridSize)) {
+		throw new Error('Custom level solution is not balanced')
+	}
+	if (hasAdjacentIdenticalRows(solution, gridSize) || hasAdjacentIdenticalColumns(solution, gridSize)) {
+		throw new Error('Custom level solution has adjacent matching lines')
+	}
+
+	const generated = generateClues(solution, difficulty, gridSize)
+	if (generated === null) throw new Error('Unable to generate unique clues for this level')
+
+	return {
+		colors: serializeGrid(generated.puzzle, gridSize),
+		numbers: serializeNumbers(generated.puzzle, gridSize),
+		solution: solutionColors,
+		difficulty,
+		gridSize,
+	}
+}

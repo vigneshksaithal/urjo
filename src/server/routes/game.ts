@@ -4,7 +4,9 @@
  */
 
 import { Hono } from 'hono'
-import { context, redis, reddit } from '@devvit/web/server'
+import type { Context } from 'hono'
+import { context, redis, reddit, scheduler } from '@devvit/web/server'
+import type { TaskRequest, TaskResponse } from '@devvit/web/server'
 import type {
 	GameState,
 	NextChallengeResponse,
@@ -20,6 +22,7 @@ import type {
 	SerializedPuzzle,
 	GridSizeResponse,
 	FirstScreenData,
+	OnboardingChoiceResponse,
 } from '../../shared/types'
 import { DEFAULT_CHALLENGE_TITLE, DEFAULT_GRID_SIZE, MAX_STREAK_FREEZES, MIN_SKILL_LEVEL, getGridLevelConfig, isValidGridSize } from '../../shared/constants'
 import type { GridSize } from '../../shared/constants'
@@ -80,15 +83,15 @@ import { trackOpen } from '../lib/metrics'
 import {
 	assignVariant,
 	trackVariantOpen,
-	trackVariantScreenTap,
 	trackVariantFirstAction,
 	trackVariantCompletion,
 } from '../lib/ab-test'
 import {
 	isDifficulty,
-	markS2REligible,
-	tryConvertS2R,
+	markS2RFirstCompletion,
+	tryConvertS2RFirstAction,
 } from '../lib/s2r'
+import { parseMeasurementHeaders } from '../../shared/measurement-contract'
 import {
 	recordCompleter,
 	recordSharer,
@@ -103,20 +106,43 @@ import {
 import { getHintsDismissed, markHintDismissed } from '../lib/hints'
 import type { HintKind } from '../lib/hints'
 import { buildChallengePreview, buildChallengeBeatPreview, maskPuzzleGrid } from '../lib/preview'
+import { toPublicPuzzle } from '../lib/public-puzzle'
 import type { ChallengePreviewData } from '../../shared/social-types'
-import { isModeratorCached } from '../lib/moderator'
+import { isModeratorCached, requireModerator } from '../lib/moderator'
 import { isOptedIn } from '../lib/notify'
 import { calculateSeasonScore, getCurrentSeason, recordSeasonScore } from '../lib/seasons'
 import { getSocialStats, incrementChallengeBeats, incrementChallengesCreated, incrementSharesCount } from '../lib/social'
-import { serializeResultComment } from '../../shared/result-card'
-import type { ResultCardData } from '../../shared/growth-types'
+import { serializeVerifiedResultComment } from '../../shared/result-card'
 import type { EngagementCompletionData, UserStats } from '../../shared/engagement-types'
 import { getSessionRunMultiplier, getSessionRunBonusCoins } from '../../shared/session-run'
+import { incrementVerifiedSessionRun } from '../lib/server-session-run'
 import { forecastNextStreak } from '../../shared/streak-rewards'
 import { getActiveWeekendEvent, getWeekendEventBonusCoins } from '../../shared/weekend-event'
 import { buildLoggedOutGameState, buildLoggedOutCompleteResponse } from '../lib/logged-out'
 import { createStickyComment } from '../post'
 import { addAdaptiveHistoryRecord, selectAdaptivePuzzleState } from '../lib/adaptive-selector'
+import { createContentId } from '../lib/content-id'
+import {
+	claimCompletionAction,
+	createCompletionSnapshot,
+	finalizeCompletionAction,
+	getOwnedCompletionSnapshot,
+	releaseCompletionAction,
+} from '../lib/completion-snapshot'
+import { recordVerifiedUrjoBlitzCompletion } from '../lib/urjo-blitz'
+import { recordScheduledSlotEvent } from '../lib/slot-metrics'
+import {
+	claimAnonymousMigration,
+	finalizeAnonymousMigration,
+	persistAnonymousPuzzle,
+	startAnonymousPuzzleTimer,
+	verifyAnonymousPuzzleCompletion,
+} from '../lib/anonymous-receipts'
+import { isCurrentScheduledCompletion } from '../lib/current-day-content'
+import {
+	registerUserDynamicKey,
+	registerUserSortedSetMembership,
+} from '../lib/account-deletion'
 
 // ─── Result Comment Dedup Key ────────────────────────────────────────────────
 
@@ -127,6 +153,203 @@ const formatMistakeCount = (mistakes: number): string =>
 	mistakes === 0 ? 'zero mistakes' : `${mistakes} mistake${mistakes === 1 ? '' : 's'}`
 
 const MAX_REPEAT_AVOIDANCE_ATTEMPTS = 5
+const COMPLETION_FOLLOWUP_TASK_NAME = 'completion-followup'
+const COMPLETION_FOLLOWUP_QUEUE_KEY = 'queue:completion-followups'
+const COMPLETION_FOLLOWUP_JOB_KEY = 'queue:completion-followups:job'
+const COMPLETION_FOLLOWUP_BATCH_SIZE = 25
+const COMPLETION_FOLLOWUP_TTL_SECONDS = 86400
+
+type CompletionFollowup = {
+	id: string
+	userId: string
+	postId: string
+	timeTaken: number
+	currentLevel: number
+	difficulty: 'easy' | 'medium' | 'hard' | 'diabolical'
+	puzzleInstanceId: string
+	isChallengePost: boolean
+	preCompletionTotalSolves: number
+	sessionId: string | null
+	contentId: string | null
+	attemptId: string | null
+}
+
+type CompletionFollowupTaskBody = TaskRequest & { data?: { batch?: unknown } }
+
+const completionFollowupKey = (userId: string, id: string): string =>
+	`user:${userId}:completion:${id}:followup`
+
+const completionFollowupQueueMember = (userId: string, id: string): string =>
+	`${userId}:${id}`
+
+const parseCompletionFollowupQueueMember = (member: string): { userId: string; id: string } | null => {
+	const separator = member.indexOf(':')
+	if (separator <= 0) return null
+	const userId = member.slice(0, separator)
+	const id = member.slice(separator + 1)
+	return userId.length > 0 && id.length > 0 ? { userId, id } : null
+}
+
+const parseCompletionFollowup = (raw: string): CompletionFollowup | null => {
+	try {
+		const value: unknown = JSON.parse(raw)
+		if (!value || typeof value !== 'object') return null
+		const event = value as Record<string, unknown>
+		if (
+			typeof event.id !== 'string'
+			|| typeof event.userId !== 'string'
+			|| typeof event.postId !== 'string'
+			|| typeof event.timeTaken !== 'number'
+			|| typeof event.currentLevel !== 'number'
+			|| typeof event.puzzleInstanceId !== 'string'
+			|| typeof event.isChallengePost !== 'boolean'
+			|| typeof event.preCompletionTotalSolves !== 'number'
+			|| !isDifficulty(event.difficulty)
+		) return null
+		return {
+			id: event.id,
+			userId: event.userId,
+			postId: event.postId,
+			timeTaken: event.timeTaken,
+			currentLevel: event.currentLevel,
+			difficulty: event.difficulty,
+			puzzleInstanceId: event.puzzleInstanceId,
+			isChallengePost: event.isChallengePost,
+			preCompletionTotalSolves: event.preCompletionTotalSolves,
+			sessionId: typeof event.sessionId === 'string' ? event.sessionId : null,
+			contentId: typeof event.contentId === 'string' ? event.contentId : null,
+			attemptId: typeof event.attemptId === 'string' ? event.attemptId : null,
+		}
+	} catch {
+		return null
+	}
+}
+
+const ensureCompletionFollowupJob = async (): Promise<void> => {
+	const claimed = await redis.set(COMPLETION_FOLLOWUP_JOB_KEY, 'pending', {
+		nx: true,
+		expiration: new Date(Date.now() + 300_000),
+	})
+	if (claimed === '') return
+
+	try {
+		const jobId = await scheduler.runJob({
+			name: COMPLETION_FOLLOWUP_TASK_NAME,
+			data: { batch: true },
+			runAt: new Date(Date.now() + 250),
+		})
+		await redis.set(COMPLETION_FOLLOWUP_JOB_KEY, jobId, {
+			expiration: new Date(Date.now() + 300_000),
+		})
+	} catch (error) {
+		await redis.del(COMPLETION_FOLLOWUP_JOB_KEY)
+		throw error
+	}
+}
+
+const enqueueCompletionFollowup = async (event: Omit<CompletionFollowup, 'id'>): Promise<void> => {
+	const id = crypto.randomUUID()
+	const payload: CompletionFollowup = { ...event, id }
+	await Promise.all([
+		registerUserDynamicKey(event.userId, completionFollowupKey(event.userId, id)),
+		redis.set(completionFollowupKey(event.userId, id), JSON.stringify(payload), {
+			expiration: new Date(Date.now() + COMPLETION_FOLLOWUP_TTL_SECONDS * 1000),
+		}),
+		redis.zAdd(COMPLETION_FOLLOWUP_QUEUE_KEY, {
+			member: completionFollowupQueueMember(event.userId, id),
+			score: Date.now(),
+		}),
+	])
+	await ensureCompletionFollowupJob()
+}
+
+const processCompletionFollowup = async (event: CompletionFollowup): Promise<void> => {
+	const today = getTodayUTC()
+	const expectedContentId = createContentId(event.postId, event.puzzleInstanceId)
+	const tasks: Promise<unknown>[] = [
+		recordCompleter(today, event.userId),
+	]
+	if (
+		event.sessionId !== null
+		&& event.contentId === expectedContentId
+		&& event.attemptId !== null
+	) {
+		tasks.push(markS2RFirstCompletion({
+			sessionId: event.sessionId,
+			date: today,
+			skillLevel: event.currentLevel,
+			difficulty: event.difficulty,
+			postId: event.postId,
+			contentId: expectedContentId,
+			attemptId: event.attemptId,
+		}))
+	}
+	if (event.isChallengePost && event.preCompletionTotalSolves === 0) {
+		tasks.push(getChallengeCreationTimestamp(event.postId).then(async (creationTs) => {
+			if (creationTs !== null) await recordCycleTime(today, (Date.now() - creationTs) / 1000)
+		}))
+	}
+	if (event.preCompletionTotalSolves === 0) {
+		tasks.push(getAttribution(event.userId).then(async (attribution) => {
+			if (attribution !== null) await recordChannelConversion(today, attribution, event.userId)
+		}))
+	}
+	const results = await Promise.allSettled(tasks)
+	for (const result of results) {
+		if (result.status === 'rejected') console.error('[Completion follow-up] task failed:', result.reason)
+	}
+}
+
+const drainCompletionFollowups = async (): Promise<void> => {
+	const entries = await redis.zRange(COMPLETION_FOLLOWUP_QUEUE_KEY, 0, COMPLETION_FOLLOWUP_BATCH_SIZE - 1, { by: 'rank' })
+	for (const { member } of entries) {
+		const queueMember = parseCompletionFollowupQueueMember(member)
+		const raw = queueMember === null
+			? undefined
+			: await redis.get(completionFollowupKey(queueMember.userId, queueMember.id))
+		const event = raw === undefined ? null : parseCompletionFollowup(raw)
+		if (event !== null) await processCompletionFollowup(event)
+		await Promise.all([
+			redis.zRem(COMPLETION_FOLLOWUP_QUEUE_KEY, [member]),
+			...(queueMember === null ? [] : [redis.del(completionFollowupKey(queueMember.userId, queueMember.id))]),
+		])
+	}
+	await redis.del(COMPLETION_FOLLOWUP_JOB_KEY)
+	if (await redis.zCard(COMPLETION_FOLLOWUP_QUEUE_KEY) > 0) await ensureCompletionFollowupJob()
+}
+
+const puzzleFirstCellTimeKey = (
+	userId: string,
+	postId: string,
+	instanceId: string,
+): string => `user:${userId}:puzzleFirstCellTime:${postId}:${instanceId}`
+
+const onboardingChoiceKey = (userId: string, postId: string): string =>
+	`user:${userId}:game:${postId}:onboardingChoice`
+
+const persistAnonymousPuzzleForRequest = async (
+	c: Context,
+	postId: string,
+	contentId: string,
+	puzzle: SerializedPuzzle,
+	postPuzzle: Record<string, string>,
+): Promise<void> => {
+	const { sessionId } = parseMeasurementHeaders(c.req.raw.headers)
+	if (sessionId === null) return
+
+	await persistAnonymousPuzzle({
+		sessionId,
+		postId,
+		contentId,
+		puzzle,
+		...(postPuzzle.scheduledDate !== undefined && {
+			scheduledDate: postPuzzle.scheduledDate,
+		}),
+		...(postPuzzle.scheduledSlotKey !== undefined && {
+			scheduledSlotKey: postPuzzle.scheduledSlotKey,
+		}),
+	})
+}
 
 const getLockedGridSize = (postPuzzle: Record<string, string>): GridSize | undefined => {
 	const rawGridSize = postPuzzle.lockedGridSize !== undefined
@@ -156,7 +379,45 @@ const normalizeChallengeTitle = (value: unknown): string | undefined => {
 	return title
 }
 
+const MAX_DAILY_CHALLENGE_POSTS = 3
+
+const claimDailyChallengeSlot = async (
+	userId: string,
+	date: string,
+	completionId: string,
+): Promise<string | null> => {
+	for (let slot = 1; slot <= MAX_DAILY_CHALLENGE_POSTS; slot++) {
+		const key = `user:${userId}:challenge-slot:${date}:${slot}`
+		await registerUserDynamicKey(userId, key)
+		const claimed = await redis.set(key, completionId, {
+			nx: true,
+			expiration: new Date(Date.now() + 172800000),
+		})
+		if (claimed) return key
+	}
+	return null
+}
+
 export const gameRouter = new Hono()
+
+gameRouter.post('/internal/scheduler/completion-followup', async (c) => {
+	const body = await c.req.json<CompletionFollowupTaskBody>().catch(() => null)
+	if (body?.data?.batch !== true) {
+		return c.json<TaskResponse>({ status: 'error', message: 'Invalid completion follow-up task' }, 400)
+	}
+
+	try {
+		await drainCompletionFollowups()
+		return c.json<TaskResponse>({ status: 'ok' })
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Completion follow-up failed'
+		return c.json<TaskResponse>({ status: 'error', message }, 500)
+	}
+})
+
+const HTTP_STATUS_BAD_REQUEST = 400
+const HTTP_STATUS_NOT_FOUND = 404
+const HTTP_STATUS_INTERNAL_ERROR = 500
 
 // ─── checkChallengeBeat ──────────────────────────────────────────────────────
 
@@ -213,7 +474,7 @@ Think you can beat it? Play above! 🎯`
 
 /**
  * Check if a puzzle completion beats the challenge score for this post.
- * If beaten, notifies the original challenger via a Reddit comment.
+ * If beaten, updates challenge stats and refreshes the sticky leaderboard comment.
  */
 async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: number): Promise<void> {
 	try {
@@ -234,8 +495,10 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 
 		// Increment beats counter
 		await redis.hIncrBy(`game:${postId}:stats`, 'beats', 1)
-		await redis.zAdd(`challenge:${postId}:beat_events`, {
-			member: `${winnerId}:${Date.now()}`,
+		const beatEventsKey = `challenge:${postId}:beat_events`
+		await registerUserSortedSetMembership(winnerId, beatEventsKey)
+		await redis.zAdd(beatEventsKey, {
+			member: winnerId,
 			score: Date.now(),
 		})
 
@@ -263,6 +526,7 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 				// Acceptable: the preview just updates again on the next beat. The
 				// MULTI/EXEC-without-WATCH pattern is unavailable in Devvit's Redis
 				// client, and using WATCH here introduces worse failure modes.
+				await registerUserDynamicKey(winnerId, previewDedupKey)
 				await redis.set(previewDedupKey, 'true')
 				await redis.expire(previewDedupKey, 3600) // 1-hour TTL dedup
 
@@ -275,6 +539,11 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 				await redis.hSet(`game:${postId}:preview`, {
 					type: 'challenge_beat',
 					data: JSON.stringify(beatPreview),
+					winnerId,
+				})
+				await redis.zAdd(`user:${winnerId}:challengeBeatPreviews`, {
+					member: postId,
+					score: Date.now(),
 				})
 			}
 		} catch (previewErr) {
@@ -283,45 +552,12 @@ async function checkChallengeBeat(postId: string, winnerId: string, timeTaken: n
 
 		// Mark beat as recorded — after stats are written so partial failure doesn't lose data.
 		// Two-step write: see previewDedupKey comment above for rationale.
+		await registerUserDynamicKey(winnerId, notifyKey)
 		await redis.set(notifyKey, 'true')
 		await redis.expire(notifyKey, 2592000) // 30-day TTL — matches speed leaderboard retention
-
-		try {
-			await postChallengeBeatReply(postId, winnerId, challengerId, timeTaken)
-		} catch (replyErr) {
-			console.error('Failed to post challenge beat reply:', replyErr)
-		}
 	} catch (err) {
 		console.error('checkChallengeBeat error:', err)
 	}
-}
-
-const postChallengeBeatReply = async (
-	postId: string,
-	winnerId: string,
-	challengerId: string,
-	timeTaken: number
-): Promise<void> => {
-	const meta = await redis.hGetAll(`game:${postId}:meta`)
-	const leaderboardCommentId = meta['leaderboardCommentId']
-	if (!leaderboardCommentId) return
-
-	const [winnerName, challengerName] = await Promise.all([
-		fetchUsername(winnerId),
-		fetchUsername(challengerId),
-	])
-
-	// Beat notifications are automated APP-account comments, not user-authored content.
-	// runAs: 'APP' (the default) is intentional — this is an informational update
-	// posted by the system, not an action taken on behalf of the player.
-	await reddit.submitComment({
-		id: leaderboardCommentId as `t1_${string}`,
-		text: [
-			`u/${winnerName} beat the challenge from u/${challengerName} in ${timeTaken}s.`,
-			'',
-			`Jump in: ${redditCommentsUrl(postId)}`,
-		].join('\n'),
-	})
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -421,7 +657,9 @@ const persistIssuedPuzzle = async (
 	source: 'adaptive' | 'manual' | 'challenge'
 }> => {
 	const instanceId = makeInstanceId()
-	await redis.hSet(`user:${userId}:game:${postId}:currentPuzzle`, {
+	const puzzleKey = `user:${userId}:game:${postId}:currentPuzzle`
+	await registerUserDynamicKey(userId, puzzleKey)
+	await redis.hSet(puzzleKey, {
 		colors: puzzle.colors,
 		numbers: puzzle.numbers,
 		solution: puzzle.solution,
@@ -430,7 +668,7 @@ const persistIssuedPuzzle = async (
 		instanceId,
 		source,
 	})
-	await redis.expire(`user:${userId}:game:${postId}:currentPuzzle`, 2592000)
+	await redis.expire(puzzleKey, 2592000)
 	await setGridSizePreference(userId, puzzle.gridSize as GridSize)
 
 	return {
@@ -673,7 +911,8 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 		isDailyFirst,
 		ctx.mistakes,
 		consecutiveLoginDays,
-		ctx.gridSize
+		ctx.gridSize,
+		false,
 	)
 
 	// Atomic increments for coins (prevents race conditions)
@@ -698,6 +937,7 @@ const applyCoinReward = async (ctx: CoinRewardContext): Promise<CoinReward> => {
 		dailyFirstSolve: isDailyFirst ? today : (lastDailySolve ?? ''),
 	})
 	// Update coins leaderboard
+	await registerUserSortedSetMembership(ctx.userId, 'leaderboard:coins')
 	await redis.zAdd('leaderboard:coins', { score: newTotalCoins, member: ctx.userId })
 
 	return coinReward
@@ -730,18 +970,30 @@ gameRouter.get('/api/game/state', async (c) => {
 			}
 			const isChallenge = Boolean(postPuzzle.challengeBy)
 			const lockedGridSize = getLockedGridSize(postPuzzle)
+			const contentId = createContentId(postId, 'post')
+			await persistAnonymousPuzzleForRequest(
+				c,
+				postId,
+				contentId,
+				serializedPuzzle,
+				postPuzzle,
+			)
 
-			let puzzleNumber: number | undefined
-			try {
-				const counterStr = await redis.get('stats:puzzleCounter')
-				puzzleNumber = counterStr !== undefined ? parseInt(counterStr, 10) : undefined
+				let puzzleNumber: number | undefined
+				try {
+					const storedPuzzleNumber = postPuzzle.puzzleNumber
+						?? await redis.get('stats:puzzleCounter')
+					puzzleNumber = storedPuzzleNumber !== undefined
+						? parseInt(storedPuzzleNumber, 10)
+						: undefined
 			} catch {
 				// non-critical
 			}
 
 			return c.json(
 				buildLoggedOutGameState({
-					puzzle: serializedPuzzle,
+					puzzle: toPublicPuzzle(serializedPuzzle),
+					contentId,
 					postId,
 					isChallenge,
 					allowsGridSizeChange: lockedGridSize === undefined,
@@ -830,6 +1082,7 @@ gameRouter.get('/api/game/state', async (c) => {
 
 		// Record start time for server-side time tracking (security fix)
 		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		await registerUserDynamicKey(userId, startTimeKey)
 		await redis.set(startTimeKey, Date.now().toString())
 		await redis.expire(startTimeKey, 86400)
 
@@ -853,12 +1106,9 @@ gameRouter.get('/api/game/state', async (c) => {
 			if (sessionId !== null) {
 				const referer = c.req.raw.headers.get('referer')
 				await captureReferrer(sessionId, userId, subredditId, referer)
-				// S2R: if this state-load is within 60s of a prior completion
-				// in the same session and a different post, count it as a
-				// "started puzzle 2" conversion.
-				await tryConvertS2R(sessionId, postId)
 			}
-			await trackOpen(today, postId, userId)
+				const openIsNew = await trackOpen(today, postId, userId)
+				if (openIsNew) await recordScheduledSlotEvent(today, postId, 'opens')
 			if (isChallenge) {
 				await trackChallengeOpen(today, postId, userId)
 			}
@@ -874,6 +1124,16 @@ gameRouter.get('/api/game/state', async (c) => {
 
 		const economy = await getUserEconomy(userId)
 		const isFirstTimeUser = economy.totalSolves === 0
+		let onboardingChoiceRequired = false
+		if (
+			!isChallenge &&
+			isFirstTimeUser &&
+			lockedGridSize !== undefined &&
+			lockedGridSize > 4
+		) {
+			const priorChoice = await redis.get(onboardingChoiceKey(userId, postId))
+			onboardingChoiceRequired = priorChoice === undefined
+		}
 
 		// ─── Viral tracking: challenge post open by new player (non-blocking) ─
 		try {
@@ -888,8 +1148,11 @@ gameRouter.get('/api/game/state', async (c) => {
 		// ─── Puzzle number ─────────────────────────────────────────────────────
 		let puzzleNumber: number | undefined
 		try {
-			const counterStr = await redis.get('stats:puzzleCounter')
-			puzzleNumber = counterStr !== undefined ? parseInt(counterStr, 10) : undefined
+			const storedPuzzleNumber = postPuzzleMeta?.puzzleNumber
+				?? await redis.get('stats:puzzleCounter')
+			puzzleNumber = storedPuzzleNumber !== undefined
+				? parseInt(storedPuzzleNumber, 10)
+				: undefined
 		} catch {
 			// non-critical
 		}
@@ -963,20 +1226,20 @@ gameRouter.get('/api/game/state', async (c) => {
 			console.error('[State] Season progress fetch failed (non-critical):', err)
 		}
 
-		// ─── A/B/C first-screen experiment ────────────────────────────────────────
-		// Shown only for non-challenge, logged-in, non-first-time users who
-		// have NOT already had a first-action on this post today.
+		// ─── Inline onboarding experiment ───────────────────────────────────────
+		// A/B are directly playable controls. C adds non-blocking guidance over
+		// the same board for eligible returning players who have not acted today.
 		let abVariant: 'A' | 'B' | 'C' | undefined
 		let hasPlayedToday = false
 		let firstScreenData: FirstScreenData | undefined
 		if (!isChallenge && !isFirstTimeUser) {
 			try {
 				abVariant = assignVariant(userId)
-				// Check if user already acted today — skip first screen if so.
+				// Check if the user already acted today — skip guidance if so.
 				const actedKey = `analytics:acted:${today}:${postId}:${userId}`
 				const acted = await redis.get(actedKey)
 				hasPlayedToday = acted !== undefined
-				// Build first-screen data for both A/B component and Variant C overlay.
+				// Build the community/target data consumed by Variant C's overlay.
 				if (communityStats !== undefined) {
 					const target = await getFirstScreenTarget(
 						today,
@@ -985,7 +1248,7 @@ gameRouter.get('/api/game/state', async (c) => {
 						userId,
 					)
 					firstScreenData = {
-						samplePuzzle: serializedPuzzle,
+						samplePuzzle: toPublicPuzzle(serializedPuzzle),
 						instruction: 'Equal reds and blues per row and column — no identical neighbours.',
 						communityStats,
 						...(target !== undefined && { targetToBeat: target }),
@@ -1003,7 +1266,8 @@ gameRouter.get('/api/game/state', async (c) => {
 		}
 
 		const gameState: GameState = {
-			puzzle: serializedPuzzle,
+			puzzle: toPublicPuzzle(serializedPuzzle),
+			contentId: createContentId(postId, puzzle.instanceId),
 			tutorialCompleted,
 			isLoggedIn: true,
 			skillLevel,
@@ -1015,6 +1279,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			streak,
 			...(username !== undefined && { username }),
 			isFirstTimeUser,
+			onboardingChoiceRequired,
 			...(puzzleNumber !== undefined && { puzzleNumber }),
 			...(communityStats !== undefined && { communityStats }),
 			isMod,
@@ -1027,7 +1292,7 @@ gameRouter.get('/api/game/state', async (c) => {
 			weekendEvent: getActiveWeekendEvent(new Date()),
 			// Always-on progression strip data
 			...(seasonProgress !== undefined && { seasonProgress }),
-			// A/B/C first-screen experiment
+			// Inline onboarding experiment
 			...(abVariant !== undefined && { variant: abVariant }),
 			...(hasPlayedToday && { hasPlayedToday: true }),
 			...(firstScreenData !== undefined && { firstScreen: firstScreenData }),
@@ -1040,7 +1305,155 @@ gameRouter.get('/api/game/state', async (c) => {
 	}
 })
 
+// ─── POST /api/game/mod-solution ────────────────────────────────────────────
+
+const getModeratorSolution = async (c: Context): Promise<Response> => {
+	const { postId, userId } = context
+	if (!postId || !userId) {
+		return c.json({ status: 'error', message: 'Missing game context' }, HTTP_STATUS_BAD_REQUEST)
+	}
+
+	try {
+		const puzzle = await getCurrentPuzzle(postId, userId)
+		if (!puzzle) {
+			return c.json({ status: 'error', message: 'Puzzle not found' }, HTTP_STATUS_NOT_FOUND)
+		}
+
+		return c.json({
+			status: 'success',
+			data: { solution: puzzle.solution },
+		})
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to load puzzle solution'
+		return c.json({ status: 'error', message }, HTTP_STATUS_INTERNAL_ERROR)
+	}
+}
+
+gameRouter.post('/api/game/mod-solution', requireModerator(), getModeratorSolution)
+
+// ─── POST /api/game/timer-start ──────────────────────────────────────────────
+
+gameRouter.post('/api/game/timer-start', async (c) => {
+	const { postId, userId } = context
+	if (!postId) return c.json({ error: 'Missing context' }, 400)
+
+	try {
+		if (!userId) {
+			const measurement = parseMeasurementHeaders(c.req.raw.headers)
+			if (
+				measurement.sessionId === null ||
+				measurement.contentId === null ||
+				measurement.attemptId === null
+			) {
+				return c.json({ error: 'Anonymous attempt headers are required' }, 400)
+			}
+			const result = await startAnonymousPuzzleTimer({
+				sessionId: measurement.sessionId,
+				postId,
+				contentId: measurement.contentId,
+				attemptId: measurement.attemptId,
+			})
+			if (result.status === 'started') return c.json({ started: true })
+			if (result.status === 'already-started') return c.json({ started: false })
+			return c.json({ error: 'Anonymous puzzle attempt is unavailable' }, 409)
+		}
+
+		const puzzle = await getCurrentPuzzle(postId, userId)
+		if (!puzzle) return c.json({ error: 'Game not found' }, 404)
+
+		const key = puzzleFirstCellTimeKey(userId, postId, puzzle.instanceId)
+		const existing = await redis.get(key)
+		if (existing !== undefined) return c.json({ started: false })
+
+		await registerUserDynamicKey(userId, key)
+		await redis.set(key, Date.now().toString())
+		await redis.expire(key, 86400)
+		return c.json({ started: true })
+	} catch (error) {
+		console.error('Error starting puzzle timer:', error)
+		return c.json({ error: 'Failed to start puzzle timer' }, 500)
+	}
+})
+
 // ─── POST /api/game/grid-size ─────────────────────────────────────────────────
+
+gameRouter.post('/api/game/onboarding-choice', async (c) => {
+	const { postId, userId } = context
+	if (!postId || !userId) return c.json({ error: 'Missing context' }, 400)
+
+	const body = await c.req.json<{ choice?: unknown }>().catch(() => null)
+	const choice = body?.choice
+	if (choice !== 'warmup' && choice !== 'advertised') {
+		return c.json({ error: 'choice must be warmup or advertised' }, 400)
+	}
+
+	try {
+		const [postPuzzle, economy] = await Promise.all([
+			redis.hGetAll(`game:${postId}:puzzle`),
+			getUserEconomy(userId),
+		])
+		const advertisedGridSize = getLockedGridSize(postPuzzle)
+		if (
+			advertisedGridSize === undefined ||
+			advertisedGridSize === 4 ||
+			Boolean(postPuzzle.challengeBy) ||
+			!postPuzzle.colors
+		) {
+			return c.json({ error: 'Warm-up choice is unavailable for this post' }, 409)
+		}
+		if (economy.totalSolves > 0) {
+			return c.json({ error: 'Warm-up choice is only for first-time players' }, 409)
+		}
+
+		const advertisedPuzzle: SerializedPuzzle = {
+			colors: postPuzzle.colors,
+			numbers: postPuzzle.numbers ?? '',
+			solution: postPuzzle.solution ?? '',
+			difficulty: (postPuzzle.difficulty ?? 'easy') as SerializedPuzzle['difficulty'],
+			gridSize: advertisedGridSize,
+		}
+		const selectedPuzzle = choice === 'warmup'
+			? generatePuzzleForGridLevel(4, MIN_SKILL_LEVEL)
+			: advertisedPuzzle
+		const issuedPuzzle = await persistIssuedPuzzle(postId, userId, selectedPuzzle, 'manual')
+
+		const returnKey = `user:${userId}:game:${postId}:warmupReturnGrid`
+		if (choice === 'warmup') {
+			await registerUserDynamicKey(userId, returnKey)
+			await redis.set(returnKey, advertisedGridSize.toString())
+			await redis.expire(returnKey, 86400)
+		} else {
+			await redis.del(returnKey)
+		}
+
+		const onboardingClaimKey = onboardingChoiceKey(userId, postId)
+		await registerUserDynamicKey(userId, onboardingClaimKey)
+		const analyticsClaim = await redis.set(
+			onboardingClaimKey,
+			choice,
+			{ nx: true },
+		)
+		if (analyticsClaim) {
+			await redis.hIncrBy(
+				`analytics:${getTodayUTC()}:onboarding_choices`,
+				`${advertisedGridSize}:${choice}`,
+				1,
+			)
+		}
+
+		const response: OnboardingChoiceResponse = {
+			choice,
+			puzzle: toPublicPuzzle(selectedPuzzle),
+			contentId: createContentId(postId, issuedPuzzle.instanceId),
+			skillLevel: await getGridSkillLevel(userId, selectedPuzzle.gridSize as GridSize),
+			advertisedGridSize,
+		}
+		return c.json(response)
+	} catch (error) {
+		console.error('Error applying onboarding choice:', error)
+		return c.json({ error: 'Failed to apply onboarding choice' }, 500)
+	}
+})
 
 gameRouter.post('/api/game/grid-size', async (c) => {
 	const { postId, userId } = context
@@ -1071,8 +1484,11 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 		// preference or a per-user puzzle override (nothing to key on).
 		if (!userId) {
 			const newPuzzle = generatePuzzleForGridLevel(gridSize, MIN_SKILL_LEVEL)
+			const contentId = createContentId(postId, makeInstanceId())
+			await persistAnonymousPuzzleForRequest(c, postId, contentId, newPuzzle, postPuzzle)
 			const response: GridSizeResponse = {
-				puzzle: newPuzzle,
+				puzzle: toPublicPuzzle(newPuzzle),
+				contentId,
 				skillLevel: MIN_SKILL_LEVEL,
 				gridSizePreference: gridSize,
 			}
@@ -1090,17 +1506,19 @@ gameRouter.post('/api/game/grid-size', async (c) => {
 		const newPuzzle = generatePuzzleForGridLevel(gridSize, skillLevel)
 
 		// Store puzzle for this user/post
+		const issuedPuzzle = await persistIssuedPuzzle(postId, userId, newPuzzle, 'manual')
 		if (postId) {
-			await persistIssuedPuzzle(postId, userId, newPuzzle, 'manual')
 			// Reset the server-side timer anchor so this freshly issued puzzle
 			// is timed from now, not from a stale earlier issuance.
 			const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+			await registerUserDynamicKey(userId, startTimeKey)
 			await redis.set(startTimeKey, Date.now().toString())
 			await redis.expire(startTimeKey, 86400)
 		}
 
 		const response: GridSizeResponse = {
-			puzzle: newPuzzle,
+			puzzle: toPublicPuzzle(newPuzzle),
+			contentId: createContentId(postId, issuedPuzzle.instanceId),
 			skillLevel,
 			gridSizePreference: gridSize,
 		}
@@ -1128,7 +1546,8 @@ gameRouter.post('/api/game/first-action', async (c) => {
 				: undefined,
 		)
 		const today = getTodayUTC()
-		const isNew = await trackFirstAction(today, postId, userId, subredditId, source)
+			const isNew = await trackFirstAction(today, postId, userId, subredditId, source)
+			if (isNew) await recordScheduledSlotEvent(today, postId, 'firstActions')
 		// Track per-variant first-action (fire-and-forget, only on first action).
 		if (isNew) {
 			const variant = assignVariant(userId)
@@ -1142,6 +1561,19 @@ gameRouter.post('/api/game/first-action', async (c) => {
 			if (sessionId !== null) {
 				await markFirstTapAndCommit(sessionId, today, userId, subredditId)
 			}
+			const measurement = parseMeasurementHeaders(c.req.raw.headers)
+			if (
+				measurement.sessionId !== null &&
+				measurement.contentId !== null &&
+				measurement.attemptId !== null
+			) {
+				await tryConvertS2RFirstAction({
+					sessionId: measurement.sessionId,
+					postId,
+					contentId: measurement.contentId,
+					attemptId: measurement.attemptId,
+				})
+			}
 		} catch (err) {
 			console.error('[DQP] First-tap commit failed (non-critical):', err)
 		}
@@ -1149,25 +1581,6 @@ gameRouter.post('/api/game/first-action', async (c) => {
 		return c.json({ tracked: isNew })
 	} catch (error) {
 		console.error('[Analytics] First action tracking failed:', error)
-		return c.json({ tracked: false })
-	}
-})
-
-// ─── POST /api/game/first-screen-tap ─────────────────────────────────────────
-// Fired when a user taps "Play" / "Beat Xs" on a Variant A or B first screen.
-// Fire-and-forget from the client; logged-out users are silently ignored.
-
-gameRouter.post('/api/game/first-screen-tap', async (c) => {
-	const { userId } = context
-	if (!userId) return c.json({ tracked: false })
-
-	try {
-		const today = getTodayUTC()
-		const variant = assignVariant(userId)
-		await trackVariantScreenTap(today, variant)
-		return c.json({ tracked: true })
-	} catch (err) {
-		console.error('[AB] First-screen tap tracking failed:', err)
 		return c.json({ tracked: false })
 	}
 })
@@ -1214,33 +1627,55 @@ gameRouter.post('/api/game/complete', async (c) => {
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
 
 	// ─── Logged-out path ─────────────────────────────────────────────────
-	// Logged-out users get a completion result (so the "nice time" screen +
-	// login CTA can show) but nothing is persisted — there is no user to
-	// key streak/coins/season on. Time is taken from the client since we
-	// can't store a server-side start time without a userId.
+	// Logged-out users get a verified result and a short-lived opaque receipt.
+	// Nothing account-scoped is credited until the same receipt is claimed
+	// after sign-in; browser-provided time and mistake counts are ignored.
 	if (!userId) {
 		try {
 			const body = await c.req.json().catch(() => null)
-			const clientTime = body && typeof body === 'object' ? (body as CompleteRequest).timeTaken : undefined
-			if (typeof clientTime !== 'number' || clientTime <= 0) {
-				return c.json({ error: 'Invalid timeTaken' }, 400)
+			if (body === null || typeof body !== 'object') {
+				return c.json({ error: 'Invalid request body' }, 400)
 			}
-			const mistakes = body && typeof (body as CompleteRequest).mistakes === 'number'
-				? (body as CompleteRequest).mistakes ?? 0
-				: 0
-
-			const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
-			const rawGridSize = postPuzzle?.gridSize ? parseInt(postPuzzle.gridSize, 10) : 4
-			const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
-
-			return c.json(
-				buildLoggedOutCompleteResponse({
+			const measurement = parseMeasurementHeaders(c.req.raw.headers)
+			if (
+				measurement.sessionId === null ||
+				measurement.contentId === null ||
+				measurement.attemptId === null
+			) {
+				const clientTime = (body as Record<string, unknown>).timeTaken
+				if (typeof clientTime !== 'number' || clientTime <= 0) {
+					return c.json({ error: 'Invalid timeTaken' }, 400)
+				}
+				return c.json(buildLoggedOutCompleteResponse({
 					timeTaken: clientTime,
-					mistakes,
-					gridSize,
+					mistakes: 0,
+					gridSize: 4,
+					weekendEvent: getActiveWeekendEvent(new Date()),
+				}))
+			}
+			const verification = await verifyAnonymousPuzzleCompletion({
+				sessionId: measurement.sessionId,
+				postId,
+				contentId: measurement.contentId,
+				attemptId: measurement.attemptId,
+				board: (body as Record<string, unknown>).board,
+			})
+			if (verification.status === 'invalid-solution') {
+				return c.json({ error: 'Solution does not match the puzzle' }, 400)
+			}
+			if (verification.status !== 'verified') {
+				return c.json({ error: 'Anonymous puzzle attempt is unavailable' }, 409)
+			}
+
+			return c.json({
+				...buildLoggedOutCompleteResponse({
+					timeTaken: verification.timeTaken,
+					mistakes: 0,
+					gridSize: verification.gridSize,
 					weekendEvent: getActiveWeekendEvent(new Date()),
 				}),
-			)
+				migrationToken: verification.migrationToken,
+			})
 		} catch (error) {
 			console.error('Error completing logged-out game:', error)
 			return c.json({ error: 'Failed to record completion' }, 500)
@@ -1249,22 +1684,26 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 	try {
 		const body: CompleteRequest = await c.req.json()
-		const { mistakes = 0 } = body
+		const verifiedMistakes = 0
 
-		// Run-again loop: client tells us how many puzzles the player has
-		// solved in this session (including this one). We clamp + sanitize on
-		// the server so a malicious client can't claim a 9999× multiplier.
-		const rawSessionRun = typeof body.sessionRun === 'number' ? body.sessionRun : 0
-		const sessionRun = Math.max(0, Math.min(Math.floor(rawSessionRun), 50))
+		const puzzle = await getCurrentPuzzle(postId, userId)
 
-		// Server-side time tracking (security fix)
+		// Prefer the first-cell anchor used by the visible timer. The issuance
+		// anchor remains a safe fallback if the non-critical start request failed.
 		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
-		const startTimeStr = await redis.get(startTimeKey)
+		const firstCellTimeKey = puzzle
+			? puzzleFirstCellTimeKey(userId, postId, puzzle.instanceId)
+			: undefined
+		const [firstCellTimeStr, startTimeStr] = await Promise.all([
+			firstCellTimeKey ? redis.get(firstCellTimeKey) : Promise.resolve(undefined),
+			redis.get(startTimeKey),
+		])
 		let timeTaken: number
 
-		if (startTimeStr) {
-			timeTaken = Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000)
-			await redis.del(startTimeKey)
+		if (firstCellTimeStr) {
+			timeTaken = Math.max(1, Math.ceil((Date.now() - parseInt(firstCellTimeStr, 10)) / 1000))
+		} else if (startTimeStr) {
+			timeTaken = Math.max(1, Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000))
 		} else {
 			const clientTime = body.timeTaken
 			if (typeof clientTime !== 'number' || clientTime <= 0) {
@@ -1272,13 +1711,11 @@ gameRouter.post('/api/game/complete', async (c) => {
 			}
 			timeTaken = clientTime
 		}
-
 		if (timeTaken <= 0) {
 			return c.json({ error: 'Invalid timeTaken' }, 400)
 		}
 
 		// Read grid size from the completed puzzle
-		const puzzle = await getCurrentPuzzle(postId, userId)
 		const rawGridSize = puzzle ? parseInt(puzzle.gridSize, 10) : 4
 		const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
 
@@ -1294,31 +1731,51 @@ gameRouter.post('/api/game/complete', async (c) => {
 			console.warn(`[Complete] board verification failed for ${userId} on ${postId}; denying reward`)
 			return c.json({ error: 'Solution does not match the puzzle' }, 400)
 		}
+		await Promise.all([
+			redis.del(startTimeKey),
+			...(firstCellTimeKey ? [redis.del(firstCellTimeKey)] : []),
+		])
 
 		// ─── Idempotency: credit each issued puzzle at most once ──────────────
 		// Keyed on the puzzle instance (not just the post) so a "run again"
 		// puzzle is credited again, but replaying the same solved board — the
 		// trivial coin/season farm — is rejected.
 		const completionKey = `user:${userId}:solved:${postId}:${puzzle.instanceId}`
-		const alreadyCompleted = await redis.get(completionKey)
-		if (alreadyCompleted !== undefined) {
+		await registerUserDynamicKey(userId, completionKey)
+		const completionClaimed = await redis.set(completionKey, '1', {
+			nx: true,
+			expiration: new Date(Date.now() + 2592000000),
+		})
+		if (!completionClaimed) {
 			return c.json({ error: 'Puzzle already completed' }, 409)
 		}
-		await redis.set(completionKey, '1')
-		await redis.expire(completionKey, 2592000) // 30-day TTL
 
-		const currentLevel = await getGridSkillLevel(userId, gridSize)
-		const history = await getGridHistory(userId, gridSize)
-		const pathLevel = await incrementPathLevel(userId)
-		const adaptiveHistory = await getAdaptiveHistory(userId)
+		const sessionId = getSessionIdFromHeader(c.req.raw.headers)
+		const [
+			sessionRun,
+			currentLevel,
+			history,
+			pathLevel,
+			adaptiveHistory,
+			puzzleMeta,
+			preCompletionEconomy,
+		] = await Promise.all([
+			incrementVerifiedSessionRun(userId, sessionId),
+			getGridSkillLevel(userId, gridSize),
+			getGridHistory(userId, gridSize),
+			puzzle.source === 'challenge' ? getPathLevel(userId) : incrementPathLevel(userId),
+			getAdaptiveHistory(userId),
+			redis.hGetAll(`game:${postId}:puzzle`),
+			getUserEconomy(userId),
+		])
 
-		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel, mistakes, gridSize)
+		const performanceScore = calculatePerformanceScore(timeTaken, currentLevel, verifiedMistakes, gridSize)
 
 		const record: GameRecord = {
 			level: currentLevel,
 			timeTaken,
 			timestamp: Date.now(),
-			mistakes,
+			mistakes: verifiedMistakes,
 			gridSize,
 			source: puzzle.source,
 		}
@@ -1326,12 +1783,27 @@ gameRouter.post('/api/game/complete', async (c) => {
 		const newSkillLevel = determineSkillLevel(currentLevel, updatedHistory)
 		const updatedAdaptiveHistory = addAdaptiveHistoryRecord(
 			adaptiveHistory,
-			buildAdaptiveRecord(gridSize, currentLevel, timeTaken, mistakes, false, puzzle.source),
+			buildAdaptiveRecord(gridSize, currentLevel, timeTaken, verifiedMistakes, false, puzzle.source),
 		)
-		const streak = await updateStreak(userId)
-		const preCompletionEconomy = await getUserEconomy(userId)
+		const completionDate = getTodayUTC()
+		const streakEligible = isCurrentScheduledCompletion({
+			scheduledDate: puzzleMeta?.scheduledDate,
+			scheduledSlotKey: puzzleMeta?.scheduledSlotKey,
+			completionDate,
+			today: completionDate,
+		})
+		const streak = streakEligible
+			? await updateStreak(userId)
+			: await getStreakData(userId)
 
-		const coinReward = await applyCoinReward({ userId, timeTaken, currentLevel, streak, mistakes, gridSize })
+		const coinReward = await applyCoinReward({
+			userId,
+			timeTaken,
+			currentLevel,
+			streak,
+			mistakes: verifiedMistakes,
+			gridSize,
+		})
 
 		// ─── Run-again loop: session-streak coin bonus ─────────────────────
 		// On top of the standard reward, a player who keeps playing within a
@@ -1359,38 +1831,47 @@ gameRouter.post('/api/game/complete', async (c) => {
 			])
 		}
 
-		const today = getTodayUTC()
+		const today = completionDate
+		const speedLeaderboardKey = `leaderboard:speed:${today}:${gridSize}`
+		await Promise.all([
+			registerUserSortedSetMembership(userId, 'leaderboard:streak'),
+			registerUserSortedSetMembership(userId, speedLeaderboardKey),
+		])
 		await Promise.all([
 			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
-			redis.zAdd(`leaderboard:speed:${today}:${gridSize}`, { score: timeTaken, member: userId }),
-			redis.expire(`leaderboard:speed:${today}:${gridSize}`, 2592000), // 30-day TTL
+			redis.zAdd(speedLeaderboardKey, { score: timeTaken, member: userId }),
+			redis.expire(speedLeaderboardKey, 2592000), // 30-day TTL
 		])
 
 		// Update per-grid skill level and history
-		await setGridSkillLevel(userId, gridSize, newSkillLevel)
-		await setGridHistory(
-			userId,
-			gridSize,
-			newSkillLevel !== currentLevel ? [] : updatedHistory
-		)
-		await setAdaptiveHistory(userId, updatedAdaptiveHistory)
-		await redis.set(`user:${userId}:consecutiveSkips:${gridSize}`, '0')
+		await Promise.all([
+			setGridSkillLevel(userId, gridSize, newSkillLevel),
+			setGridHistory(
+				userId,
+				gridSize,
+				newSkillLevel !== currentLevel ? [] : updatedHistory,
+			),
+			setAdaptiveHistory(userId, updatedAdaptiveHistory),
+			redis.set(`user:${userId}:consecutiveSkips:${gridSize}`, '0'),
+		])
 
 		// Track attempts on challenge posts (once per user)
-		const puzzleMeta = await redis.hGetAll(`game:${postId}:puzzle`)
 		const isChallengePost = Boolean(puzzleMeta?.challengeBy)
 		if (isChallengePost) {
 			const attemptedKey = `challenge:${postId}:attempted:${userId}`
 			const alreadyAttempted = await redis.get(attemptedKey)
 			if (!alreadyAttempted) {
 				await redis.hIncrBy(`game:${postId}:stats`, 'attempts', 1)
+				await registerUserDynamicKey(userId, attemptedKey)
 				await redis.set(attemptedKey, 'true')
 				await redis.expire(attemptedKey, 2592000) // 30-day TTL
 			}
 		}
 
-		// Check if this is a challenge post and if the player beat the challenge
-		await checkChallengeBeat(postId, userId, timeTaken)
+		const challengeScore = safeParseInt(puzzleMeta?.challengeScore, 0)
+		if (isChallengePost && challengeScore > 0 && timeTaken < challengeScore) {
+			await checkChallengeBeat(postId, userId, timeTaken)
+		}
 
 		// ─── Engagement Logic ──────────────────────────────────────────────────
 		let engagement: EngagementCompletionData | undefined
@@ -1437,8 +1918,10 @@ gameRouter.post('/api/game/complete', async (c) => {
 			// Increment the weekly completion count for community highlights.
 			// Must use zIncrBy (not zAdd, which would overwrite the score to 1
 			// every solve, making "Player of the Week" meaningless).
-			await redis.zIncrBy(`leaderboard:weekly:${isoWeek}`, userId, 1)
-			await redis.expire(`leaderboard:weekly:${isoWeek}`, 1209600) // 14-day TTL
+			const weeklyLeaderboardKey = `leaderboard:weekly:${isoWeek}`
+			await registerUserSortedSetMembership(userId, weeklyLeaderboardKey)
+			await redis.zIncrBy(weeklyLeaderboardKey, userId, 1)
+			await redis.expire(weeklyLeaderboardKey, 1209600) // 14-day TTL
 
 			// Check for newly unlocked achievements
 			const updatedEconomy = await getUserEconomy(userId)
@@ -1456,17 +1939,13 @@ gameRouter.post('/api/game/complete', async (c) => {
 				challengesCreated: socialStats.challengesCreated,
 				challengeBeats: socialStats.challengeBeats,
 			}
-			const newAchievements = checkAchievements(userStats, unlockedIds.map((u) => u.id))
+			const previouslyUnlockedIds = unlockedIds.map((unlock) => unlock.id)
+			const streakMilestone = streakEligible
+				? checkStreakMilestone(streak.currentStreak, previouslyUnlockedIds)
+				: null
+			const newAchievements = checkAchievements(userStats, previouslyUnlockedIds)
 			if (newAchievements.length > 0) {
 				await unlockAchievements(userId, newAchievements)
-			}
-
-			// Check streak milestones
-			const allUnlockedIds = [...unlockedIds.map((u) => u.id), ...newAchievements.map((a) => a.id)]
-			const streakMilestone = checkStreakMilestone(streak.currentStreak, allUnlockedIds)
-			if (streakMilestone !== null) {
-				await redis.hIncrBy(`user:${userId}:economy`, 'coins', streakMilestone.bonus)
-				await redis.hIncrBy(`user:${userId}:economy`, 'totalCoins', streakMilestone.bonus)
 			}
 
 			// Check referral eligibility for challenge posts
@@ -1487,89 +1966,55 @@ gameRouter.post('/api/game/complete', async (c) => {
 			console.error('Engagement logic error (non-critical):', engagementErr)
 		}
 
-		// ─── Analytics: track completion (non-blocking) ────────────────────────
 		try {
-			const { subredditId } = context
-			const today = getTodayUTC()
-			const completionIsNew = await trackCompletion(today, postId, userId, subredditId)
+			const completionIsNew = await trackCompletion(completionDate, postId, userId, context.subredditId)
 			if (completionIsNew) {
-				const variant = assignVariant(userId)
-				void trackVariantCompletion(today, variant).catch((err) =>
+				await recordScheduledSlotEvent(completionDate, postId, 'completions')
+				void trackVariantCompletion(completionDate, assignVariant(userId)).catch((err) =>
 					console.error('[AB] variant completion tracking failed:', err),
 				)
 			}
 			if (isChallengePost) {
-				await trackChallengeCompletion(today, postId, userId, preCompletionEconomy.totalSolves === 0)
+				await trackChallengeCompletion(completionDate, postId, userId, preCompletionEconomy.totalSolves === 0)
 			}
 		} catch (err) {
 			console.error('[Analytics] Completion tracking failed (non-critical):', err)
 		}
 
-		// ─── S2R: mark this completion as eligible for "started puzzle 2" ────
-		// Eligibility expires in 60s server-side. The next /api/game/state
-		// call from the same session within that window converts the
-		// eligibility into a "puzzle 2 started" event.
+		// ─── Daily preview update for every verified puzzle completion ───────────
 		try {
-			const today = getTodayUTC()
-			const sessionId = getSessionIdFromHeader(c.req.raw.headers)
-			const difficulty = isDifficulty(puzzle?.difficulty) ? puzzle.difficulty : 'easy'
-			await markS2REligible(sessionId, today, currentLevel, difficulty, userId, postId)
-		} catch (err) {
-			console.error('[S2R] markS2REligible failed (non-critical):', err)
-		}
-
-		// ─── Viral tracking: record completer + cycle time + conversion (non-blocking) ─
-		try {
-			const today = getTodayUTC()
-			await recordCompleter(today, userId)
-
-			// For new players on challenge posts, compute and record cycle time
-			if (isChallengePost && preCompletionEconomy.totalSolves === 0) {
-				const creationTs = await getChallengeCreationTimestamp(postId)
-				if (creationTs !== null) {
-					const elapsedSeconds = (Date.now() - creationTs) / 1000
-					await recordCycleTime(today, elapsedSeconds)
-				}
-			}
-
-			// Record channel conversion only for the attributed user's first completion.
-			if (preCompletionEconomy.totalSolves === 0) {
-				const attribution = await getAttribution(userId)
-				if (attribution !== null) {
-					await recordChannelConversion(today, attribution, userId)
-				}
-			}
-		} catch (err) {
-			console.error('[Viral] Completion tracking failed (non-critical):', err)
-		}
-
-		// ─── Daily preview update on first completion (deduped, non-blocking) ──
-		try {
-			const previewMeta = await redis.hGetAll(`game:${postId}:preview`)
+			const previewKey = `game:${postId}:preview`
+			const previewMeta = await redis.hGetAll(previewKey)
 			if (previewMeta?.type === 'daily') {
-				const dedupKey = `preview:updated:${postId}`
-				const alreadyUpdated = await redis.get(dedupKey)
-				if (alreadyUpdated === undefined) {
-					// Two-step write: see checkChallengeBeat previewDedupKey for rationale.
-					await redis.set(dedupKey, '1')
-					await redis.expire(dedupKey, 86400) // 24h TTL
-
-					const existingData = previewMeta.data
-					if (existingData) {
-						const parsed = JSON.parse(existingData) as { puzzleNumber: number; gridSize: number }
-						const updatedPreviewData = {
-							puzzleNumber: parsed.puzzleNumber,
-							gridSize: parsed.gridSize,
-							completionsToday: 1,
-							activeNow: 0,
-							fastestTime: timeTaken,
-							fastestUsername: null,
-						}
-						await redis.hSet(`game:${postId}:preview`, {
-							type: 'daily',
-							data: JSON.stringify(updatedPreviewData),
-						})
+				const existingData = previewMeta.data
+				if (existingData) {
+					const parsed = JSON.parse(existingData) as {
+						puzzleNumber: number
+						gridSize: number
+						completionsToday?: number
+						activeNow?: number
+						fastestTime?: number | null
+						fastestUsername?: string | null
 					}
+					await redis.hSetNX(
+						previewKey,
+						'verifiedCompletions',
+						(parsed.completionsToday ?? 0).toString(),
+					)
+					const completionsToday = await redis.hIncrBy(previewKey, 'verifiedCompletions', 1)
+					const hasNewFastest = parsed.fastestTime == null || timeTaken < parsed.fastestTime
+					const updatedPreviewData = {
+						puzzleNumber: parsed.puzzleNumber,
+						gridSize: parsed.gridSize,
+						completionsToday,
+						activeNow: parsed.activeNow ?? 0,
+						fastestTime: hasNewFastest ? timeTaken : parsed.fastestTime,
+						fastestUsername: hasNewFastest ? null : (parsed.fastestUsername ?? null),
+					}
+					await redis.hSet(previewKey, {
+						type: 'daily',
+						data: JSON.stringify(updatedPreviewData),
+					})
 				}
 			}
 		} catch (previewErr) {
@@ -1585,9 +2030,16 @@ gameRouter.post('/api/game/complete', async (c) => {
 				// Daily_Solve_Index: 1-based count of season-counted solves today.
 				// incrBy returns the post-increment value, so the first solve gets 1.
 				const seasonSolvesKey = `user:${userId}:seasonSolves:${getTodayUTC()}`
+				await registerUserDynamicKey(userId, seasonSolvesKey)
 				const dailySolveIndex = await redis.incrBy(seasonSolvesKey, 1)
 				await redis.expire(seasonSolvesKey, 172800)
-				const score = calculateSeasonScore(timeTaken, gridSize, currentLevel, mistakes, dailySolveIndex)
+				const score = calculateSeasonScore(
+					timeTaken,
+					gridSize,
+					currentLevel,
+					verifiedMistakes,
+					dailySolveIndex,
+				)
 				await recordSeasonScore(season.seasonId, userId, score)
 
 				// Read back the player's updated score and rank
@@ -1608,10 +2060,65 @@ gameRouter.post('/api/game/complete', async (c) => {
 		// manual action — never automatic. So completion only flags eligibility;
 		// the challenge post is created by /api/game/challenge when the player
 		// taps "Challenge friends" (which posts as the user, with confirmation).
+		let completionId: string | undefined
+		try {
+			const rawPuzzleNumber = puzzleMeta.puzzleNumber
+				?? await redis.get('stats:puzzleCounter')
+			const snapshotPuzzleNumber = Math.max(1, safeParseInt(rawPuzzleNumber, 1))
+			const colorGrid = Array.from({ length: gridSize }, (_, row) =>
+				puzzle.solution
+					.slice(row * gridSize, (row + 1) * gridSize)
+					.split('')
+					.map((color) => color === 'r' ? 'red' as const : 'blue' as const),
+			)
+			const snapshot = await createCompletionSnapshot({
+				userId,
+				sourcePostId: postId,
+				puzzleInstanceId: puzzle.instanceId,
+				puzzleNumber: snapshotPuzzleNumber,
+				gridSize,
+				skillLevel: currentLevel,
+				timeTaken,
+				streak: streak.currentStreak,
+				colorGrid,
+			})
+			completionId = snapshot.completionId
+			await recordVerifiedUrjoBlitzCompletion({
+				userId,
+				completionId,
+				gridSize,
+			}).catch((blitzError) => {
+				console.error('[Urjo Blitz] Completion recording failed (non-critical):', blitzError)
+			})
+		} catch (snapshotError) {
+			console.error('[Completion] Snapshot creation failed (non-critical):', snapshotError)
+		}
+
 		const challengePromptEligible =
-			mistakes === 0 && !isChallengePost && Boolean(context.subredditName)
+			completionId !== undefined && !isChallengePost && Boolean(context.subredditName)
+		const measurement = parseMeasurementHeaders(c.req.raw.headers)
+
+		try {
+			await enqueueCompletionFollowup({
+				userId,
+				postId,
+				timeTaken,
+				currentLevel,
+				difficulty: isDifficulty(puzzle.difficulty) ? puzzle.difficulty : 'easy',
+				puzzleInstanceId: puzzle.instanceId,
+				isChallengePost,
+				preCompletionTotalSolves: preCompletionEconomy.totalSolves,
+				sessionId: measurement.sessionId,
+				contentId: measurement.contentId,
+				attemptId: measurement.attemptId,
+			})
+		} catch (followupError) {
+			console.error('[Completion follow-up] failed to enqueue:', followupError)
+		}
 
 		const response: CompleteResponse = {
+			...(completionId !== undefined && { completionId }),
+			timeTaken,
 			performanceScore,
 			newSkillLevel,
 			previousSkillLevel: currentLevel,
@@ -1646,16 +2153,7 @@ gameRouter.post('/api/game/complete', async (c) => {
 
 // ─── POST /api/game/migrate-logged-out-score ─────────────────────────────────
 
-/**
- * Credit a returning (newly logged-in) user for a puzzle they solved while
- * logged out. The client replays the score it stashed in localStorage before
- * the login reload. We apply the same streak + coin + season crediting as a
- * normal completion, but skip all viral side effects (the
- * solve already happened, off-platform).
- *
- * Idempotent: a per-user/post key guards against double-crediting if the
- * client retries or replays the stored score more than once.
- */
+/** Credit a server-verified logged-out solve after sign-in. */
 gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 	const { postId, userId } = context
 
@@ -1668,54 +2166,57 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 			return c.json({ error: 'Invalid request body' }, 400)
 		}
 
-		const { timeTaken, mistakes: rawMistakes, board } = body as Record<string, unknown>
-		if (typeof timeTaken !== 'number' || timeTaken <= 0) {
-			return c.json({ error: 'Invalid timeTaken' }, 400)
+		const migrationToken = (body as Record<string, unknown>).migrationToken
+		if (typeof migrationToken !== 'string') {
+			return c.json({ error: 'A migration receipt is required' }, 400)
 		}
-		const mistakes = typeof rawMistakes === 'number' && rawMistakes >= 0 ? rawMistakes : 0
-
-		// ─── Anti-cheat: verify the replayed board before crediting ───────────
-		// A logged-out player always solves the post's baked puzzle (logged-out
-		// /state and /complete both serve game:{postId}:puzzle), so verify the
-		// replayed board against THAT — not getCurrentPuzzle, which for a
-		// returning user can be a regenerated per-user puzzle with a different
-		// solution (that mismatch would silently 400 every legitimate migrate).
-		// Done BEFORE the idempotency guard so a rejected replay doesn't burn
-		// the one-shot key.
-		const postPuzzle = await redis.hGetAll(`game:${postId}:puzzle`)
-		if (!isBoardSolved(board, postPuzzle?.solution ?? '')) {
-			console.warn(`[Migrate] board verification failed for ${userId} on ${postId}; skipping credit`)
-			return c.json({ error: 'Solution does not match the puzzle' }, 400)
+		const claim = await claimAnonymousMigration(migrationToken, userId, postId)
+		if (claim.status === 'unavailable') {
+			return c.json({ error: 'Migration receipt is invalid or expired' }, 400)
+		}
+		if (claim.status === 'pending') {
+			return c.json({ error: 'Migration is already in progress' }, 409)
+		}
+		if (claim.status === 'finalized') {
+			return c.json({ migrated: false, credited: claim.credited })
 		}
 
-		// Idempotency guard — credit a given post's logged-out score once.
-		const migratedKey = `user:${userId}:loggedOutMigrated:${postId}`
-		const alreadyMigrated = await redis.get(migratedKey)
-		if (alreadyMigrated === 'true') {
-			return c.json({ migrated: false })
+		const { receipt } = claim
+		const today = getTodayUTC()
+		const isEligible = isCurrentScheduledCompletion({
+			scheduledDate: receipt.scheduledDate,
+			scheduledSlotKey: receipt.scheduledSlotKey,
+			completionDate: receipt.completionDate,
+			today,
+		})
+		if (!isEligible) {
+			await finalizeAnonymousMigration(migrationToken, userId, false)
+			return c.json({ migrated: true, credited: false })
 		}
-		await redis.set(migratedKey, 'true')
-		await redis.expire(migratedKey, 2592000) // 30-day TTL
 
-		const rawGridSize = postPuzzle.gridSize ? parseInt(postPuzzle.gridSize, 10) : 4
-		const gridSize: GridSize = isValidGridSize(rawGridSize) ? rawGridSize : 4
-
-		const currentLevel = await getGridSkillLevel(userId, gridSize)
+		const currentLevel = await getGridSkillLevel(userId, receipt.gridSize)
 		const streak = await updateStreak(userId)
 		const coinReward = await applyCoinReward({
 			userId,
-			timeTaken,
+			timeTaken: receipt.timeTaken,
 			currentLevel,
 			streak,
-			mistakes,
-			gridSize,
+			mistakes: 0,
+			gridSize: receipt.gridSize,
 		})
 
-		const today = getTodayUTC()
+		const speedLeaderboardKey = `leaderboard:speed:${today}:${receipt.gridSize}`
+		await Promise.all([
+			registerUserSortedSetMembership(userId, 'leaderboard:streak'),
+			registerUserSortedSetMembership(userId, speedLeaderboardKey),
+		])
 		await Promise.all([
 			redis.zAdd('leaderboard:streak', { score: streak.currentStreak, member: userId }),
-			redis.zAdd(`leaderboard:speed:${today}:${gridSize}`, { score: timeTaken, member: userId }),
-			redis.expire(`leaderboard:speed:${today}:${gridSize}`, 2592000),
+			redis.zAdd(speedLeaderboardKey, {
+				score: receipt.timeTaken,
+				member: userId,
+			}),
+			redis.expire(speedLeaderboardKey, 2592000),
 		])
 
 		// Season scoring (non-blocking)
@@ -1726,10 +2227,17 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 			if (season.isActive) {
 				// Daily_Solve_Index: 1-based count of season-counted solves today.
 				// incrBy returns the post-increment value, so the first solve gets 1.
-				const seasonSolvesKey = `user:${userId}:seasonSolves:${getTodayUTC()}`
+				const seasonSolvesKey = `user:${userId}:seasonSolves:${today}`
+				await registerUserDynamicKey(userId, seasonSolvesKey)
 				const dailySolveIndex = await redis.incrBy(seasonSolvesKey, 1)
 				await redis.expire(seasonSolvesKey, 172800)
-				const score = calculateSeasonScore(timeTaken, gridSize, currentLevel, mistakes, dailySolveIndex)
+				const score = calculateSeasonScore(
+					receipt.timeTaken,
+					receipt.gridSize,
+					currentLevel,
+					0,
+					dailySolveIndex,
+				)
 				await recordSeasonScore(season.seasonId, userId, score)
 				const leaderboardKey = `season:${season.seasonId}:leaderboard`
 				const playerScore = await redis.zScore(leaderboardKey, userId)
@@ -1741,9 +2249,11 @@ gameRouter.post('/api/game/migrate-logged-out-score', async (c) => {
 		} catch (err) {
 			console.error('[Migrate] Season scoring failed (non-critical):', err)
 		}
+		await finalizeAnonymousMigration(migrationToken, userId, true)
 
 		return c.json({
 			migrated: true,
+			credited: true,
 			coinReward,
 			streak,
 			...(seasonRank !== null && { seasonRank }),
@@ -1768,8 +2278,11 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 	if (!userId) {
 		const nextGridSize = lockedGridSize ?? DEFAULT_GRID_SIZE
 		const newPuzzle = generatePuzzleForGridLevel(nextGridSize, MIN_SKILL_LEVEL)
+		const contentId = createContentId(postId, makeInstanceId())
+		await persistAnonymousPuzzleForRequest(c, postId, contentId, newPuzzle, postPuzzleMeta)
 		const response: NextChallengeResponse = {
-			puzzle: newPuzzle,
+			puzzle: toPublicPuzzle(newPuzzle),
+			contentId,
 			skillLevel: MIN_SKILL_LEVEL,
 			gridSizePreference: nextGridSize,
 		}
@@ -1825,52 +2338,76 @@ gameRouter.post('/api/game/next-challenge', async (c) => {
 		await setGridHistory(userId, currentGridSize, updatedHistory)
 		await setAdaptiveHistory(userId, updatedAdaptiveHistory)
 
+		const [pathLevel, streak] = await Promise.all([
+			getPathLevel(userId),
+			getStreakData(userId),
+		])
 		let newPuzzle: SerializedPuzzle
 		let responseGridSizePreference: GridSize
+		let responseSkillLevel: number
+		let issuedPuzzleInstanceId: string
+		const warmupReturnKey = `user:${userId}:game:${postId}:warmupReturnGrid`
+		const warmupReturnGrid = safeParseInt(await redis.get(warmupReturnKey), 0)
 
-		if (lockedGridSize !== undefined) {
+		if (
+			lockedGridSize !== undefined &&
+			warmupReturnGrid === lockedGridSize &&
+			postPuzzleMeta.colors
+		) {
+			newPuzzle = {
+				colors: postPuzzleMeta.colors,
+				numbers: postPuzzleMeta.numbers ?? '',
+				solution: postPuzzleMeta.solution ?? '',
+				difficulty: (postPuzzleMeta.difficulty ?? 'easy') as SerializedPuzzle['difficulty'],
+				gridSize: lockedGridSize,
+			}
+			issuedPuzzleInstanceId = (
+				await persistIssuedPuzzle(postId, userId, newPuzzle, 'manual')
+			).instanceId
+			await redis.del(warmupReturnKey)
+			responseGridSizePreference = lockedGridSize
+			responseSkillLevel = await getGridSkillLevel(userId, lockedGridSize)
+		} else if (lockedGridSize !== undefined) {
 			const lockedLevel = await getGridSkillLevel(userId, lockedGridSize)
 			newPuzzle = generatePuzzleForGridLevelAvoidingRepeat(
 				lockedGridSize,
 				lockedLevel,
 				currentPuzzle,
 			)
-			await persistIssuedPuzzle(postId, userId, newPuzzle, 'manual')
+			issuedPuzzleInstanceId = (
+				await persistIssuedPuzzle(postId, userId, newPuzzle, 'manual')
+			).instanceId
 			responseGridSizePreference = lockedGridSize
-		} else if (isChallengePost && postPuzzleMeta?.colors) {
-			newPuzzle = {
-				colors: postPuzzleMeta.colors,
-				numbers: postPuzzleMeta.numbers ?? '',
-				solution: postPuzzleMeta.solution ?? '',
-				difficulty: (postPuzzleMeta.difficulty ?? 'easy') as SerializedPuzzle['difficulty'],
-				gridSize: parseInt(postPuzzleMeta.gridSize ?? '4', 10),
-			}
-			await persistIssuedPuzzle(postId, userId, newPuzzle, 'challenge')
-			responseGridSizePreference = newPuzzle.gridSize as GridSize
+			responseSkillLevel = lockedLevel
 		} else {
-			const [pathLevel, streak] = await Promise.all([
-				getPathLevel(userId),
-				getStreakData(userId),
-			])
 			const selection = await selectPuzzleStateForUser(userId, {
 				pathLevel,
 				streak,
 				sessionRun: 0,
 			})
-			newPuzzle = generatePuzzleForGridLevel(selection.gridSize, selection.level)
-			await persistIssuedPuzzle(postId, userId, newPuzzle, selection.source)
+			newPuzzle = generatePuzzleForGridLevelAvoidingRepeat(
+				selection.gridSize,
+				selection.level,
+				currentPuzzle,
+			)
+			issuedPuzzleInstanceId = (
+				await persistIssuedPuzzle(postId, userId, newPuzzle, selection.source)
+			).instanceId
 			responseGridSizePreference = selection.gridSize
+			responseSkillLevel = await getGridSkillLevel(userId, newPuzzle.gridSize as GridSize)
 		}
 
 		// Reset the server-side timer anchor for the freshly issued puzzle so
 		// run-again solves are timed consistently (server-authoritative).
 		const startTimeKey = `user:${userId}:puzzleStartTime:${postId}`
+		await registerUserDynamicKey(userId, startTimeKey)
 		await redis.set(startTimeKey, Date.now().toString())
 		await redis.expire(startTimeKey, 86400)
 
 		const response: NextChallengeResponse = {
-			puzzle: newPuzzle,
-			skillLevel: await getGridSkillLevel(userId, newPuzzle.gridSize as GridSize),
+			puzzle: toPublicPuzzle(newPuzzle),
+			contentId: createContentId(postId, issuedPuzzleInstanceId),
+			skillLevel: responseSkillLevel,
 			gridSizePreference: responseGridSizePreference,
 		}
 
@@ -1947,127 +2484,162 @@ gameRouter.get('/api/game/leaderboard', async (c) => {
 
 // ─── POST /api/game/result-comment ───────────────────────────────────────────
 
-gameRouter.post('/api/game/result-comment', async (c) => {
-	const { postId, userId } = context
+type ResultCommentInput = Readonly<{
+	completionId: string
+	commentMessage?: string
+}>
 
+const RESULT_COMMENT_COMPLETION_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/
+
+const postResultComment = async (c: Context): Promise<Response> => {
+	const { postId, userId } = context
 	if (!postId) return c.json({ error: 'Post ID is required' }, 400)
 	if (!userId) return c.json({ error: 'User ID is required' }, 400)
 
+	let pendingClaim: { completionId: string; claimToken: string } | null = null
+	let createdCommentId: string | null = null
+
 	try {
 		const body = await c.req.json().catch(() => null)
-		if (!body || typeof body !== 'object') {
-			return c.json({ error: 'Invalid request body' }, 400)
+		const parsed = parseResultCommentInput(body)
+		if (typeof parsed === 'string') return c.json({ error: parsed }, 400)
+
+		const snapshot = await getOwnedCompletionSnapshot(userId, parsed.completionId)
+		if (snapshot === null || snapshot.sourcePostId !== postId) {
+			return c.json({ error: 'Verified completion not found' }, 403)
 		}
 
-		const {
-			puzzleNumber,
-			gridSize,
-			skillLevel,
-			timeTaken,
-			mistakes,
-			streak,
-			commentMessage,
-			colorGrid,
-		} = body as Record<string, unknown>
-
-		if (
-			typeof puzzleNumber !== 'number' || puzzleNumber < 1 ||
-			typeof gridSize !== 'number' || ![4, 6, 8].includes(gridSize) ||
-			typeof skillLevel !== 'number' || skillLevel < 1 || skillLevel > 9 ||
-			typeof timeTaken !== 'number' || timeTaken <= 0 ||
-			typeof mistakes !== 'number' || mistakes < 0 ||
-			typeof streak !== 'number' || streak < 0 ||
-			!Array.isArray(colorGrid)
-		) {
-			return c.json({ error: 'Invalid result card data' }, 400)
+		const actionClaim = await claimCompletionAction(userId, parsed.completionId, 'result-comment')
+		if (actionClaim.status === 'finalized') {
+			return c.json({ success: true, commentId: actionClaim.resourceId })
 		}
-
-		if (
-			commentMessage !== undefined &&
-			(typeof commentMessage !== 'string' || commentMessage.length > 400)
-		) {
-			return c.json({ error: 'Comment message must be 400 characters or fewer' }, 400)
+		if (actionClaim.status === 'pending') {
+			return c.json({ error: 'Result comment is already being posted' }, 409)
 		}
+		pendingClaim = { completionId: parsed.completionId, claimToken: actionClaim.claimToken }
+		const resultText = serializeVerifiedResultComment(snapshot, parsed.commentMessage)
 
-		const resultData: ResultCardData = {
-			puzzleNumber,
-			gridSize: gridSize as 4 | 6 | 8,
-			skillLevel,
-			colorGrid: colorGrid as ('red' | 'blue')[][],
-			timeTaken,
-			mistakes,
-			streak,
-		}
-
-		const resultText = serializeResultComment(
-			resultData,
-			typeof commentMessage === 'string' ? commentMessage : undefined,
-		)
-
-		// Find the sticky comment to reply to
-		const postMeta = await redis.hGetAll(`game:${postId}:meta`)
-		let stickyCommentId = postMeta['stickyCommentId']
-		if (!stickyCommentId) {
-			// Use an optimistic lock so only one concurrent request creates the sticky.
-			// 15-second TTL on the lock key ensures it is always released.
-			const lockKey = `game:${postId}:stickyLock`
-			const lockTxn = await redis.watch(lockKey)
-			const existingLock = await redis.get(lockKey)
-			if (existingLock !== undefined) {
-				// Another request is already creating the sticky — ask the client to retry.
-				// Unwatch releases the transaction slot before returning.
-				await lockTxn.unwatch()
-				return c.json({ error: 'Post is being set up. Try again in a moment.' }, 503)
-			}
-			await lockTxn.multi()
-			await lockTxn.set(lockKey, '1')
-			await lockTxn.expire(lockKey, 15)
-			const lockResult = await lockTxn.exec()
-			if (!lockResult || lockResult.length === 0) {
-				// Transaction aborted — another concurrent request won the race
-				return c.json({ error: 'Post is being set up. Try again in a moment.' }, 503)
-			}
-			try {
-				stickyCommentId = await createStickyComment(postId)
-				// Explicitly release lock now that stickyCommentId is stored in meta.
-				// Future requests will find it there and skip this branch entirely.
-				await redis.del(lockKey)
-			} catch (err) {
-				console.error('[ResultComment] Failed to create sticky comment:', err)
-				await redis.del(lockKey) // release lock so future requests can retry
-				return c.json({ error: 'Unable to post comment right now. Try again shortly.' }, 503)
-			}
-		}
-
-		await reddit.submitComment({
+		const stickyCommentId = await getResultCommentTarget(snapshot.sourcePostId)
+		const comment = await reddit.submitComment({
 			id: stickyCommentId as `t1_${string}`,
 			text: resultText,
 			runAs: 'USER',
 		})
-
-		// Aligns with viral channel `result_comment` recorded below.
-		// Previously this also incremented `trackResultCopy`, which
-		// double-counted shares across two channel counters.
-		await Promise.all([
-			trackResultComment(getTodayUTC(), userId),
-			incrementSharesCount(userId),
-		])
-
-		// ─── Viral tracking: record sharer + channel open (non-blocking) ──────
-		try {
-			const today = getTodayUTC()
-			await recordSharer(today, userId)
-			await recordChannelOpen(today, 'result_comment', userId)
-		} catch (err) {
-			console.error('[Viral] Result comment tracking failed (non-critical):', err)
-		}
-
-		return c.json({ success: true })
+		createdCommentId = comment.id
+		await finalizeCompletionAction(
+			userId,
+			parsed.completionId,
+			'result-comment',
+			actionClaim.claimToken,
+			createdCommentId,
+		)
+		pendingClaim = null
+		await trackPublishedResultComment(userId)
+		return c.json({ success: true, commentId: createdCommentId })
 	} catch (error) {
+		if (pendingClaim !== null && createdCommentId === null) {
+			await releaseResultCommentClaim(userId, pendingClaim)
+		}
+		if (pendingClaim !== null && createdCommentId !== null) {
+			const finalized = await retryResultCommentFinalization(
+				userId,
+				pendingClaim,
+				createdCommentId,
+			)
+			if (finalized) await trackPublishedResultComment(userId)
+			return c.json({ success: true, commentId: createdCommentId })
+		}
 		console.error('Error posting result comment:', error)
 		return c.json({ error: 'Failed to post result comment' }, 500)
 	}
-})
+}
+
+gameRouter.post('/api/game/result-comment', postResultComment)
+
+const parseResultCommentInput = (body: unknown): ResultCommentInput | string => {
+	if (!body || typeof body !== 'object') return 'Invalid request body'
+	const { completionId, commentMessage } = body as Record<string, unknown>
+	if (
+		typeof completionId !== 'string' ||
+		!RESULT_COMMENT_COMPLETION_ID_PATTERN.test(completionId)
+	) return 'A verified completion is required'
+	if (
+		commentMessage !== undefined &&
+		(typeof commentMessage !== 'string' || commentMessage.length > 400)
+	) return 'Comment message must be 400 characters or fewer'
+	return {
+		completionId,
+		...(typeof commentMessage === 'string' && { commentMessage }),
+	}
+}
+
+const getResultCommentTarget = async (postId: string): Promise<string> => {
+	const stickyCommentId = await redis.hGet(`game:${postId}:meta`, 'stickyCommentId')
+	if (stickyCommentId !== undefined) return stickyCommentId
+
+	const lockKey = `game:${postId}:stickyLock`
+	const lockResult = await redis.set(lockKey, '1', {
+		nx: true,
+		expiration: new Date(Date.now() + 15_000),
+	})
+	if (lockResult !== 'OK') throw new Error('Post is being set up')
+
+	try {
+		return await createStickyComment(postId)
+	} finally {
+		await redis.del(lockKey)
+	}
+}
+
+const trackPublishedResultComment = async (userId: string): Promise<void> => {
+	try {
+		const today = getTodayUTC()
+		await Promise.all([
+			trackResultComment(today, userId),
+			incrementSharesCount(userId),
+			recordSharer(today, userId),
+			recordChannelOpen(today, 'result_comment', userId),
+		])
+	} catch (error) {
+		console.error('[Viral] Result comment tracking failed (non-critical):', error)
+	}
+}
+
+const releaseResultCommentClaim = async (
+	userId: string,
+	claim: { completionId: string; claimToken: string },
+): Promise<void> => {
+	try {
+		await releaseCompletionAction(
+			userId,
+			claim.completionId,
+			'result-comment',
+			claim.claimToken,
+		)
+	} catch (error) {
+		console.error('[ResultComment] Failed to release completion claim:', error)
+	}
+}
+
+const retryResultCommentFinalization = async (
+	userId: string,
+	claim: { completionId: string; claimToken: string },
+	commentId: string,
+): Promise<boolean> => {
+	try {
+		await finalizeCompletionAction(
+			userId,
+			claim.completionId,
+			'result-comment',
+			claim.claimToken,
+			commentId,
+		)
+		return true
+	} catch (error) {
+		console.error('[ResultComment] Comment posted but receipt finalization failed:', error)
+		return false
+	}
+}
 
 // ─── POST /api/game/hints/dismiss ────────────────────────────────────────────
 
@@ -2119,28 +2691,73 @@ gameRouter.post('/api/game/challenge', async (c) => {
 	const { postId, userId, subredditName } = context
 
 	if (!postId || !userId) return c.json({ error: 'Missing context' }, 400)
+	let pendingClaim: { completionId: string; claimToken: string } | null = null
+	let dailySlotKey: string | null = null
+	let createdPostId: `t3_${string}` | null = null
 
 	try {
-		const body: ChallengeRequest = await c.req.json()
-		const { timeTaken, mistakes } = body
+		const body = await c.req.json<Partial<ChallengeRequest>>().catch(() => null)
+		if (!body || typeof body.completionId !== 'string') {
+			return c.json<ChallengeResponse>(
+				{ success: false, error: 'A verified completion is required' },
+				400,
+			)
+		}
+		if (!subredditName) {
+			return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' }, 400)
+		}
+		const completionId = body.completionId
+		const snapshot = await getOwnedCompletionSnapshot(userId, completionId)
+		if (snapshot === null || snapshot.sourcePostId !== postId) {
+			return c.json<ChallengeResponse>(
+				{ success: false, error: 'Verified completion not found' },
+				403,
+			)
+		}
 		const customTitle = normalizeChallengeTitle(body.customTitle)
-
-		// Rate limit user-authored challenge posts to reduce spam risk.
-		const MAX_DAILY_CHALLENGES = 3
 		const today = getTodayUTC()
-		const challengeKey = `user:${userId}:challenge:count:${today}`
-		const countStr = await redis.get(challengeKey)
-		const challengeCount = countStr !== null && countStr !== undefined ? parseInt(countStr, 10) : 0
-		if (challengeCount >= MAX_DAILY_CHALLENGES) {
-			return c.json<ChallengeResponse>({
-				success: false,
-				error: `You've reached the limit of ${MAX_DAILY_CHALLENGES} challenge posts today`,
-			})
+
+		const puzzle = await getCurrentPuzzle(postId, userId)
+		if (!puzzle || puzzle.instanceId !== snapshot.puzzleInstanceId) {
+			return c.json<ChallengeResponse>(
+				{ success: false, error: 'The verified puzzle is no longer active' },
+				409,
+			)
 		}
 
-		// Get current puzzle for this post
-		const puzzle = await getCurrentPuzzle(postId, userId)
-		if (!puzzle) return c.json<ChallengeResponse>({ success: false, error: 'No puzzle found' })
+		const actionClaim = await claimCompletionAction(userId, completionId, 'challenge')
+		if (actionClaim.status === 'finalized') {
+			const resourceId = actionClaim.resourceId as `t3_${string}`
+			return c.json<ChallengeResponse>({
+				success: true,
+				postId: resourceId,
+				postUrl: redditCommentsUrl(resourceId),
+			})
+		}
+		if (actionClaim.status === 'pending') {
+			return c.json<ChallengeResponse>(
+				{ success: false, error: 'Challenge creation is already in progress' },
+				409,
+			)
+		}
+		pendingClaim = { completionId, claimToken: actionClaim.claimToken }
+
+		dailySlotKey = await claimDailyChallengeSlot(userId, today, completionId)
+		if (dailySlotKey === null) {
+			await releaseCompletionAction(
+				userId,
+				completionId,
+				'challenge',
+				actionClaim.claimToken,
+			)
+			pendingClaim = null
+			return c.json<ChallengeResponse>(
+				{ success: false, error: `You can create ${MAX_DAILY_CHALLENGE_POSTS} rival posts per day` },
+				429,
+			)
+		}
+
+		const timeTaken = snapshot.timeTaken
 		const sourceMeta = await redis.hGetAll(`game:${postId}:meta`)
 		const sourceChainLength = parseInt(sourceMeta?.challengeChainLength ?? '0', 10)
 		const challengeChainLength = sourceChainLength + 1
@@ -2169,17 +2786,27 @@ gameRouter.post('/api/game/challenge', async (c) => {
 		// simple default instead of generating extra copy.
 		const title = customTitle ?? DEFAULT_CHALLENGE_TITLE
 
-		if (!subredditName) return c.json<ChallengeResponse>({ success: false, error: 'No subreddit context' })
-
 		const newPost = await reddit.submitCustomPost({
 			subredditName,
 			title,
+			textFallback: {
+				text: `${username} solved Urjo in ${timeTaken}s. Open the post to play the same board.`,
+			},
 			runAs: 'USER',
 			userGeneratedContent: { text: title },
 			postData: {
 				postType: 'urjo-puzzle',
 			},
 		})
+		createdPostId = newPost.id as `t3_${string}`
+		await finalizeCompletionAction(
+			userId,
+			completionId,
+			'challenge',
+			actionClaim.claimToken,
+			createdPostId,
+		)
+		pendingClaim = null
 
 		// Seed the new post with the same puzzle
 		await redis.hSet(`game:${newPost.id}:puzzle`, {
@@ -2193,7 +2820,8 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			challengeScore: timeTaken.toString(),
 			challengeByUsername: username,
 			challengeByAvatar: challengerAvatar,
-			challengeMistakes: mistakes.toString(),
+			challengeSkillLevel: snapshot.skillLevel.toString(),
+			completionId,
 			sourcePostId: postId,
 			challengeChainLength: challengeChainLength.toString(),
 		})
@@ -2204,19 +2832,12 @@ gameRouter.post('/api/game/challenge', async (c) => {
 			beats: '0',
 		})
 
-		// Increment daily challenge counter (expires at 24h).
-		// Two-step write: see result-comment dedup for rationale. A crash here leaves a
-		// stale counter; the user can retry after it expires naturally.
-		const newCount = challengeCount + 1
-		await redis.set(challengeKey, newCount.toString())
-		await redis.expire(challengeKey, 86400)
-
 		// Post the initial leaderboard comment (APP account, no user action needed).
 		// Non-critical — if rate-limited, meta is stored without a comment ID and
 		// the leaderboard comment will simply be absent.
 		let leaderboardCommentId = ''
 		try {
-			const targetLine = buildChallengeTargetLine(timeTaken.toString(), mistakes.toString())
+			const targetLine = buildChallengeTargetLine(timeTaken.toString(), undefined)
 			const leaderboardComment = await reddit.submitComment({
 				id: newPost.id,
 				text: `🏆 **Challenge Leaderboard**
@@ -2296,9 +2917,35 @@ Think you can beat it? Play above! 🎯`,
 			console.error('[Viral] Challenge post tracking failed (non-critical):', err)
 		}
 
-		return c.json<ChallengeResponse>({ success: true, postUrl: redditCommentsUrl(newPost.id) })
+		return c.json<ChallengeResponse>({
+			success: true,
+			postId: createdPostId,
+			postUrl: redditCommentsUrl(newPost.id),
+		})
 	} catch (error) {
 		console.error('Challenge post error:', error)
+		if (pendingClaim !== null) {
+			await releaseCompletionAction(
+				userId,
+				pendingClaim.completionId,
+				'challenge',
+				pendingClaim.claimToken,
+			).catch((releaseError) =>
+				console.error('[Challenge] Failed to release action claim:', releaseError),
+			)
+		}
+		if (dailySlotKey !== null && createdPostId === null) {
+			await redis.del(dailySlotKey).catch((slotError) =>
+				console.error('[Challenge] Failed to release daily slot:', slotError),
+			)
+		}
+		if (createdPostId !== null) {
+			return c.json<ChallengeResponse>({
+				success: true,
+				postId: createdPostId,
+				postUrl: redditCommentsUrl(createdPostId),
+			})
+		}
 		return c.json<ChallengeResponse>({ success: false, error: 'Failed to create challenge' })
 	}
 })

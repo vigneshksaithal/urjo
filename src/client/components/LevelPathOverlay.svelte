@@ -1,10 +1,12 @@
 <script lang="ts">
-	import { fade, fly } from "svelte/transition";
+	import { fade } from "svelte/transition";
+	import Check from "lucide-svelte/icons/check";
 	import Coins from "lucide-svelte/icons/coins";
 	import Flame from "lucide-svelte/icons/flame";
 	import Lock from "lucide-svelte/icons/lock";
 	import Play from "lucide-svelte/icons/play";
-	import { buildLevelPath, type LevelPathNode } from "../lib/level-path";
+
+	import { buildLevelPath } from "../lib/level-path";
 
 	type Props = {
 		isOpen: boolean;
@@ -15,33 +17,14 @@
 		onLevelSelect: () => void;
 	};
 
+	const VISIBLE_LEVEL_COUNT = 3;
+
 	let props: Props = $props();
-
-	type NodePosition = {
-		left: string;
-		top: string;
-	};
-
-	const fallbackNodePosition: NodePosition = {
-		left: "50%",
-		top: "50%",
-	};
-
-	// Hand-tuned positions along the SVG path — one per rendered node. The
-	// path artwork below is drawn for exactly this many stops, so the level
-	// window is sized to match rather than hardcoded separately: passing a
-	// visibleLevels count larger than this array would stack extra nodes on
-	// the fallback position with no path to sit on.
-	const nodePositions: readonly NodePosition[] = [
-		{ left: "26%", top: "70%" },
-		{ left: "50%", top: "52%" },
-		{ left: "74%", top: "33%" },
-	] as const;
 
 	const levels = $derived(
 		buildLevelPath({
 			currentLevel: props.currentLevel,
-			visibleLevels: nodePositions.length,
+			visibleLevels: VISIBLE_LEVEL_COUNT,
 		}),
 	);
 
@@ -50,173 +33,97 @@
 			? `Puzzle ${(props.puzzleNumber ?? 0) + 1}`
 			: "Next puzzle",
 	);
-
-	const getNodePosition = (index: number): NodePosition => {
-		return nodePositions[index] ?? fallbackNodePosition;
-	};
-
-	const getNodeClass = (state: LevelPathNode["state"]): string => {
-		if (state === "completed") {
-			return "bg-emerald-300 text-emerald-950 border-white/70 shadow-[0_8px_0_#047857,0_18px_24px_rgba(4,120,87,0.24)]";
-		}
-		if (state === "current") {
-			return "bg-[#ffe01b] text-slate-950 border-white shadow-[0_10px_0_#d7b400,0_0_0_14px_rgba(255,224,27,0.28),0_0_0_28px_rgba(255,224,27,0.16)] animate-cta-pulse";
-		}
-		return "bg-[#455d6f] text-slate-100 border-[#6f8798] shadow-[0_8px_0_#304757] opacity-95";
-	};
 </script>
 
 {#if props.isOpen}
 	<div
 		transition:fade={{ duration: 180 }}
-		class="fixed inset-0 z-[60] flex h-full w-full flex-col overflow-hidden bg-[#092126]"
+		class="fixed inset-0 z-[60] flex h-full w-full flex-col overflow-hidden bg-[#1C1C1E] text-white"
 	>
-		<div
-			class="pointer-events-none absolute inset-x-0 top-0 z-10 px-5 pt-5 text-white"
-			transition:fly={{ y: -12, duration: 220 }}
-		>
-			<div class="flex items-center justify-between gap-3">
-				<div class="flex min-w-0 flex-col">
-					<p
-						class="text-xs font-black uppercase tracking-[0.12em] text-cyan-100"
-					>
+		<header class="flex-none px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
+			<div class="mx-auto flex w-full max-w-sm items-start justify-between gap-3">
+				<div class="min-w-0">
+					<p class="text-[11px] font-bold uppercase tracking-[0.4px] text-[#60A5FA]">
 						{nextPuzzleLabel}
 					</p>
-					<h2
-						class="text-3xl font-black leading-tight text-white drop-shadow"
-					>
-						Level {props.currentLevel}
-					</h2>
+					<h2 class="mt-1 text-[22px] font-bold leading-tight">Journey {props.currentLevel}</h2>
+					<p class="mt-1 text-[13px] text-[#8E8E93]">Your next stop is ready.</p>
 				</div>
-				<div class="flex items-center gap-2">
+
+				<div class="flex flex-none items-center gap-2">
 					<div
-						class="flex min-h-10 items-center gap-1.5 rounded-full bg-orange-400 px-3 font-black text-stone-950 shadow-[0_5px_0_#c2410c]"
+						class="flex min-h-10 items-center gap-1.5 rounded-full bg-[#2C2C2E] px-3 text-[13px] font-bold text-[#FCD34D]"
 						aria-label="{props.streak} day streak"
 					>
-						<Flame class="h-5 w-5 fill-current" />
+						<Flame class="h-4 w-4" />
 						<span>{props.streak}</span>
 					</div>
 					{#if props.coins !== undefined}
 						<div
-							class="flex min-h-10 items-center gap-1.5 rounded-full bg-sky-300 px-3 font-black text-slate-950 shadow-[0_5px_0_#0284c7]"
+							class="flex min-h-10 items-center gap-1.5 rounded-full bg-[#2C2C2E] px-3 text-[13px] font-bold text-[#FDE68A]"
 							aria-label="{props.coins} coins"
 						>
-							<Coins class="h-5 w-5" />
+							<Coins class="h-4 w-4" />
 							<span>{props.coins}</span>
 						</div>
 					{/if}
 				</div>
 			</div>
-		</div>
+		</header>
 
-		<div class="relative min-h-0 flex-1 overflow-hidden">
-			<div
-				class="absolute left-1/2 top-[54%] h-[94%] w-[138%] -translate-x-1/2 -translate-y-1/2 rounded-[52%] bg-[linear-gradient(180deg,#5fd3d0_0%,#c7e9d6_56%,#f28b7e_100%)] shadow-[inset_0_42px_80px_rgba(255,255,255,0.28)]"
-			></div>
-			<div
-				class="absolute left-[-12%] top-[9%] h-14 w-44 rounded-full bg-white/35 blur-[2px]"
-				aria-hidden="true"
-			></div>
-			<div
-				class="absolute right-[-2%] top-[18%] h-14 w-32 rounded-full bg-white/35 blur-[2px]"
-				aria-hidden="true"
-			></div>
-			<div
-				class="absolute left-[1%] bottom-[3%] h-28 w-28 rounded-full bg-yellow-300/30 blur-sm"
-				aria-hidden="true"
-			></div>
-			<div
-				class="absolute left-[-3%] bottom-[5%] text-6xl drop-shadow-lg"
-				aria-hidden="true"
-			>
-				⛺
-			</div>
-			<div
-				class="absolute right-[8%] top-[10%] text-5xl drop-shadow-lg"
-				aria-hidden="true"
-			>
-				🏝️
-			</div>
-			<div
-				class="absolute right-[13%] bottom-[18%] text-4xl drop-shadow-lg"
-				aria-hidden="true"
-			>
-				🎁
-			</div>
+		<main class="flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-4 py-3">
+			<section class="w-full max-w-sm" aria-label="Level path">
+				<p class="mb-3 text-center text-[11px] font-bold uppercase tracking-[0.4px] text-[#8E8E93]">Level path</p>
 
-			<div
-				class="absolute left-1/2 top-[49%] h-[76%] w-[68%] -translate-x-1/2 -translate-y-1/2"
-				aria-hidden="true"
-			>
-				<svg
-					viewBox="0 0 100 100"
-					class="h-full w-full overflow-visible"
-					role="img"
-					aria-label="Level path"
-				>
-					<path
-						d="M14 74 C31 71 37 61 44 57 S60 49 67 42 S77 33 86 24"
-						fill="none"
-						stroke="rgba(50,111,126,0.48)"
-						stroke-width="10"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-					<path
-						d="M14 74 C31 71 37 61 44 57 S60 49 67 42 S77 33 86 24"
-						fill="none"
-						stroke="rgba(225,245,247,0.9)"
-						stroke-width="5"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-					<path
-						d="M14 74 C31 71 37 61 44 57 S60 49 67 42 S77 33 86 24"
-						fill="none"
-						stroke="rgba(255,255,255,0.26)"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					/>
-				</svg>
-			</div>
+				<div class="relative flex flex-col gap-3">
+					<div class="absolute bottom-10 left-7 top-10 w-1 -translate-x-1/2 rounded-full bg-[#3A3A3C]" aria-hidden="true"></div>
 
-			{#each levels as level, index (level.level)}
-				{@const position = getNodePosition(index)}
-				<div
-					class="absolute -translate-x-1/2 -translate-y-1/2"
-					style="left: {position.left}; top: {position.top};"
-				>
-					{#if level.state === "current"}
-						<button
-							onclick={props.onLevelSelect}
-							class="group flex h-[98px] w-[98px] flex-col items-center justify-center rounded-full border-[7px] font-black transition-transform active:translate-y-1 active:shadow-none {getNodeClass(
-								level.state,
-							)}"
-							aria-label="Start level {level.level}"
-						>
-							<Play
-								class="h-10 w-10 fill-current transition-transform group-active:scale-95"
-							/>
-							<span class="text-xl leading-none"
-								>{level.level}</span
+					{#each levels as level (level.level)}
+						{#if level.state === "current"}
+							<button
+								type="button"
+								onclick={props.onLevelSelect}
+								class="relative flex min-h-24 w-full items-center gap-4 rounded-full bg-[#2563EB] px-4 text-left shadow-[0_6px_0_#1A4FA8] transition-transform active:translate-y-[5px] active:shadow-[0_1px_0_#1A4FA8] animate-cta-pulse"
+								aria-label="Play level {level.level}"
 							>
-						</button>
-					{:else}
-						<div
-							class="flex h-[78px] w-[78px] flex-col items-center justify-center rounded-full border-[6px] font-black {getNodeClass(
-								level.state,
-							)}"
-							aria-label="Level {level.level} {level.state}"
-						>
-							<Lock class="h-7 w-7" />
-							<span class="text-lg leading-none"
-								>{level.level}</span
+								<span class="flex h-14 w-14 flex-none items-center justify-center rounded-full bg-white/15">
+									<Play class="h-6 w-6 fill-current" />
+								</span>
+								<span class="min-w-0 flex-1">
+									<span class="block text-[11px] font-bold uppercase tracking-[0.4px] text-white/75">Up next</span>
+									<span class="mt-1 block text-[22px] font-black leading-none">Level {level.level}</span>
+									<span class="mt-1 block text-[13px] font-semibold text-white/80">Play level</span>
+								</span>
+							</button>
+						{:else}
+							<div
+								class="relative flex min-h-[72px] w-full items-center gap-4 rounded-[20px] bg-[#2C2C2E] px-4 {level.state === 'locked' ? 'text-[#8E8E93]' : 'text-white'}"
+								aria-label="Level {level.level} {level.state}"
 							>
-						</div>
-					{/if}
+								<span class="flex h-10 w-10 flex-none items-center justify-center rounded-full {level.state === 'completed' ? 'bg-[#34C759]/12 text-[#34C759]' : 'bg-[#3A3A3C] text-[#8E8E93]'}">
+									{#if level.state === "completed"}
+										<Check class="h-5 w-5" strokeWidth={3} />
+									{:else}
+										<Lock class="h-4 w-4" />
+									{/if}
+								</span>
+								<span class="min-w-0 flex-1">
+									<span class="block text-base font-bold">Level {level.level}</span>
+									<span class="mt-0.5 block text-[13px] font-semibold {level.state === 'completed' ? 'text-[#34C759]' : 'text-[#8E8E93]'}">
+										{level.state === "completed" ? "Completed" : "Locked"}
+									</span>
+								</span>
+							</div>
+						{/if}
+					{/each}
 				</div>
-			{/each}
-		</div>
+			</section>
+		</main>
+
+		<footer class="flex-none px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
+			<p class="mx-auto max-w-sm text-center text-[13px] font-semibold text-[#8E8E93]">
+				Tap the highlighted level to keep going
+			</p>
+		</footer>
 	</div>
 {/if}

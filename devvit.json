@@ -7,10 +7,14 @@
       "scope": "user",
       "asUser": [
         "SUBMIT_COMMENT",
-        "SUBMIT_POST"
+        "SUBMIT_POST",
+        "SUBSCRIBE_TO_SUBREDDIT"
       ]
     },
-    "redis": true
+    "redis": true,
+    "journeys": true,
+    "media": true,
+    "realtime": true
   },
   "post": {
     "dir": "dist/client",
@@ -111,6 +115,16 @@
       "drift-check": {
         "endpoint": "/internal/scheduler/drift-check",
         "cron": "0 2 * * *"
+      },
+      "urjo-blitz-start": {
+        "endpoint": "/internal/scheduler/urjo-blitz-start",
+        "cron": "5 18 * * 5"
+      },
+      "urjo-blitz-close": {
+        "endpoint": "/internal/scheduler/urjo-blitz-close"
+      },
+      "completion-followup": {
+        "endpoint": "/internal/scheduler/completion-followup"
       }
     }
   },

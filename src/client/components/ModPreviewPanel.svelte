@@ -7,9 +7,6 @@
     import { deserializeGrid } from "../lib/utils";
     import type { Grid, StreakData } from "../../shared/types";
     import type { EngagementCompletionData } from "../../shared/engagement-types";
-    import type { Component } from "svelte";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    type Icon = Component<any>;
     import Grid2x2 from "lucide-svelte/icons/grid-2x2";
     import Grid3x3 from "lucide-svelte/icons/grid-3x3";
     import LayoutGrid from "lucide-svelte/icons/layout-grid";
@@ -17,6 +14,8 @@
     import Medal from "lucide-svelte/icons/medal";
     import BarChart2 from "lucide-svelte/icons/bar-chart-2";
     import Microscope from "lucide-svelte/icons/microscope";
+
+    type Icon = typeof Grid2x2;
 
     type Props = {
         isOpen: boolean;
@@ -112,6 +111,7 @@
         onNextChallenge: close,
         onRestart: close,
         onChallenge: () => {},
+        onShareChallenge: () => {},
         ...(previewCompleted && { puzzleColors: previewColors }),
         ...(previewCompleted && { engagement: MOCK_ENGAGEMENT }),
     });

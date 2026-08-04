@@ -21,7 +21,7 @@ import {
     getSessionIdFromHeader,
     recordDwellTick,
 } from '../lib/qualified'
-import { recordPlaytimeTick } from '../lib/metrics'
+import { recordAnonymousPlaytimeTick, recordPlaytimeTick } from '../lib/metrics'
 
 const HTTP_STATUS_BAD_REQUEST = 400
 
@@ -29,8 +29,6 @@ export const dwellRouter = new Hono()
 
 dwellRouter.post('/api/dwell/tick', async (c) => {
     const { userId } = context
-
-    if (!userId) return c.json({ error: 'User ID is required' }, HTTP_STATUS_BAD_REQUEST)
 
     const sessionId = getSessionIdFromHeader(c.req.raw.headers)
     if (sessionId === null) {
@@ -50,6 +48,11 @@ dwellRouter.post('/api/dwell/tick', async (c) => {
 
     try {
         const today = getTodayUTC()
+        if (!userId) {
+            await recordAnonymousPlaytimeTick(today, sessionId, tickSeconds)
+            return c.json({ qualified: false, dwellSeconds: 0, tickSeconds })
+        }
+
         await recordPlaytimeTick(today, sessionId, tickSeconds)
         const evaluation = await recordDwellTick(sessionId, userId, tickSeconds, today)
         return c.json({

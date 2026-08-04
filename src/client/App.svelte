@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import {
-		showLoginPrompt,
 		getShareData,
+		showShareSheet,
 		showToast,
 	} from "@devvit/web/client";
 	import type {
@@ -14,18 +14,21 @@
 		CoinReward,
 		GridSizeResponse,
 		FirstScreenData,
+		CompleteResponse,
+		ChallengeResponse,
+		OnboardingChoiceResponse,
 	} from "../shared/types";
 	import type { EngagementCompletionData } from "../shared/engagement-types";
 	import type { SeasonInfo } from "../shared/growth-types";
 	import type { PersonalChallengeData } from "../shared/social-types";
 	import { validatePersonalChallengeData } from "../shared/social-types";
 	import GameView from "./views/GameView.svelte";
-	import TutorialView from "./views/TutorialView.svelte";
-	import FirstScreen from "./components/FirstScreen.svelte";
+	import WarmupChoice from "./components/WarmupChoice.svelte";
 	import AnalyticsDashboard from "./components/AnalyticsDashboard.svelte";
 	import { deserializeGrid, serializeGrid } from "./lib/utils";
 	import { isGridComplete } from "./lib/validation";
-	import { getElapsedSeconds } from "./lib/elapsed-time";
+	import { getCompletedSeconds, getElapsedSeconds } from "./lib/elapsed-time";
+	import { getInitialView } from "./lib/initial-view";
 	import {
 		mistakeCount,
 		onCellChange,
@@ -33,18 +36,28 @@
 		resetMistakes,
 	} from "./stores/mistakes";
 	import { hydrateFromServer, resetHints } from "./stores/hints";
-	import { fireOnce, resetLatch } from "./stores/first-action";
+	import {
+		fireOnce,
+		resetLatch,
+		setFirstActionContentId,
+	} from "./stores/first-action";
 	import { incrementSessionRun, getSessionRun } from "./stores/session-run";
 	import {
 		startHeartbeat,
 		type HeartbeatHandle,
 	} from "./lib/dwell-heartbeat";
-	import { getSessionId, sessionHeaders } from "./lib/session-id";
 	import {
-		writeLoggedOutScore,
-		readLoggedOutScore,
-		clearLoggedOutScore,
-	} from "./lib/logged-out-score";
+		getSessionId,
+		measurementHeaders,
+		renewAttemptId,
+		sessionHeaders,
+	} from "./lib/session-id";
+	import {
+		writeLoggedOutMigration,
+		readLoggedOutMigration,
+		clearLoggedOutMigration,
+	} from "./lib/logged-out-migration";
+	import { urjoJourney } from "./lib/journeys";
 
 	type EconomyResponse = {
 		coins: number;
@@ -56,7 +69,7 @@
 		dailyFirstSolve: string | null;
 	};
 
-	type View = "game" | "tutorial" | "error" | "first-screen";
+	type View = "game" | "error" | "warmup-choice";
 
 	const PLACEHOLDER_COLORS = "brbbrbbrbrbbrbrbbrbbrbbrbrbbrbrbbrbbrbbrbbrb";
 	const PLACEHOLDER_NUMBERS = "----------------";
@@ -68,7 +81,6 @@
 	let errorMessage = $state("");
 	let puzzleColors = $state(PLACEHOLDER_COLORS);
 	let puzzleNumbers = $state(PLACEHOLDER_NUMBERS);
-	let tutorialCompleted = $state(false);
 	let startTime = $state(0);
 	// The puzzle timer starts on the user's first cell touch (see
 	// handleCellChange), not on load, so time spent reading the board before
@@ -80,6 +92,8 @@
 		lastPlayedDate: null,
 	});
 	let timeTaken = $state(0);
+	let completionPending = $state(false);
+	let completionVerified = $state(false);
 	let liveElapsedSeconds = $state(0);
 	let skillLevel = $state(1);
 	let pathLevel = $state(1);
@@ -87,6 +101,8 @@
 	let levelUpNewLevel = $state(1);
 	let hasChallenged = $state(false);
 	let challengeUrl = $state<string | null>(null);
+	let challengePostId = $state<`t3_${string}` | null>(null);
+	let sharingChallenge = $state(false);
 	let challengePromptEligible = $state(false);
 	let showAnalytics = $state(false);
 	let coins = $state(0);
@@ -95,19 +111,7 @@
 	let isLoggedIn = $state(true);
 	// Run-again loop state — persisted via sessionStorage in session-run store.
 	let sessionRun = $state(getSessionRun());
-	let sessionRunMultiplier = $state(1);
 	let sessionRunBonusCoins = $state(0);
-	// Streak forecast — what tomorrow's streak day will look like. Hydrated
-	// from /api/game/complete so the result screen can preview the next bump.
-	let streakForecast = $state<
-		| {
-				day: number;
-				coinBonus: number;
-				isMilestone: boolean;
-				label: string;
-		  }
-		| undefined
-	>(undefined);
 	// Weekend Event payload — hydrated from /api/game/state on load and
 	// refreshed on /api/game/complete. Drives the in-game banner + result
 	// screen "weekend bonus" chip.
@@ -130,7 +134,6 @@
 	let gridSizePreference = $state(4);
 	let isChallenge = $state(false);
 	let allowsGridSizeChange = $state(true);
-	let puzzleSolution = $state("");
 	let engagement = $state<EngagementCompletionData | undefined>(undefined);
 	let puzzleNumber = $state(0);
 	let currentSeason = $state<SeasonInfo | undefined>(undefined);
@@ -138,7 +141,6 @@
 	let seasonRank = $state<number | null>(null);
 	let seasonPoints = $state(0);
 	let isMod = $state(false);
-	let notifyOptIn = $state(false);
 	let postId = $state<string | undefined>(undefined);
 	let hintsDismissed = $state<{
 		numberConstraint: boolean;
@@ -150,10 +152,14 @@
 	// Personal challenge data from deeplink share (getShareData)
 	let personalChallenge = $state<PersonalChallengeData | null>(null);
 	let challengerInfo = $state<GameState["challengerInfo"]>(undefined);
-	// A/B/C first-screen experiment
-	let abVariant = $state<"A" | "B" | undefined>(undefined);
+	// Variant C uses non-blocking guidance over the directly playable board.
 	let showVariantCOverlay = $state(false);
 	let firstScreenData = $state<FirstScreenData | undefined>(undefined);
+	let communityActivePlayers = $state(0);
+	let advertisedGridSize = $state<6 | 8>(6);
+	let onboardingChoicePending = $state(false);
+	let contentId = $state("content_initial");
+	let completionId = $state<string | null>(null);
 
 	$effect(() => {
 		if (isCompleted) {
@@ -218,12 +224,20 @@
 		return () => heartbeat.stop();
 	});
 
-	function readShareData(): unknown {
+	function readShareData(): string | null | undefined {
 		try {
 			return getShareData();
 		} catch {
 			return null;
 		}
+	}
+
+	function beginAttempt(nextContentId: string): void {
+		contentId = nextContentId;
+		completionId = null;
+		renewAttemptId();
+		setFirstActionContentId(nextContentId);
+		resetLatch();
 	}
 
 	async function loadGame() {
@@ -235,12 +249,11 @@
 			if (!response.ok) throw new Error("Failed to load game");
 
 			const data: GameState = await response.json();
+			beginAttempt(data.contentId);
 
 			isLoggedIn = data.isLoggedIn !== false;
 			puzzleColors = data.puzzle.colors;
-			puzzleSolution = data.puzzle.solution;
 			puzzleNumbers = data.puzzle.numbers;
-			tutorialCompleted = data.tutorialCompleted;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
 			pathLevel = data.pathLevel;
@@ -251,12 +264,12 @@
 			challengerInfo = data.challengerInfo;
 			puzzleNumber = data.puzzleNumber ?? 0;
 			isMod = data.isMod ?? false;
+			communityActivePlayers = data.communityStats?.activePlayers ?? 0;
 
 			// Hydrate postId from server context
 			postId = data.postId;
 
-			// Hydrate notify opt-in and hints dismissed from GameState
-			notifyOptIn = data.notifyOptIn ?? false;
+			// Hydrate hint-dismissal state from GameState.
 			const serverHintsDismissed = data.hintsDismissed ?? {
 				numberConstraint: false,
 				adjacencyViolation: false,
@@ -292,8 +305,11 @@
 				data.puzzle.gridSize,
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
+			completionPending = false;
+			completionVerified = false;
 			hasChallenged = false;
 			challengeUrl = null;
+			challengePostId = null;
 			startTime = Date.now();
 			timerStarted = false;
 			coinReward = undefined;
@@ -302,36 +318,21 @@
 			resetMistakes();
 
 			firstScreenData = data.firstScreen;
-			// Challenge posts always go directly to the game — no preview screen.
-			// First-timers see the tutorial. Variant A/B: show first-screen splash.
-			// Variant C: game loads immediately with a dismissible info overlay.
-			if (isChallenge) {
-				currentView = "game";
-				showVariantCOverlay = false;
-			} else if (isFirstTimeUser && !tutorialCompleted) {
-				currentView = "tutorial";
-				showVariantCOverlay = false;
-			} else if (
-				data.variant === "C" &&
-				!(data.hasPlayedToday ?? false) &&
-				data.firstScreen !== undefined
-			) {
-				currentView = "game";
-				showVariantCOverlay = true;
-				abVariant = undefined;
-			} else if (
-				(data.variant === "A" || data.variant === "B") &&
-				!(data.hasPlayedToday ?? false) &&
-				data.firstScreen !== undefined
-			) {
-				currentView = "first-screen";
-				showVariantCOverlay = false;
-				abVariant = data.variant;
-			} else {
-				currentView = "game";
-				showVariantCOverlay = false;
-				abVariant = undefined;
+			const initialView = getInitialView({
+				isChallenge,
+				isFirstTimeUser,
+				warmupChoiceAvailable:
+					data.onboardingChoiceRequired ??
+					(!isChallenge && !allowsGridSizeChange && gridSize > 4),
+				hasPlayedToday: data.hasPlayedToday ?? false,
+				variant: data.variant,
+				firstScreenAvailable: data.firstScreen !== undefined,
+			});
+			currentView = initialView.view;
+			if (initialView.view === "warmup-choice") {
+				advertisedGridSize = gridSize === 8 ? 8 : 6;
 			}
+			showVariantCOverlay = initialView.showOnboardingOverlay;
 
 			// Load economy data (logged-in only — no wallet for anon users)
 			if (isLoggedIn) {
@@ -340,6 +341,7 @@
 				// in, so the freshly-authenticated account gets credit.
 				void migrateLoggedOutScore();
 			}
+			void urjoJourney.markAppReady();
 		} catch (error) {
 			errorMessage =
 				error instanceof Error ? error.message : "Failed to load game";
@@ -360,32 +362,38 @@
 	}
 
 	/**
-	 * Replay a logged-out score (stashed in localStorage before the login
-	 * reload) so the newly signed-in account gets credit. Best-effort and
-	 * idempotent server-side; we clear the local copy once consumed.
+	 * Claim a short-lived server receipt after the login reload. The browser
+	 * stores no score, board, or mistake data and therefore cannot forge credit.
 	 */
 	async function migrateLoggedOutScore() {
 		if (!postId) return;
-		const stashed = readLoggedOutScore(postId);
+		const stashed = readLoggedOutMigration(postId);
 		if (!stashed) return;
 		try {
 			const response = await fetch("/api/game/migrate-logged-out-score", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					timeTaken: stashed.timeTaken,
-					mistakes: stashed.mistakes,
-					board: stashed.board,
-				}),
+				body: JSON.stringify({ migrationToken: stashed.migrationToken }),
 			});
 			if (response.ok) {
 				const data = await response.json();
-				clearLoggedOutScore(postId);
+				clearLoggedOutMigration(postId);
 				if (data.streak) streakData = data.streak;
 				if (data.coinReward?.total) coins += data.coinReward.total;
 			}
 		} catch {
 			// Non-critical — score stays stashed for a later retry.
+		}
+	}
+
+	async function startServerTimer(): Promise<void> {
+		try {
+			await fetch("/api/game/timer-start", {
+				method: "POST",
+				headers: measurementHeaders(contentId),
+			});
+		} catch {
+			// The server retains its issuance-time fallback if this request fails.
 		}
 	}
 
@@ -402,9 +410,14 @@
 		if (cell.locked) return;
 
 		// Start the puzzle timer on the first cell touch of this puzzle.
+		const startsPuzzle = !timerStarted;
 		if (!timerStarted) {
 			startTime = Date.now();
 			timerStarted = true;
+		}
+		if (startsPuzzle) {
+			void startServerTimer();
+			void urjoJourney.beginPuzzle(gridSize);
 		}
 
 		// Track mistakes: check previous cell when moving to a new one
@@ -427,7 +440,9 @@
 		// Check completion client-side using full constraint validation
 		if (isGridComplete(grid, gridSize)) {
 			isCompleted = true;
-			timeTaken = getElapsedSeconds(startTime);
+			completionPending = true;
+			completionVerified = false;
+			timeTaken = getCompletedSeconds(startTime);
 			// Check last active cell before reporting
 			onPuzzleComplete(grid, gridSize);
 			reportCompletion(timeTaken);
@@ -446,35 +461,18 @@
 		// before crediting anything (completion is never taken on trust).
 		const solvedBoard = serializeGrid(grid);
 
-		// Logged-out players: stash the result so it survives the login reload
-		// and can be credited once they sign in. Skip the session-run/economy
-		// round-trip — there's no wallet to credit server-side.
-		if (!isLoggedIn) {
-			if (postId) {
-				writeLoggedOutScore({
-					postId,
-					timeTaken: time,
-					mistakes: $mistakeCount,
-					board: solvedBoard,
-				});
-			}
-		}
-
-		// Bump the session-run counter BEFORE the POST so the server applies
-		// the right multiplier for *this* solve (the freshly incremented
-		// value reflects how many puzzles have been solved this session,
-		// inclusive of the one we're reporting now).
+		// Keep an optimistic local run count for immediate UI feedback. The
+		// response replaces it with the server-verified count used for rewards.
 		const newSessionRun = incrementSessionRun();
 		sessionRun = newSessionRun;
 
 		try {
 			const response = await fetch("/api/game/complete", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: measurementHeaders(contentId),
 				body: JSON.stringify({
 					timeTaken: time,
 					mistakes: $mistakeCount,
-					sessionRun: newSessionRun,
 					board: solvedBoard,
 					// Include personal challenge beat info for bonus reward
 					...(beatPersonalChallenge && personalChallenge
@@ -490,7 +488,25 @@
 			});
 
 			if (response.ok) {
-				const data = await response.json();
+				const data: CompleteResponse = await response.json();
+				if (!isLoggedIn && postId && data.migrationToken) {
+					writeLoggedOutMigration({
+						postId,
+						migrationToken: data.migrationToken,
+					});
+				}
+				completionId = data.completionId ?? null;
+				timeTaken = data.timeTaken;
+				completionVerified = true;
+				const performanceScore =
+					typeof data.performanceScore === "number"
+						? data.performanceScore
+						: Math.max(0, Math.round(10000 / Math.max(data.timeTaken, 1)));
+				void urjoJourney.completePuzzle({
+					performanceScore,
+					timeTaken: data.timeTaken,
+					mistakes: $mistakeCount,
+				});
 				if (data.streak) {
 					streakData = data.streak;
 				}
@@ -545,17 +561,11 @@
 				if (typeof data.sessionRun === "number") {
 					sessionRun = data.sessionRun;
 				}
-				if (typeof data.sessionRunMultiplier === "number") {
-					sessionRunMultiplier = data.sessionRunMultiplier;
-				}
 				if (typeof data.sessionRunBonusCoins === "number") {
 					sessionRunBonusCoins = data.sessionRunBonusCoins;
 					if (data.sessionRunBonusCoins > 0) {
 						coins += data.sessionRunBonusCoins;
 					}
-				}
-				if (data.streakForecast) {
-					streakForecast = data.streakForecast;
 				}
 				// Weekend Event refresh: server is source of truth for both
 				// the banner countdown (hoursLeft) and the per-completion
@@ -570,9 +580,15 @@
 						coins += data.weekendBonusCoins;
 					}
 				}
+			} else {
+				void urjoJourney.abandonPuzzle("verification_failed");
+				showToast("Solve could not be verified, so it was not ranked.");
 			}
 		} catch {
-			// Non-critical, continue anyway
+			void urjoJourney.abandonPuzzle("network_error");
+			showToast("Solve could not be verified, so it was not ranked.");
+		} finally {
+			completionPending = false;
 		}
 	}
 
@@ -581,12 +597,14 @@
 	 */
 	async function handleChallenge(customTitle?: string) {
 		if (hasChallenged) return;
+		if (completionId === null) {
+			showToast("Finish a verified puzzle before creating a challenge.");
+			return;
+		}
 		void fireOnce(postId ?? "", "challenge");
 		try {
 			const challengeBody = {
-				timeTaken,
-				skillLevel,
-				mistakes: $mistakeCount,
+				completionId,
 				...(customTitle && { customTitle }),
 			};
 			const response = await fetch("/api/game/challenge", {
@@ -594,12 +612,12 @@
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(challengeBody),
 			});
-			const data = await response.json();
+			const data: ChallengeResponse = await response.json();
 			if (response.ok && data.success) {
 				hasChallenged = true;
 				challengeUrl = data.postUrl ?? null;
+				challengePostId = data.postId ?? null;
 				showToast("Challenge post created!");
-				await handleNextChallenge();
 			} else {
 				const reason: string =
 					typeof data?.error === "string"
@@ -612,15 +630,31 @@
 		}
 	}
 
+	async function handleShareChallenge(): Promise<void> {
+		if (challengePostId === null || sharingChallenge) return;
+		sharingChallenge = true;
+		try {
+			await showShareSheet({
+				post: challengePostId,
+				title: "Can you beat my Urjo time?",
+				text: `I solved Puzzle #${puzzleNumber} in ${timeTaken}s. Can you beat it?`,
+			});
+		} catch {
+			// Cancelling or closing the native share sheet leaves the Rival post intact.
+		} finally {
+			sharingChallenge = false;
+		}
+	}
+
 	/**
 	 * Handle "Next Challenge" button.
 	 */
 	async function handleNextChallenge() {
+		void urjoJourney.abandonPuzzle("next_puzzle");
 		hasChallenged = false;
 		challengeUrl = null;
+		challengePostId = null;
 		challengePromptEligible = false;
-		resetLatch();
-		void fireOnce(postId ?? "", "next-puzzle");
 		resetHints();
 		try {
 			const timeSpent = timerStarted
@@ -628,15 +662,15 @@
 				: 0;
 			const response = await fetch("/api/game/next-challenge", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: sessionHeaders(),
 				body: JSON.stringify({ timeSpent }),
 			});
 			if (!response.ok) throw new Error("Failed to get next challenge");
 
 			const data: NextChallengeResponse = await response.json();
+			beginAttempt(data.contentId);
 
 			puzzleColors = data.puzzle.colors;
-			puzzleSolution = data.puzzle.solution;
 			puzzleNumbers = data.puzzle.numbers;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
@@ -647,6 +681,8 @@
 				data.puzzle.gridSize,
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
 			isCompleted = false;
+			completionPending = false;
+			completionVerified = false;
 			startTime = Date.now();
 			timerStarted = false;
 			resetMistakes();
@@ -659,9 +695,13 @@
 		}
 	}
 	function handleRestart() {
+		void urjoJourney.abandonPuzzle("restart");
 		hasChallenged = false;
 		challengeUrl = null;
+		challengePostId = null;
 		challengePromptEligible = false;
+		completionId = null;
+		setFirstActionContentId(contentId);
 		resetLatch();
 		resetHints();
 		grid = deserializeGrid(
@@ -671,6 +711,8 @@
 			gridSize,
 		);
 		isCompleted = false;
+		completionPending = false;
+		completionVerified = false;
 		startTime = Date.now();
 		timerStarted = false;
 		resetMistakes();
@@ -685,22 +727,21 @@
 		void fireOnce(postId ?? "", "grid-size");
 		const previousSize = gridSizePreference;
 		gridSizePreference = newSize;
-		resetLatch();
 		resetHints();
 
 		try {
 			const response = await fetch("/api/game/grid-size", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: sessionHeaders(),
 				body: JSON.stringify({ gridSize: newSize }),
 			});
 
 			if (!response.ok) throw new Error("Failed to set grid size");
 
 			const data: GridSizeResponse = await response.json();
+			beginAttempt(data.contentId);
 
 			puzzleColors = data.puzzle.colors;
-			puzzleSolution = data.puzzle.solution;
 			puzzleNumbers = data.puzzle.numbers;
 			gridSize = data.puzzle.gridSize;
 			skillLevel = data.skillLevel;
@@ -711,9 +752,13 @@
 				data.puzzle.colors,
 				data.puzzle.gridSize,
 			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
+			void urjoJourney.abandonPuzzle("grid_size_changed");
 			isCompleted = false;
-			hasChallenged = false;
-			challengeUrl = null;
+			completionPending = false;
+			completionVerified = false;
+				hasChallenged = false;
+				challengeUrl = null;
+				challengePostId = null;
 			challengePromptEligible = false;
 			startTime = Date.now();
 			timerStarted = false;
@@ -725,27 +770,45 @@
 		}
 	}
 
-	/**
-	 * Handle tutorial completion.
-	 */
-	async function handleTutorialComplete() {
+	async function handleOnboardingChoice(
+		choice: "warmup" | "advertised",
+	): Promise<void> {
+		if (onboardingChoicePending) return;
+		onboardingChoicePending = true;
 		try {
-			await fetch("/api/game/tutorial-complete", { method: "POST" });
+			const response = await fetch("/api/game/onboarding-choice", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ choice }),
+			});
+			if (!response.ok) throw new Error("Choice was not accepted");
+
+			const data: OnboardingChoiceResponse = await response.json();
+			beginAttempt(data.contentId);
+			puzzleColors = data.puzzle.colors;
+			puzzleNumbers = data.puzzle.numbers;
+			gridSize = data.puzzle.gridSize;
+			gridSizePreference = data.puzzle.gridSize;
+			skillLevel = data.skillLevel;
+			grid = deserializeGrid(
+				data.puzzle.colors,
+				data.puzzle.numbers,
+				data.puzzle.colors,
+				data.puzzle.gridSize,
+			).map((row) => row.map((cell) => ({ ...cell, isLoading: false })));
+			isCompleted = false;
+			completionPending = false;
+			completionVerified = false;
+			startTime = Date.now();
+			timerStarted = false;
+			resetMistakes();
+			showVariantCOverlay = true;
+			currentView = "game";
 		} catch {
-			// Non-critical, continue anyway
+			showToast("That choice could not be loaded. Please try again.");
+		} finally {
+			onboardingChoicePending = false;
 		}
-
-		tutorialCompleted = true;
-		currentView = "game";
-	}
-
-	/**
-	 * Handle "Play" / "Beat Xs" tap on the first screen (Variants A and B).
-	 * Fires the screen-tap analytics event then transitions to the game.
-	 */
-	function handleFirstScreenPlay(): void {
-		fetch("/api/game/first-screen-tap", { method: "POST" }).catch(() => {});
-		currentView = "game";
 	}
 </script>
 
@@ -765,36 +828,21 @@
 				Retry
 			</button>
 		</div>
-	{:else if currentView === "tutorial"}
-		<TutorialView
-			onComplete={handleTutorialComplete}
-			isReplay={tutorialCompleted}
+	{:else if currentView === "warmup-choice"}
+		<WarmupChoice
+			{advertisedGridSize}
+			loading={onboardingChoicePending}
+			onChoose={handleOnboardingChoice}
 		/>
-	{:else if currentView === "first-screen"}
-		<FirstScreen
-			puzzle={firstScreenData?.samplePuzzle ?? {
-				colors: puzzleColors,
-				numbers: puzzleNumbers,
-				solution: puzzleSolution,
-				difficulty: "easy",
+		{:else if currentView === "game"}
+			{@const gameProps = {
+				grid,
 				gridSize,
-			}}
-			{puzzleNumber}
-			communityStats={firstScreenData?.communityStats ?? {
-				activePlayers: 0,
-				collectiveStreakDays: 0,
-			}}
-			targetToBeat={firstScreenData?.targetToBeat}
-			variant={abVariant ?? "A"}
-			currentStreak={streakData.currentStreak}
-			onPlay={handleFirstScreenPlay}
-		/>
-	{:else if currentView === "game"}
-		{@const gameProps = {
-			grid,
-			gridSize,
-			isCompleted,
-			streakData,
+				isCompleted,
+					completionPending,
+					completionVerified,
+					completionId,
+				streakData,
 			hasChallenged,
 			challengeUrl,
 			coins,
@@ -807,8 +855,9 @@
 			onCellChange: handleCellChange,
 			onNextChallenge: handleNextChallenge,
 			onRestart: handleRestart,
-			onChallenge: handleChallenge,
-			solution: puzzleSolution,
+				onChallenge: handleChallenge,
+				onShareChallenge: handleShareChallenge,
+				sharingChallenge,
 			onOpenAnalytics: () => (showAnalytics = true),
 			isMod,
 			onGridSizeChange: handleGridSizeChange,
@@ -820,13 +869,10 @@
 			seasonRank,
 			seasonPoints,
 			currentSeason,
-			notifyOptIn,
 			hintsDismissed,
 			challengePromptEligible,
 			sessionRun,
-			sessionRunMultiplier,
 			sessionRunBonusCoins,
-			streakForecast,
 			weekendEvent,
 			weekendBonusCoins,
 			seasonProgress,
@@ -834,18 +880,19 @@
 			...(challengerInfo !== undefined && { challengerInfo }),
 			...(username !== undefined && { username }),
 			...(engagement !== undefined && { engagement }),
-			showOnboardingOverlay: showVariantCOverlay,
-			...(showVariantCOverlay &&
-				firstScreenData !== undefined && {
+				...(coinReward !== undefined && { coinReward }),
+				showOnboardingOverlay: showVariantCOverlay,
+				...(showVariantCOverlay && {
 					onboardingOverlay: {
 						activePlayers:
-							firstScreenData.communityStats.activePlayers,
-						...(firstScreenData.targetToBeat !== undefined && {
+							firstScreenData?.communityStats.activePlayers ??
+							communityActivePlayers,
+						...(firstScreenData?.targetToBeat !== undefined && {
 							targetToBeat: firstScreenData.targetToBeat,
 						}),
 					},
 				}),
-		}}
+			}}
 		<GameView {...gameProps} />
 	{/if}
 </div>
@@ -859,9 +906,9 @@
 	<div class="level-up-overlay" role="status" aria-live="polite">
 		<div class="level-up-card">
 			<div class="level-up-icon">⬆️</div>
-			<div class="level-up-title">Level Up!</div>
+			<div class="level-up-title">Skill Up!</div>
 			<div class="level-up-subtitle">
-				You're now <strong>Level {levelUpNewLevel}</strong>
+				You're now <strong>Skill Level {levelUpNewLevel}</strong>
 			</div>
 		</div>
 	</div>

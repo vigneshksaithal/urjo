@@ -11,7 +11,9 @@ import { describe, expect, it } from 'vitest'
 import {
     computeViews,
     getSimpleMetrics,
+    readAnonymousPlaytime,
     readPlaytime,
+    recordAnonymousPlaytimeTick,
     recordPlaytimeTick,
     trackOpen,
 } from '../metrics'
@@ -91,6 +93,24 @@ testPlaytimeEmpty('readPlaytime returns null average when there are no sessions'
     const pt = await readPlaytime('2026-01-01')
     expect(pt.sessions).toBe(0)
     expect(pt.averageSeconds).toBe(null)
+})
+
+const testAnonymousPlaytime = createDevvitTest()
+testAnonymousPlaytime('anonymous playtime is aggregated separately and deduped by page session', async () => {
+    await recordAnonymousPlaytimeTick('2026-07-15', 'session_anon-one', 5)
+    await recordAnonymousPlaytimeTick('2026-07-15', 'session_anon-one', 5)
+    await recordAnonymousPlaytimeTick('2026-07-15', 'session_anon-two', 10)
+
+    expect(await readAnonymousPlaytime('2026-07-15')).toEqual({
+        totalSeconds: 20,
+        sessions: 2,
+        averageSeconds: 10,
+    })
+    expect(await readPlaytime('2026-07-15')).toEqual({
+        totalSeconds: 0,
+        sessions: 0,
+        averageSeconds: null,
+    })
 })
 
 // ─── getSimpleMetrics ───────────────────────────────────────────────────────────

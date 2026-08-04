@@ -13,6 +13,10 @@ import type {
     InviteChannel,
     PerChannelMetrics,
 } from '../../shared/growth-types'
+import {
+    registerUserDynamicKey,
+    registerUserSortedSetMembership,
+} from './account-deletion'
 
 // ─── TTL Constants ─────────────────────────────────────────────────────────────
 
@@ -62,13 +66,23 @@ const channelOpensKey = (date: string, channel: InviteChannel): string =>
 const channelConversionsKey = (date: string, channel: InviteChannel): string =>
     `viral:${date}:channel:${channel}:conversions`
 
-const trySetDedup = async (key: string, ttl: number): Promise<boolean> => {
+const trySetUserDedup = async (
+    key: string,
+    ttl: number,
+    userId: string,
+): Promise<boolean> => {
+    await registerUserDynamicKey(userId, key)
     const existing = await redis.get(key)
     if (existing !== undefined) return false
 
     await redis.set(key, '1')
     await redis.expire(key, ttl)
     return true
+}
+
+const addUserToSortedSet = async (key: string, userId: string): Promise<void> => {
+    await registerUserSortedSetMembership(userId, key)
+    await redis.zAdd(key, { member: userId, score: Date.now() })
 }
 
 // ─── Redis Recording Functions ─────────────────────────────────────────────────
@@ -80,7 +94,7 @@ const trySetDedup = async (key: string, ttl: number): Promise<boolean> => {
  */
 export const recordCompleter = async (date: string, userId: string): Promise<void> => {
     const key = completersKey(date)
-    await redis.zAdd(key, { member: userId, score: Date.now() })
+    await addUserToSortedSet(key, userId)
     await redis.expire(key, TTL_90D)
 }
 
@@ -90,11 +104,11 @@ export const recordCompleter = async (date: string, userId: string): Promise<voi
  * share actions within the same day.
  */
 export const recordSharer = async (date: string, userId: string): Promise<void> => {
-    const isNew = await trySetDedup(shareDedupKey(date, userId), TTL_48H)
+    const isNew = await trySetUserDedup(shareDedupKey(date, userId), TTL_48H, userId)
     if (!isNew) return
 
     const key = sharersKey(date)
-    await redis.zAdd(key, { member: userId, score: Date.now() })
+    await addUserToSortedSet(key, userId)
     await redis.expire(key, TTL_90D)
 }
 
@@ -153,7 +167,11 @@ export const recordChannelOpen = async (
     channel: InviteChannel,
     userId: string,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(channelOpenDedupKey(date, channel, userId), TTL_48H)
+    const isNew = await trySetUserDedup(
+        channelOpenDedupKey(date, channel, userId),
+        TTL_48H,
+        userId,
+    )
     if (!isNew) return false
 
     const key = channelOpensKey(date, channel)
@@ -171,7 +189,11 @@ export const recordChannelConversion = async (
     channel: InviteChannel,
     userId: string,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(channelConversionDedupKey(channel, userId), TTL_90D)
+    const isNew = await trySetUserDedup(
+        channelConversionDedupKey(channel, userId),
+        TTL_90D,
+        userId,
+    )
     if (!isNew) return false
 
     const key = channelConversionsKey(date, channel)

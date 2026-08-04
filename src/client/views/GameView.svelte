@@ -1,17 +1,19 @@
 <script lang="ts">
 	import { navigateTo, showLoginPrompt, showToast } from "@devvit/web/client";
-	import type { CellColor, Grid, StreakData } from "../../shared/types";
+	import type { CellColor, CoinReward, Grid, StreakData } from "../../shared/types";
 	import type { EngagementCompletionData } from "../../shared/engagement-types";
 	import type { SeasonInfo } from "../../shared/growth-types";
 	import type { PersonalChallengeData } from "../../shared/social-types";
 	import { validateGrid } from "../lib/validation";
 	import { computeBoardSize } from "../lib/board-layout";
+	import { shouldCompactInlineBoard } from "../lib/inline-layout";
 	import { fireOnce } from "../stores/first-action";
 	import { getLoginGate, LOGIN_CTA } from "../lib/login-gate";
+	import { getEarnedCoins } from "../lib/completion-reward";
+	import { serializeGrid } from "../lib/utils";
 	import ConfettiEffect from "../components/ConfettiEffect.svelte";
 	import GameBoard from "../components/GameBoard.svelte";
 	import LeaderboardModal from "../components/LeaderboardModal.svelte";
-	import GridSizeSelector from "../components/GridSizeSelector.svelte";
 	import AchievementsPanel from "../components/AchievementsPanel.svelte";
 	import StreakMilestoneOverlay from "../components/StreakMilestoneOverlay.svelte";
 
@@ -21,10 +23,14 @@
 	import LevelPathOverlay from "../components/LevelPathOverlay.svelte";
 	import PersonalChallengeBanner from "../components/PersonalChallengeBanner.svelte";
 	import SettingsSheet from "../components/SettingsSheet.svelte";
+	import ProgressionHub from "../components/ProgressionHub.svelte";
+	import UrjoBlitz from "../components/UrjoBlitz.svelte";
 	import Flame from "lucide-svelte/icons/flame";
+	import Medal from "lucide-svelte/icons/medal";
 	import Megaphone from "lucide-svelte/icons/megaphone";
 	import Settings from "lucide-svelte/icons/settings";
 	import Timer from "lucide-svelte/icons/timer";
+	import Trophy from "lucide-svelte/icons/trophy";
 
 	// ─── Grouped Props Types ─────────────────────────────────────────────────────
 	// Props are grouped by domain for better API design, type safety, and testing.
@@ -34,16 +40,18 @@
 		grid: Grid;
 		gridSize: number;
 		isCompleted: boolean;
+		completionPending?: boolean;
+		completionVerified?: boolean;
+		completionId?: string | null;
 		timeTaken?: number;
 		liveElapsedSeconds?: number;
-		mistakes?: number;
-		solution?: string;
 		puzzleColors?: string;
 		puzzleNumber?: number;
 	};
 
 	type ProgressionProps = {
 		coins?: number;
+		coinReward?: CoinReward;
 		streakData: StreakData;
 		skillLevel?: number;
 		pathLevel?: number;
@@ -63,6 +71,7 @@
 		allowsGridSizeChange?: boolean;
 		hasChallenged: boolean;
 		challengeUrl: string | null;
+		sharingChallenge?: boolean;
 		challengePromptEligible?: boolean;
 		challengerInfo?: {
 			username: string;
@@ -83,18 +92,18 @@
 			  }
 			| undefined;
 		engagement?: EngagementCompletionData;
+		weekendBonusCoins?: number;
 	};
 
 	type SessionProps = {
 		sessionRun?: number;
-		sessionRunMultiplier?: number;
+		sessionRunBonusCoins?: number;
 	};
 
 	type UserProps = {
 		username?: string;
 		isLoggedIn?: boolean;
 		isMod?: boolean;
-		notifyOptIn?: boolean;
 		hintsDismissed?: {
 			numberConstraint: boolean;
 			adjacencyViolation: boolean;
@@ -106,6 +115,7 @@
 		onNextChallenge: () => void;
 		onRestart: () => void;
 		onChallenge: (customTitle?: string) => void;
+		onShareChallenge: () => void;
 		onOpenAnalytics?: () => void;
 		onGridSizeChange?: (size: number) => void;
 		onEngagementDismissed?: () => void;
@@ -135,37 +145,40 @@
 		gridSize,
 		onCellChange,
 		isCompleted,
+		completionPending = false,
+		completionVerified = false,
+		completionId = null,
 		onNextChallenge,
 		streakData,
 		hasChallenged,
 		challengeUrl,
+		sharingChallenge = false,
 		onChallenge,
+		onShareChallenge,
 		coins,
+		coinReward = undefined,
 		onOpenAnalytics,
 		isMod = false,
 		timeTaken,
 		liveElapsedSeconds = 0,
-		mistakes = 0,
-		username,
 		isLoggedIn = true,
 		isChallenge = false,
 		allowsGridSizeChange = true,
 		onGridSizeChange,
 		engagement,
 		puzzleColors,
-		skillLevel = 1,
 		pathLevel = 1,
 		puzzleNumber = 0,
-		notifyOptIn = false,
 		postId,
-		challengePromptEligible = false,
 		weekendEvent = undefined,
+		weekendBonusCoins = 0,
+		sessionRunBonusCoins = 0,
+		seasonRank = null,
 		// hintsDismissed is accepted for forward-compat; wired in task 13.3
 		hintsDismissed: _hintsDismissed = {
 			numberConstraint: false,
 			adjacencyViolation: false,
 		},
-		solution = "",
 		personalChallenge = null,
 		challengerInfo = undefined,
 		showOnboardingOverlay = false,
@@ -195,6 +208,7 @@
 	let dismissedMilestoneKey = $state<string | null>(null);
 	let showOptInTutorial = $state(false);
 	let showAchievements = $state(false);
+	let modSolvePending = $state(false);
 	// Personal challenge banner - dismissed when user clicks X
 	let showPersonalChallengeBanner = $state(true);
 
@@ -203,14 +217,6 @@
 			showLevelPath = false;
 		}
 	});
-
-	// ─── Notify toggle ─────────────────────────────────────────────────────────
-	// Optimistic update with revert on failure (Reqs 13.1–13.5)
-	// Using a function initialiser avoids the Svelte "captures initial value" warning
-	// while still seeding from the server-provided prop on first render.
-	let localNotifyOptIn = $state((() => notifyOptIn)());
-	let notifySubmitting = $state(false);
-	let notifyError = $state<string | null>(null);
 
 	// ─── Help-tap tracking ────────────────────────────────────────────────────
 	// POST to /api/game/help-tap on the first Help icon tap per session (Req 11.1).
@@ -233,8 +239,12 @@
 	// clipping) while staying square. See src/client/lib/board-layout.ts.
 	let availableWidth = $state(0);
 	let availableHeight = $state(0);
+	let gameHeight = $state(0);
 	const boardSize = $derived(
 		computeBoardSize(availableWidth, availableHeight),
+	);
+	const useCompactInlineBoard = $derived(
+		shouldCompactInlineBoard(gridSize, gameHeight),
 	);
 
 	const currentCompletionKey = $derived(
@@ -254,10 +264,22 @@
 	// Logged-out users see the puzzle only; wallet/streak/season/leaderboard/
 	// social actions are hidden and a sign-in CTA appears instead.
 	const loginGate = $derived(getLoginGate(isLoggedIn));
+	const earnedCoins = $derived(
+		getEarnedCoins({
+			...(coinReward !== undefined && { coinReward }),
+			sessionRunBonusCoins,
+			weekendBonusCoins,
+		}),
+	);
 
 	// Check if user beat a personal challenge (for completion overlay)
 	const personalChallengeBeat = $derived(() => {
-		if (!personalChallenge || !isCompleted || timeTaken === undefined) {
+		if (
+			!personalChallenge ||
+			!isCompleted ||
+			!completionVerified ||
+			timeTaken === undefined
+		) {
 			return null;
 		}
 		if (timeTaken < personalChallenge.time) {
@@ -289,8 +311,8 @@
 
 	async function submitVictoryComment(commentMessage: string): Promise<void> {
 		if (commentingVictory) return;
-		if (!puzzleNumber) {
-			showToast("Puzzle not ready yet — try again in a moment.");
+		if (completionId === null) {
+			showToast("Finish a verified puzzle before commenting.");
 			return;
 		}
 		void fireOnce(postId ?? "", "result-comment");
@@ -302,20 +324,11 @@
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					puzzleNumber,
-					gridSize,
-					skillLevel,
-					timeTaken: Math.max(timeTaken ?? 0, 1),
-					mistakes,
-					streak: streakData.currentStreak,
+					completionId,
 					commentMessage:
 						normalizedCommentMessage.length > 0
 							? normalizedCommentMessage
 							: undefined,
-					colorGrid: buildVictoryColorGrid(
-						puzzleColors ?? "",
-						gridSize,
-					),
 				}),
 			});
 
@@ -329,7 +342,6 @@
 			}
 
 			showToast("Victory commented!");
-			handlePrimaryCta();
 		} catch (error) {
 			showToast(
 				error instanceof Error
@@ -355,50 +367,8 @@
 		dismissedMilestoneKey = milestoneKey;
 	}
 
-	// Notify toggle handler — optimistic update, revert on failure (Req 13.5)
-	async function handleNotifyToggle(): Promise<void> {
-		if (notifySubmitting) return;
-		void fireOnce(postId ?? "", "notify");
-		notifySubmitting = true;
-		notifyError = null;
-		const previous = localNotifyOptIn;
-		localNotifyOptIn = !previous;
-		const endpoint = previous
-			? "/api/game/notify/opt-out"
-			: "/api/game/notify/opt-in";
-		try {
-			const res = await fetch(endpoint, { method: "POST" });
-			if (!res.ok) throw new Error("Request failed");
-			const json = (await res.json()) as { optedIn: boolean };
-			localNotifyOptIn = json.optedIn;
-		} catch {
-			// Revert on failure and show inline error (Req 13.5)
-			localNotifyOptIn = previous;
-			notifyError =
-				"Could not update notification preference. Try again.";
-		} finally {
-			notifySubmitting = false;
-		}
-	}
-
 	function handleOpenOptInTutorial(): void {
 		showOptInTutorial = true;
-	}
-
-	function buildVictoryColorGrid(
-		colors: string,
-		size: number,
-	): ("red" | "blue")[][] {
-		if (colors.length < size * size) return [];
-		const rows: ("red" | "blue")[][] = [];
-		for (let row = 0; row < size; row++) {
-			const cells: ("red" | "blue")[] = [];
-			for (let col = 0; col < size; col++) {
-				cells.push(colors[row * size + col] === "r" ? "red" : "blue");
-			}
-			rows.push(cells);
-		}
-		return rows;
 	}
 
 	async function handleOptInTutorialComplete(): Promise<void> {
@@ -415,57 +385,71 @@
 	}
 
 	// ─── Mod Debug: Instant Solve ────────────────────────────────────────────────
-	// Testing-only feature for mods. Fills the entire grid with the correct solution.
-	function handleModSolve(): void {
-		if (!solution || isCompleted) return;
-
-		// Parse solution string (e.g., "rbbrrbbrrbbrrbbb")
-		const solutionColors: CellColor[] = solution.split("").map((char) => {
-			if (char === "r") return "red";
-			if (char === "b") return "blue";
-			return null;
-		});
-
-		// Fill each cell with the solution color
-		for (let row = 0; row < gridSize; row++) {
-			for (let col = 0; col < gridSize; col++) {
-				const index = row * gridSize + col;
-				const cell = grid[row]?.[col];
-				if (cell && !cell.locked && solutionColors[index]) {
-					onCellChange(row, col, solutionColors[index]!);
+	async function handleModSolve(): Promise<void> {
+		if (!isMod || isCompleted || modSolvePending) return;
+		modSolvePending = true;
+		try {
+			const response = await fetch("/api/game/mod-solution", { method: "POST" });
+			const data: unknown = await response.json().catch(() => null);
+			const solution = readModSolution(data);
+			if (!response.ok || !solution || solution.length !== gridSize * gridSize) {
+				throw new Error("Could not load the moderator solution");
+			}
+			for (let row = 0; row < gridSize; row++) {
+				for (let col = 0; col < gridSize; col++) {
+					const cell = grid[row]?.[col];
+					if (!cell || cell.locked) continue;
+					const color = solution[row * gridSize + col] === "r" ? "red" : "blue";
+					onCellChange(row, col, color);
 				}
 			}
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : "Moderator solve failed");
+		} finally {
+			modSolvePending = false;
 		}
+	}
+
+	function readModSolution(raw: unknown): string | null {
+		if (!raw || typeof raw !== "object" || !("data" in raw)) return null;
+		const data = raw.data;
+		if (!data || typeof data !== "object" || !("solution" in data)) return null;
+		return typeof data.solution === "string" && /^[rb]+$/.test(data.solution)
+			? data.solution
+			: null;
 	}
 </script>
 
-<div class="h-full w-full flex flex-col overflow-hidden">
+<div
+	class="h-full w-full flex flex-col overflow-hidden"
+	bind:clientHeight={gameHeight}
+>
 	<!-- Weekend Event banner — persistent across the in-game and completion
 	     screens whenever the server reports an active event. Provides the
 	     FOMO clock the game previously lacked (CoC builder timer, Subway
 	     Surfers daily challenge timer). Tapping it has no action; it's a
 	     status indicator, not a CTA. -->
-	{#if weekendEvent?.active}
+	{#if weekendEvent?.active && !useCompactInlineBoard}
 		<section
 			class="flex-none w-full bg-amber-400 text-stone-950 shadow-[0_6px_22px_rgba(245,158,11,0.28)]"
 			aria-label="{weekendEvent.name} announcement"
 		>
 			<div
-				class="mx-auto flex w-full max-w-xl items-start gap-3 px-4 py-3 sm:items-center sm:justify-center"
+				class="mx-auto flex w-full max-w-xl items-center justify-center gap-2 px-3 py-2"
 			>
 				<Megaphone
-					class="h-7 w-7 shrink-0 text-stone-950 sm:h-6 sm:w-6"
+					class="h-5 w-5 shrink-0 text-stone-950"
 					aria-hidden="true"
 				/>
 				<div
-					class="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-center sm:gap-3"
+					class="flex min-w-0 items-center justify-center gap-2"
 				>
-					<span class="text-lg font-black leading-tight sm:text-base">
+					<span class="truncate text-sm font-black leading-tight">
 						{weekendEvent.name} · {weekendEvent.multiplier}× coins
 					</span>
 					{#if weekendEvent.hoursLeft !== null && weekendEvent.hoursLeft > 0}
 						<span
-							class="text-sm font-bold leading-tight text-stone-800 sm:border-l sm:border-stone-900/25 sm:pl-3 sm:text-xs"
+							class="shrink-0 border-l border-stone-900/25 pl-2 text-xs font-bold leading-tight text-stone-800"
 						>
 							Ends in {weekendEvent.hoursLeft}h
 						</span>
@@ -476,7 +460,7 @@
 	{/if}
 
 	<!-- Personal challenge banner — shown when user opens a challenge link -->
-	{#if personalChallenge && showPersonalChallengeBanner && !isCompleted}
+	{#if personalChallenge && showPersonalChallengeBanner && !isCompleted && !useCompactInlineBoard}
 		<PersonalChallengeBanner
 			challenge={personalChallenge}
 			onDismiss={() => (showPersonalChallengeBanner = false)}
@@ -485,7 +469,7 @@
 
 	<!-- Unified top bar: streak + timer in a single pill -->
 	{#if !isCompleted}
-		<div class="flex w-full items-center justify-center px-1 pt-3 pb-3">
+		<div class="flex w-full items-center justify-center px-1 py-2">
 			<div
 				class="flex items-center gap-5 rounded-full bg-theme-bg-secondary/85 border border-theme-border/70 px-4 py-2 shadow-sm"
 				aria-label="{liveElapsedSeconds ?? 0} seconds elapsed"
@@ -518,7 +502,7 @@
 	     for signed-in users. Pairs the prompt with a clear value proposition
 	     (save progress + unlock) per Reddit's logged-out guidance. Triggered
 	     only by the user's tap, so it's a natural conversion moment. -->
-	{#if !isCompleted && loginGate.showLoginCta}
+	{#if !isCompleted && loginGate.showLoginCta && !useCompactInlineBoard}
 		<div class="flex-none flex justify-center px-3 pb-2">
 			<button
 				onclick={handleLoginPrompt}
@@ -532,19 +516,33 @@
 		</div>
 	{/if}
 
-	<!-- Grid size selector: its own row, centred, hidden for challenge posts -->
-	{#if !isChallenge && allowsGridSizeChange && onGridSizeChange}
-		<div class="flex-none flex justify-center px-3 pb-2">
-			<GridSizeSelector
-				{gridSize}
-				onGridSizeChange={handleGridSizeSelect}
-			/>
+	{#if !isCompleted && useCompactInlineBoard && (personalChallenge || (isChallenge && challengerInfo) || weekendEvent?.active || loginGate.showLoginCta)}
+		<div
+			data-testid="compact-game-status"
+			class="flex-none flex min-w-0 items-center justify-center px-3 pb-1.5 text-xs font-semibold text-theme-text-secondary"
+		>
+			{#if personalChallenge}
+				<span class="truncate">⚔️ Beat {personalChallenge.username}'s {personalChallenge.time}s</span>
+			{:else if isChallenge && challengerInfo}
+				<span class="truncate">⚔️ Beat {challengerInfo.username}'s {challengerInfo.targetSeconds}s</span>
+			{:else if weekendEvent?.active}
+				<span class="truncate">{weekendEvent.emoji} {weekendEvent.name} · {weekendEvent.multiplier}× coins</span>
+			{:else}
+				<button
+					onclick={handleLoginPrompt}
+					class="rounded-full bg-urjo-blue/10 px-3 py-1 text-urjo-blue transition-all active:scale-95"
+				>
+					{LOGIN_CTA.button}
+				</button>
+			{/if}
 		</div>
 	{/if}
 
 	<!-- Main game area -->
 	<main
-		class="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden px-3 pb-2"
+		class="flex-1 min-h-0 flex items-center justify-center relative overflow-hidden pb-2"
+		class:px-1={gridSize >= 8}
+		class:px-3={gridSize < 8}
 	>
 		<!-- Board wrapper: maintains square aspect ratio within available space.
 		     The outer div is measured (bind:clientWidth/Height) to get the
@@ -571,7 +569,7 @@
 	</main>
 
 	<!-- Challenger strip — shown below the board on challenge posts -->
-	{#if isChallenge && challengerInfo && !isCompleted}
+	{#if isChallenge && challengerInfo && !isCompleted && !useCompactInlineBoard}
 		<div class="flex-none flex items-center justify-center gap-3 px-4 pb-2">
 			{#if challengerInfo.avatarUrl}
 				<img
@@ -594,21 +592,47 @@
 	{/if}
 
 	<!-- Footer -->
-	<footer class="flex-none flex items-center justify-between gap-2 px-1">
-		<div class="w-9"></div>
+	{#if loginGate.showWallet}
+		<div class="flex-none space-y-1 px-2 pb-1">
+			<UrjoBlitz />
+			<ProgressionHub />
+		</div>
+	{/if}
+
+	<footer class="flex-none flex items-center justify-between gap-2 px-2 pb-1">
+		<div class="flex items-center gap-1">
+			{#if loginGate.showWallet}
+				<button
+					onclick={() => (showLeaderboard = true)}
+					class="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-theme-text-muted transition-colors hover:bg-theme-hover"
+					aria-label="Leaderboard"
+				>
+					<Trophy class="h-5 w-5" />
+				</button>
+				<button
+					onclick={() => (showAchievements = true)}
+					class="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-theme-text-muted transition-colors hover:bg-theme-hover"
+					aria-label="Achievements"
+				>
+					<Medal class="h-5 w-5" />
+				</button>
+			{/if}
+		</div>
 		<div class="flex-1 flex justify-center">
 			{#if isMod && !isCompleted}
 				<button
 					onclick={handleModSolve}
-					class="px-3 py-1.5 text-xs font-bold rounded-lg bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 active:scale-95 transition-all"
+					disabled={modSolvePending}
+					class="min-h-11 rounded-xl border border-purple-500/40 bg-purple-500/20 px-3 text-xs font-bold text-purple-300 transition-all hover:bg-purple-500/30 active:scale-95 disabled:cursor-wait disabled:opacity-60"
+					aria-label="Solve puzzle for moderator testing"
 				>
-					⚡ Solve
+					{modSolvePending ? "Solving…" : "⚡ Solve"}
 				</button>
 			{/if}
 		</div>
 		<button
 			onclick={() => (showSettings = true)}
-			class="flex items-center justify-center w-9 h-9 rounded-lg hover:bg-theme-hover transition-colors shrink-0"
+			class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-theme-hover"
 			aria-label="Settings"
 		>
 			<Settings class="w-5 h-5 text-theme-text-muted" />
@@ -641,7 +665,7 @@
 				</p>
 			{:else}
 				<p class="text-xs text-theme-text-muted">
-					Tap any cell to start
+					Tap a dark dot to cycle colors
 				</p>
 			{/if}
 		</div>
@@ -651,17 +675,26 @@
 <!-- Completion overlay -->
 <CompletionOverlay
 	{isCompleted}
+	{completionPending}
+	{completionVerified}
 	timeTaken={timeTaken ?? 0}
-	{coins}
+	{earnedCoins}
+	{seasonRank}
+	{pathLevel}
+	streak={streakData.currentStreak}
 	{loginGate}
 	onContinue={handlePrimaryCta}
+	onLogin={handleLoginPrompt}
 	onCommentVictory={submitVictoryComment}
 	{commentingVictory}
-	onChallenge={requestChallenge}
+		onChallenge={requestChallenge}
+		onOpenChallenge={openChallenge}
+		{onShareChallenge}
+		{sharingChallenge}
 	{hasChallenged}
-	{puzzleColors}
 	{gridSize}
 	{puzzleNumber}
+	editorSeedSolution={serializeGrid(grid)}
 	personalChallengeBeat={personalChallengeBeat()}
 />
 
@@ -695,8 +728,14 @@
 	isOpen={showSettings}
 	onClose={() => (showSettings = false)}
 	{isMod}
-	onTutorial={handleOpenOptInTutorial}
-	{onOpenAnalytics}
+	showProgression={loginGate.showWallet}
+	onLeaderboard={() => (showLeaderboard = true)}
+	onAchievements={() => (showAchievements = true)}
+	{gridSize}
+	allowsGridSizeChange={!isChallenge && allowsGridSizeChange}
+	onGridSizeChange={handleGridSizeSelect}
+	onTutorial={handleHelpTap}
+	{...(onOpenAnalytics !== undefined ? { onOpenAnalytics } : {})}
 	onShowModPreview={() => (showModPreview = true)}
 />
 

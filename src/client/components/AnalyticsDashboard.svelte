@@ -14,12 +14,16 @@
     type VariantMetrics = {
         variant: "A" | "B" | "C";
         opens: number;
-        screenTaps: number | null;
         firstActions: number;
         completions: number;
-        screenTapRate: number | null;
         firstActionRate: number | null;
         completionRate: number | null;
+    };
+
+    const VARIANT_LABELS: Record<VariantMetrics["variant"], string> = {
+        A: "A · Direct",
+        B: "B · Direct",
+        C: "C · Guide",
     };
 
     let { isOpen, onClose }: Props = $props();
@@ -298,11 +302,11 @@
                         </table>
                     </div>
 
-                    <!-- A/B/C first-screen experiment -->
+                    <!-- Direct inline controls versus non-blocking guidance -->
                     <div class="mt-4">
                         <div class="flex items-center justify-between mb-2">
                             <p class="text-xs text-theme-text-muted">
-                                A/B/C First-Screen Test · {variantDate}
+                                Inline Onboarding Test · {variantDate}
                                 <span class="ml-1 text-[10px] opacity-60"
                                     >(primary metric: FA%)</span
                                 >
@@ -351,10 +355,6 @@
                                                 >Opens</th
                                             >
                                             <th
-                                                class="px-2 py-2 text-right font-semibold"
-                                                >Screen Tap%</th
-                                            >
-                                            <th
                                                 class="px-2 py-2 text-right font-semibold text-urjo-blue"
                                                 >FA%</th
                                             >
@@ -373,15 +373,11 @@
                                             >
                                                 <td
                                                     class="px-2 py-2 text-left font-bold text-theme-text-primary"
-                                                    >{v.variant}</td
+                                                    >{VARIANT_LABELS[v.variant]}</td
                                                 >
                                                 <td
                                                     class="px-2 py-2 text-right text-theme-text-muted"
                                                     >{num(v.opens)}</td
-                                                >
-                                                <td
-                                                    class="px-2 py-2 text-right text-theme-text-primary"
-                                                    >{pct(v.screenTapRate)}</td
                                                 >
                                                 <td
                                                     class="px-2 py-2 text-right font-bold text-theme-text-primary"

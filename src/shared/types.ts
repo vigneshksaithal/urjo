@@ -25,13 +25,16 @@ export type SerializedPuzzle = {
 	gridSize: number // 4, 6, or 8
 }
 
+/** Puzzle fields safe to send to an untrusted webview. */
+export type PublicPuzzle = Omit<SerializedPuzzle, 'solution'>
+
 export type CommunityStats = {
 	activePlayers: number
 	collectiveStreakDays: number
 }
 
 export type FirstScreenData = {
-	samplePuzzle: SerializedPuzzle
+	samplePuzzle: PublicPuzzle
 	instruction: string
 	communityStats: CommunityStats
 	targetToBeat?: {
@@ -41,7 +44,8 @@ export type FirstScreenData = {
 }
 
 export type GameState = {
-	puzzle: SerializedPuzzle
+	puzzle: PublicPuzzle
+	contentId: string
 	tutorialCompleted: boolean
 	skillLevel: number
 	pathLevel: number
@@ -57,6 +61,9 @@ export type GameState = {
 	streak?: StreakData
 	username?: string
 	isFirstTimeUser?: boolean
+	/** True only until a first-time player chooses 4×4 warm-up or the exact
+	 *  advertised 6×6/8×8 board on a fixed-size scheduled post. */
+	onboardingChoiceRequired?: boolean
 	puzzleNumber?: number
 	communityStats?: CommunityStats
 	isMod?: boolean
@@ -69,8 +76,7 @@ export type GameState = {
 	}
 	notifyOptIn?: boolean
 	hintsDismissed?: { numberConstraint: boolean; adjacencyViolation: boolean }
-	/** Challenger info for challenge posts — always present when isChallenge is true.
-	 *  Replaces the firstScreen preview; shown as a strip below the board. */
+	/** Challenger info for challenge posts — shown as a strip below the board. */
 	challengerInfo?: {
 		username: string
 		avatarUrl?: string
@@ -94,22 +100,31 @@ export type GameState = {
 		rank: number | null
 		score: number
 	}
-	/** First-screen preview data for the onboarding splash. Present for
-	 *  non-challenge posts when the user hasn't played today. */
+	/** Community and rival data for non-blocking inline onboarding guidance. */
 	firstScreen?: FirstScreenData
-	/** A/B/C first-screen experiment variant assigned to this session.
+	/** Inline onboarding variant assigned to this session. A/B are direct-play
+	 *  controls; C adds guidance without blocking the board.
 	 *  Absent for logged-out users, challenge posts, and first-time users
-	 *  (who see the tutorial instead). */
+	 *  (who enter a guided real puzzle instead). */
 	variant?: 'A' | 'B' | 'C'
 	/** True when the user has already had a first-action on this post today.
-	 *  When true the client skips the first screen and goes straight to game. */
+	 *  When true the client skips optional inline guidance. */
 	hasPlayedToday?: boolean
 }
 
 export type NextChallengeResponse = {
-	puzzle: SerializedPuzzle
+	puzzle: PublicPuzzle
+	contentId: string
 	skillLevel: number
 	gridSizePreference: number
+}
+
+export type OnboardingChoiceResponse = {
+	choice: 'warmup' | 'advertised'
+	puzzle: PublicPuzzle
+	contentId: string
+	skillLevel: number
+	advertisedGridSize: GridSize
 }
 
 export type CompleteRequest = {
@@ -125,6 +140,12 @@ export type CompleteRequest = {
 }
 
 export type CompleteResponse = {
+	/** Opaque server-issued receipt for optional post-completion actions. */
+	completionId?: string
+	/** Short-lived server-issued receipt that lets a logged-out solve be
+	 * credited after the player signs in without trusting browser metrics. */
+	migrationToken?: string
+	timeTaken: number
 	performanceScore: number
 	newSkillLevel: number
 	previousSkillLevel: number
@@ -219,15 +240,14 @@ export type LeaderboardData = {
 
 /** Challenge post request */
 export type ChallengeRequest = {
-	timeTaken: number
-	skillLevel: number
-	mistakes: number
+	completionId: string
 	customTitle?: string
 }
 
 /** Challenge post response */
 export type ChallengeResponse = {
 	success: boolean
+	postId?: `t3_${string}`
 	postUrl?: string
 	error?: string
 }
@@ -324,7 +344,8 @@ export type EquipTitleResponse = {
 
 /** Grid size selection response */
 export type GridSizeResponse = {
-	puzzle: SerializedPuzzle
+	puzzle: PublicPuzzle
+	contentId: string
 	skillLevel: number
 	gridSizePreference: number
 }

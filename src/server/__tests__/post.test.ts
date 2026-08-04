@@ -28,6 +28,9 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 	expect(reddit.submitCustomPost).toHaveBeenCalledWith({
 		subredditName: 'testsub',
 		title: 'Urjo Puzzle - Can you solve it?',
+		textFallback: {
+			text: expect.stringContaining('Open this post to play'),
+		},
 		postData: expect.objectContaining({
 			[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
 		}),
@@ -48,6 +51,31 @@ test('createPost creates a Reddit post and stores puzzle in Redis', async () => 
 	const meta = await redis.hGetAll('game:t3_abc123:meta')
 	expect(meta[URJO_POST_TYPE_KEY]).toBe(URJO_PUZZLE_POST_TYPE)
 	expect(meta.stickyCommentId).toBe('t1_sticky123')
+})
+
+test('createPost stores immutable scheduled-post dimensions', async () => {
+	vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_scheduled' } as never)
+	vi.spyOn(reddit, 'submitComment').mockResolvedValue({
+		id: 't1_scheduled',
+		distinguish: vi.fn().mockResolvedValue(undefined),
+	} as never)
+
+	await createPost('Urjo 8x8 Puzzle #42', undefined, {
+		gridSize: 8,
+		lockGridSize: true,
+		scheduledSlotKey: '8x8-2000',
+		scheduledDate: '2026-07-15',
+		puzzleNumber: 42,
+	})
+
+	const puzzle = await redis.hGetAll('game:t3_scheduled:puzzle')
+	const meta = await redis.hGetAll('game:t3_scheduled:meta')
+	for (const stored of [puzzle, meta]) {
+		expect(stored.scheduledSlotKey).toBe('8x8-2000')
+		expect(stored.scheduledDate).toBe('2026-07-15')
+		expect(stored.scheduledGridSize).toBe('8')
+		expect(stored.puzzleNumber).toBe('42')
+	}
 })
 
 // ─── createPost — missing subredditName ──────────────────────────────────────

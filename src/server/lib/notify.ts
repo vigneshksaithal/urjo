@@ -6,6 +6,11 @@
 
 import { redis } from '@devvit/web/server'
 
+import {
+    registerUserDynamicKey,
+    registerUserSortedSetMembership,
+} from './account-deletion'
+
 // ─── TTL Constants ─────────────────────────────────────────────────────────────
 
 const TTL_48H = 172800
@@ -72,6 +77,7 @@ export const buildMentionCommentText = (
  * Idempotent — if the user is already a member, zAdd updates the score.
  */
 export const addOptIn = async (userId: string): Promise<void> => {
+    await registerUserSortedSetMembership(userId, OPT_IN_KEY)
     await redis.zAdd(OPT_IN_KEY, { member: userId, score: Date.now() })
 }
 
@@ -160,6 +166,7 @@ export const getCompleterUserIdsForDate = async (date: string): Promise<string[]
  */
 export const tryMarkUserMentioned = async (date: string, userId: string): Promise<boolean> => {
     const key = mentionDedupKey(date, userId)
+    await registerUserDynamicKey(userId, key)
     const existing = await redis.get(key)
     if (existing !== undefined) return false
 

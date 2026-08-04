@@ -13,7 +13,7 @@
  * they can be unit-tested without Redis or the Reddit API.
  */
 
-import type { GameState, CompleteResponse, SerializedPuzzle } from '../../shared/types'
+import type { GameState, CompleteResponse, PublicPuzzle } from '../../shared/types'
 import type { GridSize } from '../../shared/constants'
 import { calculatePerformanceScore } from './adaptive'
 
@@ -26,7 +26,8 @@ const LOGGED_OUT_GRID_SIZE = 4
 type WeekendEvent = NonNullable<GameState['weekendEvent']>
 
 type LoggedOutStateInput = {
-    puzzle: SerializedPuzzle
+    puzzle: PublicPuzzle
+    contentId: string
     postId: string
     isChallenge: boolean
     allowsGridSizeChange?: boolean
@@ -38,12 +39,13 @@ type LoggedOutStateInput = {
  * Build the game state served to a logged-out viewer.
  *
  * The puzzle comes straight from the post (no per-user override), gameplay is
- * never gated behind the tutorial/first-screen, and no meta-progression is
+ * never gated behind onboarding, and no meta-progression is
  * attached.
  */
 export const buildLoggedOutGameState = (input: LoggedOutStateInput): GameState => {
     const {
         puzzle,
+        contentId,
         postId,
         isChallenge,
         allowsGridSizeChange = true,
@@ -56,8 +58,9 @@ export const buildLoggedOutGameState = (input: LoggedOutStateInput): GameState =
 
     return {
         puzzle,
+        contentId,
         isLoggedIn: false,
-        // Skip the tutorial/first-screen gate so logged-out users can "just
+        // Skip onboarding gates so logged-out users can "just
         // play" immediately — the single highest-leverage rule in the guide.
         tutorialCompleted: true,
         isFirstTimeUser: false,
@@ -102,6 +105,7 @@ export const buildLoggedOutCompleteResponse = (
     )
 
     return {
+        timeTaken,
         performanceScore,
         newSkillLevel: LOGGED_OUT_SKILL_LEVEL,
         previousSkillLevel: LOGGED_OUT_SKILL_LEVEL,

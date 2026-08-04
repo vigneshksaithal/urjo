@@ -5,6 +5,7 @@
 
 import { redis } from '@devvit/web/server'
 import { REFERRAL_BONUS, REFERRAL_CAP_PER_POST } from '../../shared/engagement-constants'
+import { registerUserDynamicKey } from './account-deletion'
 
 type ReferralResult = { awarded: boolean; reason?: string }
 
@@ -50,7 +51,9 @@ export const checkAndAwardReferral = async (
         return { awarded: false, reason: 'cap_reached' }
     }
 
-    await redis.set(dedupKey(postId, newPlayerId), 'true')
+    const referralDedupKey = dedupKey(postId, newPlayerId)
+    await registerUserDynamicKey(newPlayerId, referralDedupKey)
+    await redis.set(referralDedupKey, 'true')
     await redis.incrBy(referralCountKey(postId), 1)
 
     const totalReferralsStr = await redis.hGet(economyKey(challengeCreatorId), 'totalReferrals')

@@ -93,7 +93,7 @@ export const ROADMAP_PHASES: readonly RoadmapPhase[] = [
         phase: 1, startDay: 1, endDay: 14, label: 'Distribution Sprint',
         suggestedActions: [
             'Pitch to 2 subreddit mods today',
-            'Polish first-screen copy',
+            'Polish inline onboarding guidance',
             'Check install conversion',
         ],
     },

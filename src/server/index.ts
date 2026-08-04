@@ -22,15 +22,22 @@ import { seasonRouter } from './routes/season'
 import { notifyRouter } from './routes/notify'
 import { dwellRouter } from './routes/dwell'
 import { previewRouter } from './routes/preview'
+import { journeysRouter } from './routes/journeys'
+import { mediaRouter } from './routes/media'
+import { progressionRouter } from './routes/progression'
+import { urjoBlitzRouter } from './routes/urjo-blitz'
+import { challengeManagementRouter } from './routes/challenge-management'
+import { communityRouter } from './routes/community'
+import { customLevelsRouter } from './routes/custom-levels'
 import { buildHighlightsComment, buildPlayerOfTheWeekComment, buildMissionPreview } from './lib/highlights'
 import { deleteUserData } from './lib/account-deletion'
-import { selectDailyMissions } from './lib/missions'
+import { deleteUrjoBlitzUserData } from './lib/urjo-blitz'
+import { getVerifiedDailyMissions } from './lib/progression-missions'
 import { getTodayUTC, getISOWeek, getYesterdayUTC } from './lib/helpers'
 import { runDriftCheck, formatDriftLogLine } from './lib/drift'
 import { getSeasonRecap, awardSeasonRewards, getSeasonForDate } from './lib/seasons'
 import { getSubredditConfig, recordInstallation } from './lib/subreddit-config'
 import { isValidGridSize, type GridSize } from '../shared/constants'
-import { DAILY_MISSION_TEMPLATES } from '../shared/engagement-constants'
 import type { HighlightData, WeeklyHighlightData } from '../shared/engagement-types'
 
 const HTTP_STATUS_BAD_REQUEST = 400
@@ -199,7 +206,10 @@ app.post('/internal/on-account-delete', async (c: Context) => {
     const input = await c.req.json<AccountDeletePayload>().catch(() => null)
     const userId = input?.userId ?? input?.user?.id
     if (typeof userId === 'string' && userId.length > 0) {
-      await deleteUserData(userId)
+      await Promise.all([
+        deleteUserData(userId),
+        deleteUrjoBlitzUserData(userId),
+      ])
     }
     return c.json({ status: 'ok' })
   } catch (error) {
@@ -252,20 +262,26 @@ const buildScheduledPostTitle = (
   gridSize: GridSize,
 ): string => `${brandingEmoji} Urjo ${gridSize}x${gridSize} Puzzle #${puzzleNumber} - Beat today's board`
 
+const scheduledPostSlotKey = (
+  date: string,
+  subredditId: string,
+  slotKey: string,
+): string => `scheduled-post:${date}:${subredditId}:${slotKey}`
+
 const claimScheduledPostSlot = async (
   date: string,
   subredditId: string,
   slotKey: string,
 ): Promise<boolean> => {
-  const dedupKey = `scheduled-post:${date}:${subredditId}:${slotKey}`
-  const existing = await redis.get(dedupKey)
-  if (existing !== undefined) {
-    return false
-  }
-
-  await redis.set(dedupKey, '1')
-  await redis.expire(dedupKey, SCHEDULED_POST_TTL_SECONDS)
-  return true
+  const result = await redis.set(
+    scheduledPostSlotKey(date, subredditId, slotKey),
+    'pending',
+    {
+      nx: true,
+      expiration: new Date(Date.now() + SCHEDULED_POST_TTL_SECONDS * 1000),
+    },
+  )
+  return result === 'OK'
 }
 
 // Build a stats comment for the daily puzzle post.
@@ -331,7 +347,7 @@ const buildStatsComment = async (puzzleNumber: number): Promise<string> => {
   }
 
   // ─── Mission preview ───────────────────────────────────────────────────────
-  const todayMissions = selectDailyMissions(today, DAILY_MISSION_TEMPLATES)
+  const todayMissions = getVerifiedDailyMissions(today)
   const missionPreview = buildMissionPreview(todayMissions)
 
   // ─── Yesterday's Stars ─────────────────────────────────────────────────────
@@ -457,7 +473,15 @@ app.post('/internal/scheduler/daily-puzzle', async (c: Context) => {
       ...(stickyCommentText ? { stickyCommentText } : {}),
       gridSize: rawGridSize,
       lockGridSize: true,
+      scheduledSlotKey: slotKey,
+      scheduledDate: today,
+      puzzleNumber,
     })
+    await redis.set(
+      scheduledPostSlotKey(today, context.subredditId, slotKey),
+      post.id,
+      { expiration: new Date(Date.now() + SCHEDULED_POST_TTL_SECONDS * 1000) },
+    )
 
     // ─── Custom post preview for feed engagement (non-blocking) ────────────
     try {
@@ -597,6 +621,13 @@ app.route('/', seasonRouter)
 app.route('/', notifyRouter)
 app.route('/', dwellRouter)
 app.route('/', previewRouter)
+app.route('/', journeysRouter)
+app.route('/', mediaRouter)
+app.route('/', progressionRouter)
+app.route('/', urjoBlitzRouter)
+app.route('/', challengeManagementRouter)
+app.route('/', communityRouter)
+app.route('/', customLevelsRouter)
 
 // Start the Devvit-wrapped server so context (reddit, redis, etc.) is available
 // Guard against running in test environment to prevent side effects during test imports

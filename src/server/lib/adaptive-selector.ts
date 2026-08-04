@@ -92,6 +92,14 @@ export const selectAdaptivePuzzleState = (
         }
     }
 
+    if (input.adaptiveHistory.length === 0) {
+        return {
+            gridSize: 4,
+            level: input.perGridLevels[4],
+            source: 'adaptive',
+        }
+    }
+
     const orderedHistory = [...input.adaptiveHistory].sort((left, right) => left.timestamp - right.timestamp)
     const lastRecord = orderedHistory[orderedHistory.length - 1]
     const comfortIndex = calculateComfortIndex(orderedHistory)

@@ -1,6 +1,5 @@
 <script lang="ts">
     import { showToast } from "@devvit/web/client";
-    import type { ResultCardData } from "../../shared/growth-types";
     import { fireOnce } from "../stores/first-action";
     import MessageSquare from "lucide-svelte/icons/message-square";
     import Loader2 from "lucide-svelte/icons/loader-2";
@@ -13,6 +12,7 @@
         streak: number;
         timeTaken: number;
         mistakes: number;
+        completionId?: string | null;
         seasonNumber?: number | null;
         seasonRank?: number | null;
         seasonPoints?: number;
@@ -27,13 +27,8 @@
     };
 
     let {
-        puzzleColors,
-        gridSize,
-        skillLevel,
-        puzzleNumber,
-        streak,
         timeTaken,
-        mistakes,
+        completionId = null,
         seasonNumber = null,
         seasonRank = null,
         seasonPoints = 0,
@@ -47,35 +42,12 @@
     let confirmingComment = $state(false);
     let commentError = $state<string | null>(null);
 
-    const colorGrid = $derived(buildColorGrid(puzzleColors, gridSize));
-    const resultCardData = $derived<ResultCardData>({
-        puzzleNumber,
-        gridSize: gridSize as 4 | 6 | 8,
-        skillLevel,
-        colorGrid,
-        timeTaken,
-        mistakes,
-        streak,
-    });
-
-    function buildColorGrid(
-        colors: string,
-        size: number,
-    ): ("red" | "blue")[][] {
-        const grid: ("red" | "blue")[][] = [];
-        for (let row = 0; row < size; row++) {
-            const rowCells: ("red" | "blue")[] = [];
-            for (let col = 0; col < size; col++) {
-                const ch = colors[row * size + col];
-                rowCells.push(ch === "r" ? "red" : "blue");
-            }
-            grid.push(rowCells);
-        }
-        return grid;
-    }
-
     async function handleComment() {
         if (commenting || hasCommented) return;
+        if (completionId === null) {
+            commentError = "Finish a verified puzzle before commenting.";
+            return;
+        }
         void fireOnce("", "result-comment");
         commenting = true;
         commentError = null;
@@ -84,7 +56,7 @@
             const res = await fetch("/api/game/result-comment", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(resultCardData),
+                body: JSON.stringify({ completionId }),
             });
 
             if (!res.ok) {

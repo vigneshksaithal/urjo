@@ -10,6 +10,9 @@ import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis, runWithContext } from '@devvit/web/server'
 import { expect } from 'vitest'
 import { app } from '../index'
+import {
+    getAnonymousPuzzle,
+} from '../lib/anonymous-receipts'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +37,21 @@ const LOGGED_OUT_CTX = {
     subredditName: 'testsub',
 }
 
+const SESSION_ID = 'session_logged_out_123'
+const ATTEMPT_ID = 'attempt_logged_out_123'
+
+const stateHeaders = (): Record<string, string> => ({
+    'x-urjo-session': SESSION_ID,
+})
+
+const attemptHeaders = (contentId: string): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    'x-urjo-session': SESSION_ID,
+    'x-urjo-content': contentId,
+    'x-urjo-attempt': ATTEMPT_ID,
+    'x-urjo-event': 'event_logged_out_123',
+})
+
 const seedPuzzle = async (postId: string): Promise<void> => {
     await redis.hSet(`game:${postId}:puzzle`, {
         colors: 'rrbbrrbbrrbbrrbb',
@@ -56,13 +74,20 @@ const testState = createDevvitTest({
 testState('GET /api/game/state serves a playable puzzle to logged-out users', async () => {
     await withCtx(LOGGED_OUT_CTX, () => seedPuzzle('t3_logged_out_post'))
 
-    const res = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/state'))
+    const res = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/state', {
+        headers: stateHeaders(),
+    }))
     expect(res.status).toBe(200)
 
     const body = await res.json() as Record<string, unknown>
     expect(body).toHaveProperty('isLoggedIn', false)
     expect(body).toHaveProperty('puzzle')
     expect((body.puzzle as { colors: string }).colors).toBe('rrbbrrbbrrbbrrbb')
+    const stored = await withCtx(LOGGED_OUT_CTX, () =>
+        getAnonymousPuzzle(SESSION_ID, LOGGED_OUT_CTX.postId),
+    )
+    expect(stored?.puzzle.solution).toBe('rrbbrrbbrrbbrrbb')
+    expect(stored?.contentId).toBe(body.contentId)
 })
 
 testState('GET /api/game/state omits account-scoped data for logged-out users', async () => {
@@ -93,14 +118,27 @@ const testComplete = createDevvitTest({
     postId: 't3_logged_out_post',
 })
 
-testComplete('POST /api/game/complete returns a result for logged-out users without persisting', async () => {
+testComplete('POST /api/game/complete verifies the stored puzzle and uses first-cell server time', async () => {
     await withCtx(LOGGED_OUT_CTX, () => seedPuzzle('t3_logged_out_post'))
+
+    const state = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/state', {
+        headers: stateHeaders(),
+    }))
+    const stateBody = await state.json() as { contentId: string }
+    await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/timer-start', {
+        method: 'POST',
+        headers: attemptHeaders(stateBody.contentId),
+    }))
 
     const res = await withCtx(LOGGED_OUT_CTX, () =>
         app.request('/api/game/complete', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeTaken: 30, mistakes: 0 }),
+            headers: attemptHeaders(stateBody.contentId),
+            body: JSON.stringify({
+                timeTaken: 999,
+                mistakes: 999,
+                board: 'rrbbrrbbrrbbrrbb',
+            }),
         }),
     )
     expect(res.status).toBe(200)
@@ -108,6 +146,8 @@ testComplete('POST /api/game/complete returns a result for logged-out users with
     const body = await res.json() as Record<string, unknown>
     expect(body).toHaveProperty('isLoggedIn', false)
     expect(body).toHaveProperty('performanceScore')
+    expect(body).toHaveProperty('migrationToken')
+    expect(body.timeTaken).not.toBe(999)
     expect(body.coinReward).toBeUndefined()
     expect(body.streak).toBeUndefined()
 
@@ -119,6 +159,46 @@ testComplete('POST /api/game/complete returns a result for logged-out users with
     const streakBoard = await withCtx(LOGGED_OUT_CTX, () => redis.zCard('leaderboard:streak'))
     expect(streakBoard).toBe(0)
     void completions
+})
+
+testComplete('POST /api/game/complete rejects a forged anonymous board', async () => {
+    await withCtx(LOGGED_OUT_CTX, () => seedPuzzle('t3_logged_out_post'))
+    const state = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/state', {
+        headers: stateHeaders(),
+    }))
+    const { contentId } = await state.json() as { contentId: string }
+    await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/timer-start', {
+        method: 'POST',
+        headers: attemptHeaders(contentId),
+    }))
+
+    const res = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/complete', {
+        method: 'POST',
+        headers: attemptHeaders(contentId),
+        body: JSON.stringify({
+            timeTaken: 1,
+            mistakes: 0,
+            board: 'bbbbrrrrbbbbrrrr',
+        }),
+    }))
+
+    expect(res.status).toBe(400)
+})
+
+testComplete('POST /api/game/complete preserves unranked play without measurement headers', async () => {
+    await withCtx(LOGGED_OUT_CTX, () => seedPuzzle('t3_logged_out_post'))
+
+    const res = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeTaken: 30, mistakes: 999, board: 'forged' }),
+    }))
+    const body = await res.json() as Record<string, unknown>
+
+    expect(res.status).toBe(200)
+    expect(body.timeTaken).toBe(30)
+    expect(body.migrationToken).toBeUndefined()
+    expect(body.coinReward).toBeUndefined()
 })
 
 testComplete('POST /api/game/complete rejects invalid timeTaken for logged-out users', async () => {
@@ -145,10 +225,15 @@ const testNext = createDevvitTest({
 testNext('POST /api/game/next-challenge serves a fresh puzzle to logged-out users', async () => {
     await withCtx(LOGGED_OUT_CTX, () => seedPuzzle('t3_logged_out_post'))
 
+    const state = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/state', {
+        headers: stateHeaders(),
+    }))
+    const stateBody = await state.json() as { contentId: string }
+
     const res = await withCtx(LOGGED_OUT_CTX, () =>
         app.request('/api/game/next-challenge', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: attemptHeaders(stateBody.contentId),
             body: JSON.stringify({ timeSpent: 10 }),
         }),
     )
@@ -157,6 +242,11 @@ testNext('POST /api/game/next-challenge serves a fresh puzzle to logged-out user
     const body = await res.json() as Record<string, unknown>
     expect(body).toHaveProperty('puzzle')
     expect((body.puzzle as { colors: string }).colors.length).toBeGreaterThan(0)
+    const stored = await withCtx(LOGGED_OUT_CTX, () =>
+        getAnonymousPuzzle(SESSION_ID, LOGGED_OUT_CTX.postId),
+    )
+    expect(stored?.contentId).toBe(body.contentId)
+    expect(stored?.puzzle.solution).toHaveLength(stored?.puzzle.gridSize ** 2)
 })
 
 // ─── POST /api/game/grid-size ──────────────────────────────────────────────────
@@ -170,10 +260,15 @@ const testGrid = createDevvitTest({
 testGrid('POST /api/game/grid-size returns a puzzle at the requested size for logged-out users', async () => {
     await withCtx(LOGGED_OUT_CTX, () => seedPuzzle('t3_logged_out_post'))
 
+    const state = await withCtx(LOGGED_OUT_CTX, () => app.request('/api/game/state', {
+        headers: stateHeaders(),
+    }))
+    const stateBody = await state.json() as { contentId: string }
+
     const res = await withCtx(LOGGED_OUT_CTX, () =>
         app.request('/api/game/grid-size', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: attemptHeaders(stateBody.contentId),
             body: JSON.stringify({ gridSize: 6 }),
         }),
     )
@@ -182,6 +277,11 @@ testGrid('POST /api/game/grid-size returns a puzzle at the requested size for lo
     const body = await res.json() as Record<string, unknown>
     expect((body.puzzle as { gridSize: number }).gridSize).toBe(6)
     expect(body).toHaveProperty('gridSizePreference', 6)
+    const stored = await withCtx(LOGGED_OUT_CTX, () =>
+        getAnonymousPuzzle(SESSION_ID, LOGGED_OUT_CTX.postId),
+    )
+    expect(stored?.contentId).toBe(body.contentId)
+    expect(stored?.puzzle.gridSize).toBe(6)
 })
 
 testGrid('POST /api/game/grid-size rejects invalid size for logged-out users', async () => {

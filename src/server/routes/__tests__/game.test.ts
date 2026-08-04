@@ -5,7 +5,7 @@
  */
 
 import { createDevvitTest } from '@devvit/test/server/vitest'
-import { redis, runWithContext } from '@devvit/web/server'
+import { redis, runWithContext, scheduler } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
 import { app } from '../../index'
 import * as seasons from '../../lib/seasons'
@@ -21,6 +21,8 @@ import { Context } from '@devvit/server'
 const POST_ID = 't3_post1'
 const USER_ID = 't2_testuser'
 const SOLUTION = 'rbrbbrbrrbbbbrbr'
+const ANONYMOUS_SESSION_ID = 'session_game_anon'
+const ANONYMOUS_ATTEMPT_ID = 'attempt_game_anon'
 
 // Full headers matching what createDevvitTest injects, plus devvit-post
 const TEST_HEADERS = {
@@ -68,6 +70,14 @@ const requestWithPost = async (url: string, init?: RequestInit): Promise<Respons
     return runWithContext(ctx, () => app.request(url, init))
 }
 
+const anonymousAttemptHeaders = (contentId: string): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    'x-urjo-session': ANONYMOUS_SESSION_ID,
+    'x-urjo-content': contentId,
+    'x-urjo-attempt': ANONYMOUS_ATTEMPT_ID,
+    'x-urjo-event': 'event_game_anon',
+})
+
 // ─── GET /api/game/state ──────────────────────────────────────────────────────
 
 const testState = createDevvitTest({
@@ -89,6 +99,58 @@ testState('GET /api/game/state returns 200 with GameState JSON when puzzle is se
     expect(json.skillLevel).toBeDefined()
     expect(json.tutorialCompleted).toBeDefined()
     expect(json.streak).toBeDefined()
+})
+
+// ─── POST /api/game/mod-solution ────────────────────────────────────────────
+
+const testModSolution = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+testModSolution('POST /api/game/mod-solution returns the current puzzle solution to moderators', async () => {
+    await issueInstance('4', SOLUTION)
+    await redis.set(`mod:t5_testsub:${USER_ID}`, '1')
+
+    const res = await requestWithPost('/api/game/mod-solution', { method: 'POST' })
+    const json = await res.json() as {
+        status?: string
+        data?: { solution?: string }
+    }
+
+    expect(res.status).toBe(200)
+    expect(json).toEqual({
+        status: 'success',
+        data: { solution: SOLUTION },
+    })
+})
+
+testModSolution('POST /api/game/mod-solution rejects non-moderators without leaking the solution', async () => {
+    await issueInstance('4', SOLUTION)
+    await redis.set(`mod:t5_testsub:${USER_ID}`, '0')
+
+    const res = await requestWithPost('/api/game/mod-solution', { method: 'POST' })
+    const body = await res.text()
+
+    expect(res.status).toBe(403)
+    expect(body).not.toContain(SOLUTION)
+})
+
+// ─── POST /api/game/timer-start ──────────────────────────────────────────────
+
+const testTimerStart = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+testTimerStart('POST /api/game/timer-start records the first cell only once', async () => {
+    await seedPuzzle()
+
+    const first = await requestWithPost('/api/game/timer-start', { method: 'POST' })
+    const second = await requestWithPost('/api/game/timer-start', { method: 'POST' })
+
+    expect(await first.json()).toEqual({ started: true })
+    expect(await second.json()).toEqual({ started: false })
 })
 
 /**
@@ -115,12 +177,17 @@ const testComplete = createDevvitTest({
 /**
  * Requirement 5.3: POST /api/game/complete returns 200 with expected response fields
  */
-testComplete('POST /api/game/complete returns 200 with performanceScore, newSkillLevel, previousSkillLevel, streak, coinReward', async () => {
+testComplete('POST /api/game/complete returns the authoritative time used for scoring', async () => {
     await seedPuzzle()
+    await requestWithPost('/api/game/timer-start', { method: 'POST' })
+    await redis.set(
+        `user:${USER_ID}:puzzleFirstCellTime:${POST_ID}:post`,
+        (Date.now() - 250).toString(),
+    )
     const res = await requestWithPost('/api/game/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeTaken: 5, board: SOLUTION }),
+        body: JSON.stringify({ timeTaken: 99, board: SOLUTION }),
     })
     expect(res.status).toBe(200)
 
@@ -130,6 +197,131 @@ testComplete('POST /api/game/complete returns 200 with performanceScore, newSkil
     expect(json.previousSkillLevel).toBeDefined()
     expect(json.streak).toBeDefined()
     expect(json.coinReward).toBeDefined()
+    expect(json.timeTaken).toBe(1)
+})
+
+testComplete('POST /api/game/complete queues non-player-facing follow-up work', async () => {
+    await seedPuzzle()
+    const runJob = vi.spyOn(scheduler, 'runJob').mockResolvedValue('completion-followup-job')
+
+    try {
+        const response = await requestWithPost('/api/game/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+        })
+
+        expect(response.status).toBe(200)
+        expect(runJob).toHaveBeenCalledWith(expect.objectContaining({
+            name: 'completion-followup',
+            data: expect.objectContaining({ batch: true }),
+        }))
+    } finally {
+        runJob.mockRestore()
+    }
+})
+
+testComplete('completion follow-up task drains queued tracking work', async () => {
+    await seedPuzzle()
+    const runJob = vi.spyOn(scheduler, 'runJob').mockResolvedValue('completion-followup-job')
+
+    try {
+        await requestWithPost('/api/game/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timeTaken: 20, board: SOLUTION }),
+        })
+        const followup = await requestWithPost('/internal/scheduler/completion-followup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: { batch: true } }),
+        })
+
+        expect(followup.status).toBe(200)
+        expect(await redis.zCard('queue:completion-followups')).toBe(0)
+    } finally {
+        runJob.mockRestore()
+    }
+})
+
+const testCurrentDayStreak = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+testCurrentDayStreak('POST /api/game/complete advances streaks only on today\'s scheduled content', async () => {
+    const today = getTodayUTC()
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    await seedPuzzleGrid('4')
+    await redis.hSet(`game:${POST_ID}:puzzle`, {
+        scheduledDate: today,
+        scheduledSlotKey: '6x6-1400',
+    })
+    await redis.set(`user:${USER_ID}:streak:current`, '6')
+    await redis.set(`user:${USER_ID}:streak:longest`, '6')
+    await redis.set(`user:${USER_ID}:streak:lastDate`, yesterday)
+    await issueInstance('4')
+
+    const response = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.streak.currentStreak).toBe(7)
+    expect(body.engagement.streakMilestone).toEqual({ threshold: 7, bonus: 50 })
+    expect(body.engagement.newAchievements).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: 'streak_7', coinBonus: 50 })]),
+    )
+    expect(await redis.get(`user:${USER_ID}:streak:lastDate`)).toBe(today)
+})
+
+const testArchivedStreak = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+testArchivedStreak('POST /api/game/complete does not advance streaks from archived scheduled content', async () => {
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    await seedPuzzleGrid('4')
+    await redis.hSet(`game:${POST_ID}:puzzle`, {
+        scheduledDate: yesterday,
+        scheduledSlotKey: '6x6-1400',
+    })
+    await redis.set(`user:${USER_ID}:streak:current`, '6')
+    await redis.set(`user:${USER_ID}:streak:longest`, '6')
+    await redis.set(`user:${USER_ID}:streak:lastDate`, yesterday)
+    await issueInstance('4')
+
+    const response = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.streak.currentStreak).toBe(6)
+    expect(await redis.get(`user:${USER_ID}:streak:lastDate`)).toBe(yesterday)
+})
+
+const testRivalStreak = createDevvitTest({
+    userId: USER_ID,
+    subredditName: 'testsub',
+})
+
+testRivalStreak('POST /api/game/complete does not advance streaks from rival posts', async () => {
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    await seedPuzzleGrid('4')
+    await redis.hSet(`game:${POST_ID}:puzzle`, {
+        challengeBy: 't2_challenger',
+        created: new Date().toISOString(),
+    })
+    await redis.set(`user:${USER_ID}:streak:current`, '6')
+    await redis.set(`user:${USER_ID}:streak:longest`, '6')
+    await redis.set(`user:${USER_ID}:streak:lastDate`, yesterday)
+    await issueInstance('4')
+
+    const response = await requestWithPost('/api/game/complete', COMPLETE_INIT(20))
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.streak.currentStreak).toBe(6)
+    expect(await redis.get(`user:${USER_ID}:streak:lastDate`)).toBe(yesterday)
 })
 
 const testCompleteInvalidStr = createDevvitTest({
@@ -254,10 +446,8 @@ const testPreviewDedup = createDevvitTest({
     subredditName: 'testsub',
 })
 
-/**
- * Requirement 6: Preview update is deduped — second completion does not update preview again
- */
-testPreviewDedup('POST /api/game/complete does not update daily preview on second completion (deduped)', async () => {
+/** Requirement 6: every independently verified completion updates the daily preview. */
+testPreviewDedup('POST /api/game/complete ignores the obsolete preview dedup key', async () => {
     await seedPuzzle()
     // Seed a daily preview in Redis
     await redis.hSet(`game:${POST_ID}:preview`, {
@@ -272,7 +462,8 @@ testPreviewDedup('POST /api/game/complete does not update daily preview on secon
         }),
     })
 
-    // Set the dedup key to simulate already-updated
+    // Legacy builds wrote this post-wide key, which incorrectly collapsed all
+    // players into one completion. It must no longer suppress a verified solve.
     await redis.set(`preview:updated:${POST_ID}`, '1')
 
     const res = await requestWithPost('/api/game/complete', {
@@ -282,11 +473,11 @@ testPreviewDedup('POST /api/game/complete does not update daily preview on secon
     })
     expect(res.status).toBe(200)
 
-    // Verify preview was NOT updated (still shows 0 completions)
+    // The independently verified completion is counted.
     const previewMeta = await redis.hGetAll(`game:${POST_ID}:preview`)
     const parsed = JSON.parse(previewMeta.data!)
-    expect(parsed.completionsToday).toBe(0)
-    expect(parsed.fastestTime).toBeNull()
+    expect(parsed.completionsToday).toBe(1)
+    expect(parsed.fastestTime).toBe(20)
 })
 
 const testPreviewNonDaily = createDevvitTest({
@@ -451,14 +642,26 @@ testLoggedOutComplete('POST /api/game/complete: logged-out completion succeeds a
 
     await seedPuzzleGrid('4')
 
-    const res = await runWithContext(loggedOutCtx, () =>
-        app.request('/api/game/complete', COMPLETE_INIT(20)),
-    )
+    const state = await runWithContext(loggedOutCtx, () => app.request('/api/game/state', {
+        headers: { 'x-urjo-session': ANONYMOUS_SESSION_ID },
+    }))
+    const { contentId } = await state.json() as { contentId: string }
+    await runWithContext(loggedOutCtx, () => app.request('/api/game/timer-start', {
+        method: 'POST',
+        headers: anonymousAttemptHeaders(contentId),
+    }))
+    const res = await runWithContext(loggedOutCtx, () => app.request('/api/game/complete', {
+        method: 'POST',
+        headers: anonymousAttemptHeaders(contentId),
+        body: JSON.stringify({ timeTaken: 999, mistakes: 999, board: SOLUTION }),
+    }))
     expect(res.status).toBe(200)
 
     const json = await res.json()
     // Logged-out result is returned but nothing account-scoped is persisted.
     expect(json.isLoggedIn).toBe(false)
+    expect(json.migrationToken).toBeDefined()
+    expect(json.timeTaken).toBe(1)
     expect(json.coinReward).toBeUndefined()
     expect(json.seasonPoints).toBeUndefined()
 
@@ -481,8 +684,35 @@ const testMigrateLoggedOut = createDevvitTest({
  */
 testMigrateLoggedOut('POST /api/game/migrate-logged-out-score: credits the user and writes the season counter', async () => {
     await seedPuzzleGrid('4')
+	await redis.hSet(`game:${POST_ID}:puzzle`, {
+		scheduledDate: getTodayUTC(),
+		scheduledSlotKey: '6x6-1400',
+	})
+	const loggedOutCtx = {
+		postId: POST_ID,
+		subredditId: 't5_testsub',
+		subredditName: 'testsub',
+	} as Parameters<typeof runWithContext>[0]
+	const state = await runWithContext(loggedOutCtx, () => app.request('/api/game/state', {
+		headers: { 'x-urjo-session': ANONYMOUS_SESSION_ID },
+	}))
+	const { contentId } = await state.json() as { contentId: string }
+	await runWithContext(loggedOutCtx, () => app.request('/api/game/timer-start', {
+		method: 'POST',
+		headers: anonymousAttemptHeaders(contentId),
+	}))
+	const completion = await runWithContext(loggedOutCtx, () => app.request('/api/game/complete', {
+		method: 'POST',
+		headers: anonymousAttemptHeaders(contentId),
+		body: JSON.stringify({ board: SOLUTION }),
+	}))
+	const { migrationToken } = await completion.json() as { migrationToken: string }
 
-    const res = await requestWithPost('/api/game/migrate-logged-out-score', COMPLETE_INIT(20))
+	const res = await requestWithPost('/api/game/migrate-logged-out-score', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ migrationToken }),
+	})
     expect(res.status).toBe(200)
 
     const json = await res.json()

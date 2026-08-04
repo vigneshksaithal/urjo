@@ -81,11 +81,12 @@ export const calculateCoinReward = (
 	isDailyFirst: boolean,
 	mistakes: number = 0,
 	consecutiveLoginDays: number = 0,
-	gridSize: GridSize = 4
+	gridSize: GridSize = 4,
+	mistakesVerified: boolean = true,
 ): CoinReward => {
 	const config = getGridLevelConfig(gridSize, level)
 	const speedBonusRaw = Math.round(MAX_SPEED_COIN_BONUS * speedFactor(timeTaken, config.expectedTime))
-	const perfectBonusRaw = mistakes === 0 ? COIN_PERFECT_BONUS : 0
+	const perfectBonusRaw = mistakesVerified && mistakes === 0 ? COIN_PERFECT_BONUS : 0
 
 	const loginBonusRaw = isDailyFirst && consecutiveLoginDays > 0
 		? getDailyLoginBonus(consecutiveLoginDays)
@@ -100,7 +101,7 @@ export const calculateCoinReward = (
 	// pool. Daily bonus stays full strength because it represents "showed up
 	// today" — we don't want to punish first-of-the-day on a Scrappy solve.
 	const tier = getResultTier(mistakes, gridSize)
-	const tierMultiplier = getTierBonusMultiplier(tier.id)
+	const tierMultiplier = mistakesVerified ? getTierBonusMultiplier(tier.id) : 1
 
 	// Streak bonus uses the escalating curve from streak-rewards.ts so that
 	// week / fortnight / month milestones feel like genuine "bumps" rather
@@ -123,8 +124,7 @@ export const calculateCoinReward = (
 		loginBonus,
 		gridSizeMultiplier,
 		total: Math.round(base + bonuses),
-		tierId: tier.id,
-		tierMultiplier,
+		...(mistakesVerified && { tierId: tier.id, tierMultiplier }),
 	}
 }
 

@@ -261,14 +261,14 @@ export const getSessionIdFromHeader = (headers: Headers): string | null => {
  *
  * Called from /api/game/state. Sets:
  *   - referrer = '1'  if the referer header is Reddit-origin
- *   - userId / subredditId / firstSeenMs   on first capture only
+ *   - subredditId / firstSeenMs   on first capture only
  *
  * Idempotent: re-capture with a different referrer does NOT clear an
  * already-set flag. Once a Reddit referrer is seen, we keep that signal.
  */
 export const captureReferrer = async (
     sessionId: string,
-    userId: string,
+    _userId: string,
     subredditId: string | undefined,
     referer: string | null | undefined,
 ): Promise<void> => {
@@ -278,8 +278,7 @@ export const captureReferrer = async (
     const existing = await redis.hGetAll(key)
     const fields: Record<string, string> = {}
 
-    if (existing.userId === undefined) {
-        fields.userId = userId
+    if (existing.firstSeenMs === undefined) {
         fields.firstSeenMs = Date.now().toString()
     }
     if (subredditId !== undefined && existing.subredditId === undefined) {
@@ -318,8 +317,6 @@ export const recordDwellTick = async (
     const fields: Record<string, string> = {
         dwellSeconds: nextDwell.toString(),
     }
-    if (existing.userId === undefined) fields.userId = userId
-
     await redis.hSet(key, fields)
     await redis.expire(key, SESSION_FLAG_TTL_SECONDS)
 
@@ -354,7 +351,6 @@ export const markFirstTapAndCommit = async (
     const existing = await redis.hGetAll(key)
 
     const fields: Record<string, string> = { firstTap: '1' }
-    if (existing.userId === undefined) fields.userId = userId
     if (subredditId !== undefined && existing.subredditId === undefined) {
         fields.subredditId = subredditId
     }

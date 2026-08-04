@@ -11,7 +11,7 @@
 		hasError?: boolean;
 		gridSize?: number;
 		isHint?: boolean;
-		hintColor?: "blue" | "red";
+		hintColor?: "blue" | "red" | undefined;
 		isTutorialTarget?: boolean;
 		onChange: (color: CellColor) => void;
 	};
@@ -31,10 +31,8 @@
 		onChange,
 	}: Props = $props();
 
-	let pointerStartY = $state(0);
-	let isPressed = $state(false);
 	let releaseToken = $state(0);
-	const SWIPE_THRESHOLD = 20;
+	const isInteractive = $derived(!locked && !isLoading);
 
 	const animationDelay = $derived(
 		rowIndex !== undefined && colIndex !== undefined
@@ -42,34 +40,19 @@
 			: "0ms",
 	);
 
-	function handlePointerDown(e: PointerEvent) {
-		if (locked) return;
-		pointerStartY = e.clientY;
-		isPressed = true;
-		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-	}
-
-	function handlePointerUp(e: PointerEvent) {
-		if (locked) {
-			isPressed = false;
-			return;
-		}
-		const deltaY = pointerStartY - e.clientY;
-
-		if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
-			onChange(deltaY > 0 ? "blue" : "red");
-		} else {
-			cycleColor();
-		}
-		isPressed = false;
+	function handleCellClick(): void {
+		if (!isInteractive) return;
+		cycleColor();
 		releaseToken += 1;
 	}
 
-	function handlePointerCancel(): void {
-		isPressed = false;
+	function handleKeyDown(event: KeyboardEvent): void {
+		if (event.key !== "Enter" && event.key !== " ") return;
+		event.preventDefault();
+		handleCellClick();
 	}
 
-	function cycleColor() {
+	function cycleColor(): void {
 		if (color === null) {
 			onChange("blue");
 		} else if (color === "blue") {
@@ -83,19 +66,18 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
-	onpointerdown={handlePointerDown}
-	onpointerup={handlePointerUp}
-	onpointercancel={handlePointerCancel}
-	onlostpointercapture={handlePointerCancel}
-	role={locked ? undefined : "button"}
-	tabindex={locked ? undefined : 0}
+	onclick={handleCellClick}
+	onkeydown={handleKeyDown}
+	role={isInteractive ? "button" : undefined}
+	tabindex={isInteractive ? 0 : undefined}
 	class="
 		relative w-full aspect-square rounded-full
 		flex items-center justify-center
-		touch-none select-none
+		touch-manipulation select-none
 		transition-[transform,filter] duration-300 ease-[cubic-bezier(0.2,0.9,0.2,1.25)]
-		{locked ? 'cursor-default' : 'cursor-pointer hover:scale-[1.018]'}
-		{isPressed ? 'scale-[0.91] saturate-125' : ''}
+		{isInteractive
+			? 'group cursor-pointer hover:scale-[1.018] active:scale-[0.91] active:saturate-125'
+			: 'cursor-default'}
 		{hasError ? 'ring-2 ring-red-400/40' : ''}
 	"
 >
@@ -126,9 +108,26 @@
 	<!-- Empty cell: single neutral tone. Animated with a floating effect when
 	     it's the tutorial target to draw attention to the cell to tap. -->
 	{#if !isLoading && color === null}
+		{#if isTutorialTarget}
+			<div
+				data-tutorial-glow-halo="true"
+				class="absolute inset-[-28%] rounded-full pointer-events-none animate-tutorial-glow-halo"
+			></div>
+			<div
+				data-tutorial-glow-ring="true"
+				class="absolute inset-[-10%] rounded-full pointer-events-none animate-tutorial-glow-ring"
+			></div>
+			<div
+				data-tutorial-glow-spark="true"
+				class="absolute left-1/2 top-[16%] h-[14%] w-[14%] -translate-x-1/2 rounded-full bg-white/78 pointer-events-none blur-[1px] animate-tutorial-glow-spark"
+			></div>
+		{/if}
 		<div
+			data-tutorial-glow={isTutorialTarget ? "true" : undefined}
 			class="absolute inset-0 rounded-full pointer-events-none bg-theme-empty-cell
-				{isTutorialTarget ? 'animate-tutorial-float' : 'animate-empty-breathe'}"
+				{isTutorialTarget
+				? 'animate-tutorial-float ring-[1.5px] ring-[#94deff]/70 shadow-[inset_0_3px_10px_rgba(255,255,255,0.2),0_0_0_2px_rgba(94,188,255,0.12)]'
+				: 'animate-empty-breathe'}"
 		></div>
 	{/if}
 
@@ -161,9 +160,7 @@
 	<!-- Non-loading: filled red -->
 	{#if !isLoading && color === "red"}
 		<div
-			class="absolute inset-0 bg-[#E54E3E] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
+			class="absolute inset-0 scale-100 rounded-full bg-[#E54E3E] blur-0 transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none group-active:scale-[1.08] group-active:blur-[0.2px]"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -171,9 +168,7 @@
 	<!-- Non-loading: filled blue -->
 	{#if !isLoading && color === "blue"}
 		<div
-			class="absolute inset-0 bg-[#3997D7] rounded-full transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none {isPressed
-				? 'scale-[1.08] blur-[0.2px]'
-				: 'scale-100 blur-0'}"
+			class="absolute inset-0 scale-100 rounded-full bg-[#3997D7] blur-0 transition-[opacity,transform,filter] duration-500 ease-[cubic-bezier(0.2,0.9,0.2,1.25)] pointer-events-none group-active:scale-[1.08] group-active:blur-[0.2px]"
 			class:opacity-0={isLoading}
 		></div>
 	{/if}
@@ -306,5 +301,68 @@
 
 	.animate-tutorial-float {
 		animation: tutorialFloat 2s ease-in-out infinite;
+	}
+
+	@keyframes tutorialGlowHalo {
+		0%,
+		100% {
+			opacity: 0.5;
+			transform: scale(0.88);
+			filter: blur(8px);
+		}
+		50% {
+			opacity: 0.95;
+			transform: scale(1.12);
+			filter: blur(12px);
+		}
+	}
+
+	.animate-tutorial-glow-halo {
+		background: radial-gradient(
+			circle,
+			rgba(132, 219, 255, 0.32) 0%,
+			rgba(85, 184, 255, 0.18) 36%,
+			rgba(31, 113, 174, 0.12) 58%,
+			rgba(85, 184, 255, 0) 80%
+		);
+		animation: tutorialGlowHalo 2.2s ease-in-out infinite;
+	}
+
+	@keyframes tutorialGlowRing {
+		0%,
+		100% {
+			opacity: 0.45;
+			transform: scale(0.9);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1.08);
+		}
+	}
+
+	.animate-tutorial-glow-ring {
+		box-shadow:
+			inset 0 0 0 1px rgba(173, 231, 255, 0.72),
+			0 0 0 6px rgba(85, 184, 255, 0.07),
+			0 0 28px rgba(85, 184, 255, 0.26);
+		animation: tutorialGlowRing 1.8s cubic-bezier(0.22, 1, 0.36, 1)
+			infinite;
+	}
+
+	@keyframes tutorialGlowSpark {
+		0%,
+		100% {
+			opacity: 0.48;
+			transform: translateX(-50%) translateY(0) scale(0.88);
+		}
+		50% {
+			opacity: 1;
+			transform: translateX(-50%) translateY(-1px) scale(1.18);
+		}
+	}
+
+	.animate-tutorial-glow-spark {
+		box-shadow: 0 0 16px rgba(255, 255, 255, 0.72);
+		animation: tutorialGlowSpark 1.35s ease-in-out infinite;
 	}
 </style>

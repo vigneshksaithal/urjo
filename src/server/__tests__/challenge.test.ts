@@ -1,16 +1,18 @@
 import { createDevvitTest } from '@devvit/test/server/vitest'
-import { redis, reddit } from '@devvit/web/server'
+import { context, redis, reddit } from '@devvit/web/server'
 import { runWithContext } from '@devvit/server'
 import { expect, vi } from 'vitest'
 
 import { app } from '../index'
 import { DEFAULT_CHALLENGE_TITLE } from '../../shared/constants'
 import { REFERRAL_BONUS } from '../../shared/engagement-constants'
+import { createCompletionSnapshot } from '../lib/completion-snapshot'
 
 // ─── Shared test context ──────────────────────────────────────────────────────
 
 const test = createDevvitTest({ userId: 't2_winner', subredditName: 'urjo' })
 const challengeTest = createDevvitTest({ userId: 't2_challenger', subredditName: 'urjo' })
+const PLAIN_SOLUTION = 'rbrbbrbrrbbbbrbr'
 
 // ─── Request helpers ──────────────────────────────────────────────────────────
 
@@ -35,12 +37,45 @@ const completeRequest = (body: object = {}) =>
         body: JSON.stringify({ mistakes: 0, board: 'rbrb', ...body }),
     })
 
-const challengeRequest = (body: object) =>
-    app.request('/api/game/challenge', {
+const challengeRequest = async (body: object): Promise<Response> => {
+    const input = body as { completionId?: unknown; customTitle?: unknown; timeTaken?: unknown; skillLevel?: unknown }
+    let completionId = typeof input.completionId === 'string' ? input.completionId : undefined
+
+    if (completionId === undefined) {
+        const { postId, userId } = context
+        if (!postId || !userId) throw new Error('Challenge test context is missing')
+        const puzzle = await redis.hGetAll(`game:${postId}:puzzle`)
+        const gridSize = Number(puzzle?.gridSize)
+        if (gridSize !== 4 && gridSize !== 6 && gridSize !== 8) {
+            throw new Error('Challenge test puzzle has an invalid grid size')
+        }
+        const snapshot = await createCompletionSnapshot({
+            userId,
+            sourcePostId: postId,
+            puzzleInstanceId: 'post',
+            puzzleNumber: 1,
+            gridSize,
+            skillLevel: typeof input.skillLevel === 'number' ? input.skillLevel : 1,
+            timeTaken: typeof input.timeTaken === 'number' ? input.timeTaken : 45,
+            streak: 0,
+            colorGrid: Array.from({ length: gridSize }, (_, row) =>
+                Array.from({ length: gridSize }, (_, column) =>
+                    (row + column) % 2 === 0 ? 'red' as const : 'blue' as const,
+                ),
+            ),
+        })
+        completionId = snapshot.completionId
+    }
+
+    return app.request('/api/game/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+            completionId,
+            ...(typeof input.customTitle === 'string' && { customTitle: input.customTitle }),
+        }),
     })
+}
 
 const stickyComment = (id: string, distinguish = vi.fn().mockResolvedValue(undefined)) => ({
     id,
@@ -213,7 +248,7 @@ test('checkChallengeBeat: dedup prevents double-counting the same winner', async
     expect(stats['beats']).toBe('1')
 })
 
-test('checkChallengeBeat: posts one public beat reply under leaderboard comment', async () => {
+test('checkChallengeBeat: does not post a public beat reply under leaderboard comment', async () => {
     const postId = 't3_beat6'
     await seedChallengePuzzle(postId, 't2_challenger', 60)
     await seedStartTime('t2_winner', postId, 30)
@@ -232,12 +267,7 @@ test('checkChallengeBeat: posts one public beat reply under leaderboard comment'
         'id' in arg &&
         arg.id === 't1_leaderboard'
     )
-    expect(beatReplies).toHaveLength(1)
-
-    const replyArg = beatReplies[0]?.[0] as { text?: string } | undefined
-    expect(replyArg?.text).toContain('beat the challenge')
-    expect(replyArg?.text).toContain('https://reddit.com/comments/beat6')
-    expect(replyArg?.text).not.toContain('https://reddit.com/t3_')
+    expect(beatReplies).toHaveLength(0)
 })
 
 test('referral: awards creator when a first-time player completes their challenge', async () => {
@@ -313,7 +343,9 @@ test('attempts: does not increment on non-challenge posts', async () => {
 
 const seedPlainPuzzle = async (postId: string) => {
     await redis.hSet(`game:${postId}:puzzle`, {
-        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        colors: PLAIN_SOLUTION,
+        numbers: '-'.repeat(16),
+        solution: PLAIN_SOLUTION,
         difficulty: 'easy', gridSize: '4',
     })
 }
@@ -326,7 +358,9 @@ test('complete: perfect solve on a normal post never posts as the user and flags
     // Reddit user actions must be explicit — completion must NOT submit a post.
     const submitPostSpy = vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_should_not_post' } as never)
 
-    const res = await withContext(postId, 't2_winner', () => completeRequest({ mistakes: 0 }))
+    const res = await withContext(postId, 't2_winner', () =>
+        completeRequest({ mistakes: 0, board: PLAIN_SOLUTION })
+    )
     expect(res.status).toBe(200)
 
     const body = await res.json() as { challengePromptEligible?: boolean }
@@ -334,16 +368,18 @@ test('complete: perfect solve on a normal post never posts as the user and flags
     expect(submitPostSpy).not.toHaveBeenCalled()
 })
 
-test('complete: imperfect solve is not challenge-prompt eligible', async () => {
+test('complete: client-reported mistakes cannot suppress a verified challenge receipt', async () => {
     const postId = 't3_imperfectprompt'
     await seedPlainPuzzle(postId)
     await seedStartTime('t2_winner', postId, 30)
 
-    const res = await withContext(postId, 't2_winner', () => completeRequest({ mistakes: 2 }))
+    const res = await withContext(postId, 't2_winner', () =>
+        completeRequest({ mistakes: 2, board: PLAIN_SOLUTION })
+    )
     expect(res.status).toBe(200)
 
     const body = await res.json() as { challengePromptEligible?: boolean }
-    expect(body.challengePromptEligible).toBeUndefined()
+    expect(body.challengePromptEligible).toBe(true)
 })
 
 test('complete: perfect solve on a challenge post is not challenge-prompt eligible', async () => {
@@ -423,7 +459,7 @@ challengeTest('challenge route: puts generic score details in the pinned thread 
     expect(reddit.submitComment).toHaveBeenCalledTimes(1)
     expect(reddit.submitComment).toHaveBeenCalledWith({
         id: 't3_scorethread',
-        text: expect.stringContaining('Score to beat: 45s with zero mistakes'),
+        text: expect.stringContaining('Score to beat: 45s'),
     })
     expect(distinguishSticky).toHaveBeenCalledWith(true)
 })
@@ -444,15 +480,41 @@ challengeTest('challenge route: returns comments URL and increments challengesCr
     )
     expect(res.status).toBe(200)
 
-    const body = await res.json() as { success: boolean; postUrl?: string }
+    const body = await res.json() as { success: boolean; postId?: string; postUrl?: string }
     const social = await redis.hGetAll('user:t2_challenger:social')
     const today = new Date().toISOString().split('T')[0] ?? ''
     const challengePosts = await redis.get(`analytics:${today}:challenge_posts`)
 
     expect(body.success).toBe(true)
+    expect(body.postId).toBe('t3_newposturl')
     expect(body.postUrl).toBe('https://reddit.com/comments/newposturl')
     expect(social['challengesCreated']).toBe('1')
     expect(challengePosts).toBe('1')
+})
+
+challengeTest('challenge route: allows creating another challenge post even after the old daily limit', async () => {
+    const sourcePostId = 't3_sourcepost_no_limit'
+    await redis.hSet(`game:${sourcePostId}:puzzle`, {
+        colors: 'rbrb', numbers: '----', solution: 'rbrb',
+        difficulty: 'easy', gridSize: '4',
+    })
+
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    await redis.set(`user:t2_challenger:challenge:count:${today}`, '3')
+
+    const submitSpy = vi.spyOn(reddit, 'submitCustomPost').mockResolvedValue({ id: 't3_nolimit' } as never)
+    vi.spyOn(reddit, 'getUserById').mockResolvedValue({ username: 'ChallengerUser' } as never)
+    vi.spyOn(reddit, 'submitComment').mockResolvedValue(stickyComment('t1_lb_nolimit') as never)
+
+    const res = await withContext(sourcePostId, 't2_challenger', () =>
+        challengeRequest({ timeTaken: 45, skillLevel: 3, mistakes: 0 })
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { success: boolean; error?: string }
+    expect(body.success).toBe(true)
+    expect(body.error).toBeUndefined()
+    expect(submitSpy).toHaveBeenCalledTimes(1)
 })
 
 challengeTest('challenge route: uses a trimmed custom title when provided', async () => {

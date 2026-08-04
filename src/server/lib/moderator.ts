@@ -6,6 +6,8 @@
 import type { MiddlewareHandler } from 'hono'
 import { context, redis, reddit } from '@devvit/web/server'
 
+import { registerUserDynamicKey } from './account-deletion'
+
 const HTTP_STATUS_UNAUTHORIZED = 401
 const HTTP_STATUS_FORBIDDEN = 403
 const HTTP_STATUS_INTERNAL_ERROR = 500
@@ -45,6 +47,7 @@ export const isModeratorCached = async (subredditId: string, userId: string): Pr
 
     // Cache the result (fire-and-forget — cache write failure is non-critical)
     try {
+        await registerUserDynamicKey(userId, cacheKey)
         await redis.set(cacheKey, isMod ? '1' : '0')
         await redis.expire(cacheKey, MOD_CACHE_TTL)
     } catch {

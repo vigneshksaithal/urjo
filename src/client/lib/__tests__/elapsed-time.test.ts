@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getElapsedSeconds } from "../elapsed-time";
+import { getCompletedSeconds, getElapsedSeconds } from "../elapsed-time";
 
 describe("getElapsedSeconds", () => {
 	it("floors fractional seconds instead of rounding up", () => {
@@ -11,5 +11,11 @@ describe("getElapsedSeconds", () => {
 
 	it("never returns a negative duration", () => {
 		expect(getElapsedSeconds(5_000, 4_999)).toBe(0);
+	});
+
+	it("reports a completed solve as at least one second", () => {
+		expect(getCompletedSeconds(1_000, 1_001)).toBe(1);
+		expect(getCompletedSeconds(1_000, 2_999)).toBe(1);
+		expect(getCompletedSeconds(1_000, 3_000)).toBe(2);
 	});
 });

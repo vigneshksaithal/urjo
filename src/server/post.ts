@@ -13,6 +13,9 @@ type CreatePostOptions = {
 	stickyCommentText?: string
 	gridSize?: GridSize
 	lockGridSize?: boolean
+	scheduledSlotKey?: string
+	scheduledDate?: string
+	puzzleNumber?: number
 }
 
 const PUBLIC_POST_GRID_LOOP: readonly GridSize[] = [6, 6, 8, 6, 4, 8, 6] as const
@@ -72,12 +75,16 @@ export const createPost = async (
 	const post = await reddit.submitCustomPost({
 		subredditName,
 		title,
+		textFallback: {
+			text: `${title}\n\nA ${puzzle.gridSize}×${puzzle.gridSize} red-and-blue logic puzzle. Open this post to play the interactive board.`,
+		},
 		postData: {
 			[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
 		},
 	})
 
 	// Save puzzle to Redis
+	const scheduledDimensions = getScheduledDimensions(options, puzzle.gridSize as GridSize)
 	await redis.hSet(`game:${post.id}:puzzle`, {
 		colors: puzzle.colors,
 		numbers: puzzle.numbers,
@@ -86,11 +93,13 @@ export const createPost = async (
 		gridSize: puzzle.gridSize.toString(),
 		created: new Date().toISOString(),
 		...(options.lockGridSize ? { lockedGridSize: puzzle.gridSize.toString() } : {}),
+		...scheduledDimensions,
 	})
 
 	await redis.hSet(`game:${post.id}:meta`, {
 		[URJO_POST_TYPE_KEY]: URJO_PUZZLE_POST_TYPE,
 		...(options.lockGridSize ? { lockedGridSize: puzzle.gridSize.toString() } : {}),
+		...scheduledDimensions,
 	})
 
 	await createStickyComment(post.id, options.stickyCommentText)
@@ -101,5 +110,32 @@ export const createPost = async (
 	return {
 		id: post.id,
 		gridSize: puzzle.gridSize as GridSize,
+	}
+}
+
+const getScheduledDimensions = (
+	options: CreatePostOptions,
+	gridSize: GridSize,
+): Record<string, string> => {
+	const puzzleNumber = options.puzzleNumber
+	const values = [options.scheduledSlotKey, options.scheduledDate, puzzleNumber]
+	if (values.every((value) => value === undefined)) return {}
+	if (
+		typeof options.scheduledSlotKey !== 'string' ||
+		!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(options.scheduledSlotKey) ||
+		typeof options.scheduledDate !== 'string' ||
+		!/^\d{4}-\d{2}-\d{2}$/.test(options.scheduledDate) ||
+		typeof puzzleNumber !== 'number' ||
+		!Number.isInteger(puzzleNumber) ||
+		puzzleNumber < 1
+	) {
+		throw new Error('Scheduled post dimensions are invalid')
+	}
+
+	return {
+		scheduledSlotKey: options.scheduledSlotKey,
+		scheduledDate: options.scheduledDate,
+		scheduledGridSize: gridSize.toString(),
+		puzzleNumber: puzzleNumber.toString(),
 	}
 }

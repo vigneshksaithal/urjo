@@ -55,6 +55,20 @@ describe('calculateComfortIndex', () => {
 })
 
 describe('selectAdaptivePuzzleState', () => {
+    it('gives a player with no adaptive history a 4x4 first puzzle', () => {
+        const result = selectAdaptivePuzzleState({
+            pathLevel: 1,
+            perGridLevels: { 4: 1, 6: 1, 8: 1 },
+            adaptiveHistory: [],
+            currentStreak: 0,
+            sessionRun: 0,
+            isFirstPuzzleOfDay: true,
+            isReentry: false,
+        }, () => 0.99)
+
+        expect(result).toEqual({ gridSize: 4, level: 1, source: 'adaptive' })
+    })
+
     it('forces a recovery pick after 2 struggles in the last 5 adaptive puzzles', () => {
         const adaptiveHistory: AdaptiveHistoryRecord[] = [
             record(6, 2, { timeTaken: 110, timestamp: 1 }),

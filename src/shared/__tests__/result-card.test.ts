@@ -3,6 +3,7 @@ import * as fc from 'fast-check'
 import {
     serializeResultCard,
     serializeResultComment,
+    serializeVerifiedResultComment,
     parseResultCard,
 } from '../result-card'
 import type { ResultCardData } from '../growth-types'
@@ -84,6 +85,25 @@ describe('result-card', () => {
     })
 
     describe('serializeResultComment', () => {
+        it('omits unverified mistake claims from a server-verified result', () => {
+            const result = serializeVerifiedResultComment({
+                puzzleNumber: 42,
+                gridSize: 4,
+                skillLevel: 3,
+                colorGrid: [
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                    ['red', 'blue', 'red', 'blue'],
+                    ['blue', 'red', 'blue', 'red'],
+                ],
+                timeTaken: 23,
+                streak: 5,
+            })
+
+            expect(result).toContain('⏱️ 23s | 🔥 5 streak')
+            expect(result).not.toContain('mistake')
+        })
+
         it('prepends a custom message above the generated card', () => {
             const data: ResultCardData = {
                 puzzleNumber: 42,

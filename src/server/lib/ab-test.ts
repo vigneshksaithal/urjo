@@ -1,18 +1,20 @@
 /**
- * A/B/C First-Screen Experiment
+ * A/B/C Inline Onboarding Experiment
  *
  * Deterministic variant assignment via djb2 hash — no Redis reads on hot path.
- * Per-variant funnel counters: opens, screen_taps (A/B only), first_actions, completions.
+ * A/B are direct-play controls; C adds guidance over the playable board.
+ * Per-variant funnel counters: opens, first_actions, completions.
  *
  * Redis key schema:
  *   analytics:{date}:variant:{A|B|C}:opens
- *   analytics:{date}:variant:{A|B|C}:screen_taps  (A and B only)
  *   analytics:{date}:variant:{A|B|C}:first_actions
  *   analytics:{date}:variant:{A|B|C}:completions
  *   analytics:variant_seen:{date}:{postId}:{userId}  (dedup, TTL 24h)
  */
 
 import { redis } from '@devvit/web/server'
+
+import { registerUserDynamicKey } from './account-deletion'
 
 export type Variant = 'A' | 'B' | 'C'
 
@@ -53,9 +55,6 @@ const DEDUP_TTL = 86400
 const variantOpenKey = (date: string, v: Variant): string =>
     `analytics:${date}:variant:${v}:opens`
 
-const variantScreenTapKey = (date: string, v: Variant): string =>
-    `analytics:${date}:variant:${v}:screen_taps`
-
 const variantFirstActionKey = (date: string, v: Variant): string =>
     `analytics:${date}:variant:${v}:first_actions`
 
@@ -84,20 +83,12 @@ export const trackVariantOpen = async (
     userId: string,
     variant: Variant,
 ): Promise<void> => {
-    const isNew = await trySetDedup(variantOpenDedupKey(date, postId, userId), DEDUP_TTL)
+    const dedupKey = variantOpenDedupKey(date, postId, userId)
+    await registerUserDynamicKey(userId, dedupKey)
+    const isNew = await trySetDedup(dedupKey, DEDUP_TTL)
     if (!isNew) return
     await redis.incrBy(variantOpenKey(date, variant), 1)
     await redis.expire(variantOpenKey(date, variant), COUNTER_TTL)
-}
-
-/**
- * Track when a user taps "Play" / "Beat Xs" on a Variant A or B first screen.
- * Not applicable to Variant C (no separate first-screen Play button).
- * No dedup — fires at most once per session (first screen only shown when !hasPlayedToday).
- */
-export const trackVariantScreenTap = async (date: string, variant: Variant): Promise<void> => {
-    await redis.incrBy(variantScreenTapKey(date, variant), 1)
-    await redis.expire(variantScreenTapKey(date, variant), COUNTER_TTL)
 }
 
 /**
@@ -123,12 +114,8 @@ export const trackVariantCompletion = async (date: string, variant: Variant): Pr
 export type VariantMetrics = {
     variant: Variant
     opens: number
-    /** null for Variant C — no first-screen Play button in that treatment. */
-    screenTaps: number | null
     firstActions: number
     completions: number
-    /** screenTaps / opens — null for Variant C or when opens === 0. */
-    screenTapRate: number | null
     /** firstActions / opens — null when opens === 0. */
     firstActionRate: number | null
     /** completions / firstActions — null when firstActions === 0. */
@@ -144,28 +131,24 @@ const parseCount = (raw: string | undefined): number => {
 const safeRate = (num: number, denom: number): number | null =>
     denom === 0 ? null : num / denom
 
-/** Read per-variant funnel metrics for a single UTC date (12 parallel gets). */
+/** Read per-variant funnel metrics for a single UTC date (9 parallel gets). */
 export const readVariantMetrics = async (date: string): Promise<VariantMetrics[]> => {
     const keys = VARIANTS.flatMap((v) => [
         variantOpenKey(date, v),
-        variantScreenTapKey(date, v),
         variantFirstActionKey(date, v),
         variantCompletionKey(date, v),
     ])
     const values = await Promise.all(keys.map((k) => redis.get(k)))
 
     return VARIANTS.map((v, i) => {
-        const opens = parseCount(values[i * 4])
-        const screenTaps = parseCount(values[i * 4 + 1])
-        const firstActions = parseCount(values[i * 4 + 2])
-        const completions = parseCount(values[i * 4 + 3])
+        const opens = parseCount(values[i * 3])
+        const firstActions = parseCount(values[i * 3 + 1])
+        const completions = parseCount(values[i * 3 + 2])
         return {
             variant: v,
             opens,
-            screenTaps: v === 'C' ? null : screenTaps,
             firstActions,
             completions,
-            screenTapRate: v === 'C' ? null : safeRate(screenTaps, opens),
             firstActionRate: safeRate(firstActions, opens),
             completionRate: safeRate(completions, firstActions),
         }

@@ -6,6 +6,10 @@
 
 import type { ResultCardData } from './growth-types'
 
+export type VerifiedResultCardData = Omit<ResultCardData, 'mistakes' | 'colorGrid'> & {
+    colorGrid: readonly (readonly ('red' | 'blue')[])[]
+}
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 const RED_EMOJI = '🟥'
@@ -17,14 +21,27 @@ const VALID_GRID_SIZES = new Set([4, 6, 8])
 // ─── Serialization ─────────────────────────────────────────────────────────────
 
 /** Serialize a completed puzzle into the shareable text format */
-export const serializeResultCard = (data: ResultCardData): string => {
+export const serializeResultCard = (data: ResultCardData): string =>
+    serializeResult(data, `⏱️ ${data.timeTaken}s | 🎯 ${data.mistakes} mistakes | 🔥 ${data.streak} streak`)
+
+/** Serialize only fields backed by the immutable server completion receipt. */
+export const serializeVerifiedResultComment = (
+    data: VerifiedResultCardData,
+    customMessage?: string,
+): string => withCustomMessage(
+    serializeResult(data, `⏱️ ${data.timeTaken}s | 🔥 ${data.streak} streak`),
+    customMessage,
+)
+
+const serializeResult = (
+    data: VerifiedResultCardData,
+    stats: string,
+): string => {
     const header = `${HEADER_PREFIX}${data.puzzleNumber} 🧩 ${data.gridSize}×${data.gridSize} ⭐${data.skillLevel}`
 
     const gridRows = data.colorGrid.map((row) =>
         row.map((cell) => (cell === 'red' ? RED_EMOJI : BLUE_EMOJI)).join('')
     )
-
-    const stats = `⏱️ ${data.timeTaken}s | 🎯 ${data.mistakes} mistakes | 🔥 ${data.streak} streak`
 
     return [header, ...gridRows, stats, FOOTER].join('\n')
 }
@@ -36,10 +53,11 @@ export const serializeResultCard = (data: ResultCardData): string => {
 export const serializeResultComment = (
     data: ResultCardData,
     customMessage?: string,
-): string => {
+): string => withCustomMessage(serializeResultCard(data), customMessage)
+
+const withCustomMessage = (card: string, customMessage?: string): string => {
     const message = customMessage?.trim()
-    if (!message) return serializeResultCard(data)
-    return `${message}\n\n${serializeResultCard(data)}`
+    return message ? `${message}\n\n${card}` : card
 }
 
 // ─── Parsing ───────────────────────────────────────────────────────────────────

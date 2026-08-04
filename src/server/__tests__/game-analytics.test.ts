@@ -9,8 +9,9 @@ import { createDevvitTest } from '@devvit/test/server/vitest'
 import { redis, reddit as webReddit, runWithContext } from '@devvit/web/server'
 import { expect, vi } from 'vitest'
 import { app } from '../index'
+import { createCompletionSnapshot } from '../lib/completion-snapshot'
 import { getCurrentSeason } from '../lib/seasons'
-import { serializeResultComment } from '../../shared/result-card'
+import { serializeVerifiedResultComment } from '../../shared/result-card'
 
 // ─── Helper: run with Devvit context ──────────────────────────────────────────
 
@@ -102,7 +103,7 @@ testPostOpen('GET /api/game/state captures referrer when x-urjo-session header i
 
     const flags = await withCtx(CTX, () => redis.hGetAll(`qe:session:${sessionId}:flags`))
     expect(flags.referrer).toBe('1')
-    expect(flags.userId).toBe('t2_player1')
+    expect(flags.userId).toBeUndefined()
 
     vi.restoreAllMocks()
 })
@@ -254,7 +255,7 @@ testComplete('POST /api/game/complete increments completion counter and records 
     vi.restoreAllMocks()
 })
 
-// ─── POST /api/game/result-comment — succeeds first time, 400 on duplicate ───
+// ─── POST /api/game/result-comment — verified, receipt-gated sharing ─────────
 
 const testResultComment = createDevvitTest({
     userId: 't2_player1',
@@ -278,16 +279,41 @@ const RESULT_BODY = {
     ],
 }
 
+const createResultReceipt = async (): Promise<string> => {
+    const snapshot = await createCompletionSnapshot({
+        userId: 't2_player1',
+        sourcePostId: 't3_testpost',
+        puzzleInstanceId: 'verified-instance',
+        puzzleNumber: RESULT_BODY.puzzleNumber,
+        gridSize: RESULT_BODY.gridSize as 4,
+        skillLevel: RESULT_BODY.skillLevel,
+        timeTaken: RESULT_BODY.timeTaken,
+        streak: RESULT_BODY.streak,
+        colorGrid: RESULT_BODY.colorGrid as ('red' | 'blue')[][],
+    })
+    return snapshot.completionId
+}
+
+const VERIFIED_RESULT_BODY = {
+    puzzleNumber: RESULT_BODY.puzzleNumber,
+    gridSize: RESULT_BODY.gridSize as 4,
+    skillLevel: RESULT_BODY.skillLevel,
+    timeTaken: RESULT_BODY.timeTaken,
+    streak: RESULT_BODY.streak,
+    colorGrid: RESULT_BODY.colorGrid as ('red' | 'blue')[][],
+}
+
 testResultComment('POST /api/game/result-comment succeeds on first call', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 
+    const completionId = await createResultReceipt()
     await withCtx(CTX, () => seedStickyComment('t3_testpost'))
 
     const res = await withCtx(CTX, () =>
         app.request('/api/game/result-comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(RESULT_BODY),
+            body: JSON.stringify({ completionId }),
         }),
     )
     expect(res.status).toBe(200)
@@ -321,6 +347,7 @@ testResultComment('POST /api/game/result-comment succeeds on first call', async 
 testResultComment('POST /api/game/result-comment prepends a custom message when provided', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 
+    const completionId = await createResultReceipt()
     await withCtx(CTX, () => seedStickyComment('t3_testpost'))
 
     const res = await withCtx(CTX, () =>
@@ -328,7 +355,7 @@ testResultComment('POST /api/game/result-comment prepends a custom message when 
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                ...RESULT_BODY,
+                completionId,
                 commentMessage: 'Big win today!',
             }),
         }),
@@ -339,7 +366,7 @@ testResultComment('POST /api/game/result-comment prepends a custom message when 
         expect.objectContaining({
             id: 't1_sticky123',
             runAs: 'USER',
-            text: serializeResultComment(RESULT_BODY, 'Big win today!'),
+            text: serializeVerifiedResultComment(VERIFIED_RESULT_BODY, 'Big win today!'),
         }),
     )
 
@@ -349,6 +376,7 @@ testResultComment('POST /api/game/result-comment prepends a custom message when 
 testResultComment('POST /api/game/result-comment returns 400 when commentMessage exceeds 400 characters', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 
+    const completionId = await createResultReceipt()
     await withCtx(CTX, () => seedStickyComment('t3_testpost'))
 
     const res = await withCtx(CTX, () =>
@@ -356,7 +384,7 @@ testResultComment('POST /api/game/result-comment returns 400 when commentMessage
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                ...RESULT_BODY,
+                completionId,
                 commentMessage: 'x'.repeat(401),
             }),
         }),
@@ -373,6 +401,7 @@ testResultComment('POST /api/game/result-comment returns 400 when commentMessage
 testResultComment('POST /api/game/result-comment accepts commentMessage at exactly 400 characters', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 
+    const completionId = await createResultReceipt()
     await withCtx(CTX, () => seedStickyComment('t3_testpost'))
 
     const res = await withCtx(CTX, () =>
@@ -380,7 +409,7 @@ testResultComment('POST /api/game/result-comment accepts commentMessage at exact
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                ...RESULT_BODY,
+                completionId,
                 commentMessage: 'x'.repeat(400),
             }),
         }),
@@ -399,11 +428,13 @@ testResultComment('POST /api/game/result-comment creates missing sticky comment 
         } as never)
         .mockResolvedValueOnce({ id: 't1_result_comment' } as never)
 
+    const completionId = await createResultReceipt()
+
     const res = await withCtx(CTX, () =>
         app.request('/api/game/result-comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(RESULT_BODY),
+            body: JSON.stringify({ completionId }),
         }),
     )
 
@@ -430,27 +461,28 @@ testResultComment('POST /api/game/result-comment creates missing sticky comment 
     vi.restoreAllMocks()
 })
 
-testResultComment('POST /api/game/result-comment allows repeated comments on the same post', async () => {
+testResultComment('POST /api/game/result-comment allows distinct completions on the same post', async () => {
     vi.spyOn(webReddit, 'submitComment').mockResolvedValue({ id: 't1_comment1' } as never)
 
+    const firstCompletionId = await createResultReceipt()
+    const secondCompletionId = await createResultReceipt()
     await withCtx(CTX, () => seedStickyComment('t3_testpost'))
 
-    // First call — succeeds
+    // Each verified completion may create its own explicit result comment.
     const firstRes = await withCtx(CTX, () =>
         app.request('/api/game/result-comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(RESULT_BODY),
+            body: JSON.stringify({ completionId: firstCompletionId }),
         }),
     )
     expect(firstRes.status).toBe(200)
 
-    // Second call — also succeeds on the same post
     const secondRes = await withCtx(CTX, () =>
         app.request('/api/game/result-comment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(RESULT_BODY),
+            body: JSON.stringify({ completionId: secondCompletionId }),
         }),
     )
     expect(secondRes.status).toBe(200)
@@ -485,7 +517,7 @@ testResultComment('POST /api/game/result-comment returns 400 with invalid body',
     expect(res.status).toBe(400)
 
     const body = await res.json() as { error: string }
-    expect(body.error).toBe('Invalid result card data')
+    expect(body.error).toBe('A verified completion is required')
 })
 
 // ─── POST /api/game/help-tap — tracks help icon taps ─────────────────────────

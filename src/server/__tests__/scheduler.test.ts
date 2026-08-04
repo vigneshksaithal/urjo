@@ -58,6 +58,20 @@ test('POST /internal/scheduler/daily-puzzle returns 200 with ok status', async (
     expect(body).toEqual({ status: 'ok' })
 })
 
+test('concurrent delivery claims one scheduled slot and creates exactly one post', async () => {
+    mockRedditApis('t3_single_slot')
+
+    const responses = await withCtx(() => Promise.all([
+        schedulerRequest(),
+        schedulerRequest(),
+    ]))
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(reddit.submitCustomPost).toHaveBeenCalledTimes(1)
+    const today = new Date().toISOString().split('T')[0] ?? ''
+    expect(await redis.get(`scheduled-post:${today}:t5_testsub:6x6-1400`)).toBe('t3_single_slot')
+})
+
 test('POST /internal/scheduler/daily-puzzle increments puzzleCounter', async () => {
     mockRedditApis('t3_sched2')
 
@@ -164,6 +178,10 @@ test('scheduler stores locked 8x8 metadata for 8x8 tasks', async () => {
 
     const meta = await withCtx(() => redis.hGetAll('game:t3_sched8x8:meta'))
     expect(meta.lockedGridSize).toBe('8')
+    expect(meta.scheduledSlotKey).toBe('8x8-2000')
+    expect(meta.scheduledGridSize).toBe('8')
+    expect(meta.scheduledDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(Number(meta.puzzleNumber)).toBeGreaterThan(0)
 
     const previewMeta = await withCtx(() => redis.hGetAll('game:t3_sched8x8:preview'))
     const parsed = JSON.parse(previewMeta.data!)

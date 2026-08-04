@@ -11,9 +11,17 @@
  * it.
  */
 
-import { generateSessionId, SESSION_HEADER } from './dwell-heartbeat'
+import {
+    ATTEMPT_ID_HEADER,
+    CONTENT_ID_HEADER,
+    EVENT_ID_HEADER,
+    SESSION_ID_HEADER,
+    isMeasurementId,
+} from '../../shared/measurement-contract'
+import { generateSessionId } from './dwell-heartbeat'
 
 let cachedSessionId: string | null = null
+let cachedAttemptId: string | null = null
 
 /**
  * Get (and lazily mint) the per-page-load session id. Stable for the
@@ -26,6 +34,20 @@ export const getSessionId = (): string => {
     return cachedSessionId
 }
 
+export const getAttemptId = (): string => {
+    if (cachedAttemptId === null) {
+        cachedAttemptId = generateSessionId()
+    }
+    return cachedAttemptId
+}
+
+export const renewAttemptId = (): string => {
+    cachedAttemptId = generateSessionId()
+    return cachedAttemptId
+}
+
+export const createEventId = (): string => generateSessionId()
+
 /**
  * Convenience: build a Headers object pre-stamped with `Content-Type` and
  * the session id. Centralizes the header name so it doesn't drift across
@@ -33,6 +55,22 @@ export const getSessionId = (): string => {
  */
 export const sessionHeaders = (extra: Record<string, string> = {}): Record<string, string> => ({
     'Content-Type': 'application/json',
-    [SESSION_HEADER]: getSessionId(),
+    [SESSION_ID_HEADER]: getSessionId(),
     ...extra,
 })
+
+export const measurementHeaders = (
+    contentId: string,
+    extra: Record<string, string> = {},
+): Record<string, string> => {
+    if (!isMeasurementId(contentId)) throw new Error('Invalid measurement content ID')
+
+    return {
+        'Content-Type': 'application/json',
+        [SESSION_ID_HEADER]: getSessionId(),
+        [CONTENT_ID_HEADER]: contentId,
+        [ATTEMPT_ID_HEADER]: getAttemptId(),
+        [EVENT_ID_HEADER]: createEventId(),
+        ...extra,
+    }
+}

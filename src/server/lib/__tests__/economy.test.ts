@@ -16,6 +16,15 @@ import { MAX_SPEED_COIN_BONUS } from '../../../shared/scoring'
 import { describe, it } from 'vitest'
 
 describe('calculateCoinReward', () => {
+	it('treats unverified client mistake data as neutral and never grants a perfect bonus', () => {
+		const trustedFlawless = calculateCoinReward(20, 1, 3, false, 0, 0, 4)
+		const mistakeNeutral = calculateCoinReward(20, 1, 3, false, 0, 0, 4, false)
+
+		expect(mistakeNeutral.perfectBonus).toBe(0)
+		expect(mistakeNeutral.speedBonus).toBe(trustedFlawless.speedBonus)
+		expect(mistakeNeutral.streakBonus).toBe(trustedFlawless.streakBonus)
+	})
+
     it('total equals base + streakBonus + speedBonus + dailyBonus + perfectBonus + loginBonus', () => {
         const reward = calculateCoinReward(5, 1, 3, true, 0, 2)
         expect(reward.total).toBe(reward.base + reward.streakBonus + reward.speedBonus + reward.dailyBonus + reward.perfectBonus + reward.loginBonus)

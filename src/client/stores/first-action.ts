@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store'
 
-import { sessionHeaders } from '../lib/session-id'
+import { measurementHeaders, sessionHeaders } from '../lib/session-id'
+import { isMeasurementId } from '../../shared/measurement-contract'
 import type { FirstActionSource } from '../../shared/first-action'
 
 export type { FirstActionSource } from '../../shared/first-action'
@@ -15,6 +16,12 @@ export type { FirstActionSource } from '../../shared/first-action'
  * calls (e.g. fast cell taps) cannot race past the guard.
  */
 export const firstActionLatchStore = writable<{ latched: boolean }>({ latched: false })
+
+let currentContentId: string | null = null
+
+export const setFirstActionContentId = (contentId: string): void => {
+    currentContentId = isMeasurementId(contentId) ? contentId : null
+}
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
@@ -46,7 +53,9 @@ export const fireOnce = async (
     try {
         await fetch('/api/game/first-action', {
             method: 'POST',
-            headers: sessionHeaders(),
+            headers: currentContentId === null
+                ? sessionHeaders()
+                : measurementHeaders(currentContentId),
             body: JSON.stringify({ postId, source }),
         })
     } catch {

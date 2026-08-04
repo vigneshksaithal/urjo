@@ -56,8 +56,24 @@ const renderGameView = (
 	flushSync();
 };
 
+const openSettings = (): void => {
+	const settingsButton = document.querySelector<HTMLButtonElement>(
+		'[aria-label="Settings"]',
+	);
+	expect(settingsButton).not.toBeNull();
+	settingsButton?.click();
+	flushSync();
+};
+
 beforeEach(() => {
 	document.body.innerHTML = "";
+	Object.defineProperty(Element.prototype, "animate", {
+		configurable: true,
+		value: vi.fn(() => ({
+			cancel: vi.fn(),
+			finished: Promise.resolve(),
+		})),
+	});
 	vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null))));
 	vi.stubGlobal(
 		"ResizeObserver",
@@ -75,6 +91,7 @@ afterEach(async () => {
 		app = undefined;
 	}
 	vi.unstubAllGlobals();
+	delete (Element.prototype as { animate?: unknown }).animate;
 	document.body.innerHTML = "";
 });
 
@@ -83,6 +100,7 @@ describe("GameView grid size selector", () => {
 		renderGameView({
 			allowsGridSizeChange: false,
 		});
+		openSettings();
 
 		expect(
 			document.querySelector('[aria-label="Grid size selector"]'),
@@ -93,6 +111,7 @@ describe("GameView grid size selector", () => {
 		renderGameView({
 			allowsGridSizeChange: true,
 		});
+		openSettings();
 
 		expect(
 			document.querySelector('[aria-label="Grid size selector"]'),

@@ -8,6 +8,10 @@ import { redis } from '@devvit/web/server'
 
 import type { DailyMetrics, GrowthLoopMetrics } from '../../shared/growth-types'
 import type { FirstActionSource } from '../../shared/first-action'
+import {
+    registerUserDynamicKey,
+    registerUserSortedSetMembership,
+} from './account-deletion'
 import { readViralMetricsForDate } from './viral-tracker'
 
 export type { FirstActionSource } from '../../shared/first-action'
@@ -86,6 +90,9 @@ const actedDedupKey = (date: string, postId: string, userId: string): string =>
 const completedDedupKey = (postId: string, userId: string): string =>
     `analytics:completed:${postId}:${userId}`
 
+const subscribedDedupKey = (date: string, userId: string): string =>
+    `analytics:subscribed:${date}:${userId}`
+
 const challengeOpenedDedupKey = (date: string, postId: string, userId: string): string =>
     `analytics:challenge_opened:${date}:${postId}:${userId}`
 
@@ -102,13 +109,27 @@ const userCompletionDatesKey = (userId: string): string =>
  * false if it already existed (duplicate).
  * Uses get → set + expire pattern matching the existing codebase.
  */
-const trySetDedup = async (key: string, ttl: number): Promise<boolean> => {
+const trySetUserDedup = async (
+    key: string,
+    ttl: number,
+    userId: string,
+): Promise<boolean> => {
+    await registerUserDynamicKey(userId, key)
     const existing = await redis.get(key)
     if (existing !== undefined) return false
 
     await redis.set(key, '1')
     await redis.expire(key, ttl)
     return true
+}
+
+const addUserToSortedSet = async (
+    key: string,
+    userId: string,
+    score: number,
+): Promise<void> => {
+    await registerUserSortedSetMembership(userId, key)
+    await redis.zAdd(key, { member: userId, score })
 }
 
 const dateToTimestamp = (date: string): number =>
@@ -151,10 +172,7 @@ export const isReturnWindowClosed = (
 }
 
 const trackDailyActiveEngager = async (date: string, userId: string): Promise<void> => {
-    await redis.zAdd(dailyActiveEngagersKey(date), {
-        member: userId,
-        score: Date.now(),
-    })
+    await addUserToSortedSet(dailyActiveEngagersKey(date), userId, Date.now())
 }
 
 // ─── Event Tracking ────────────────────────────────────────────────────────────
@@ -176,7 +194,7 @@ export const trackPostOpen = async (
     userId: string,
     _subredditId: string,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(seenDedupKey(date, postId, userId), TTL_24H)
+    const isNew = await trySetUserDedup(seenDedupKey(date, postId, userId), TTL_24H, userId)
     if (!isNew) return false
 
     await redis.incrBy(postOpenCounterKey(date), 1)
@@ -194,7 +212,7 @@ export const trackFirstAction = async (
     _subredditId: string,
     source: FirstActionSource = 'unknown',
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(actedDedupKey(date, postId, userId), TTL_24H)
+    const isNew = await trySetUserDedup(actedDedupKey(date, postId, userId), TTL_24H, userId)
     if (!isNew) return false
 
     await Promise.all([
@@ -216,7 +234,7 @@ export const trackCompletion = async (
     userId: string,
     subredditId: string,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(completedDedupKey(postId, userId), TTL_48H)
+    const isNew = await trySetUserDedup(completedDedupKey(postId, userId), TTL_48H, userId)
     if (!isNew) return false
 
     const dateTimestamp = dateToTimestamp(date)
@@ -224,7 +242,7 @@ export const trackCompletion = async (
     await Promise.all([
         redis.incrBy(completionCounterKey(date), 1),
         redis.incrBy(subredditCompletionKey(date, subredditId), 1),
-        redis.zAdd(completionUsersKey(date), { member: userId, score: dateTimestamp }),
+        addUserToSortedSet(completionUsersKey(date), userId, dateTimestamp),
         redis.zAdd(userCompletionDatesKey(userId), { member: date, score: dateTimestamp }),
         trackDailyActiveEngager(date, userId),
     ])
@@ -260,10 +278,7 @@ export const trackChallengePostCreated = async (
 ): Promise<void> => {
     await Promise.all([
         redis.incrBy(challengePostCounterKey(date), 1),
-        redis.zAdd(challengePostCreatorsKey(date), {
-            member: creatorId,
-            score: Date.now(),
-        }),
+        addUserToSortedSet(challengePostCreatorsKey(date), creatorId, Date.now()),
         redis.zAdd(challengePostIdsKey(date), {
             member: postId,
             score: Date.now(),
@@ -280,7 +295,11 @@ export const trackChallengeOpen = async (
     postId: string,
     userId: string,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(challengeOpenedDedupKey(date, postId, userId), TTL_24H)
+    const isNew = await trySetUserDedup(
+        challengeOpenedDedupKey(date, postId, userId),
+        TTL_24H,
+        userId,
+    )
     if (!isNew) return false
 
     await Promise.all([
@@ -299,7 +318,11 @@ export const trackChallengeCompletion = async (
     userId: string,
     isNewPlayer: boolean,
 ): Promise<boolean> => {
-    const isNew = await trySetDedup(challengeCompletedDedupKey(postId, userId), TTL_48H)
+    const isNew = await trySetUserDedup(
+        challengeCompletedDedupKey(postId, userId),
+        TTL_48H,
+        userId,
+    )
     if (!isNew) return false
 
     const writes: Promise<unknown>[] = [
@@ -310,10 +333,11 @@ export const trackChallengeCompletion = async (
     if (isNewPlayer) {
         writes.push(
             redis.incrBy(newPlayerChallengeCompletionCounterKey(date), 1),
-            redis.zAdd(challengeNewCompletionUsersKey(date), {
-                member: userId,
-                score: dateToTimestamp(date),
-            }),
+            addUserToSortedSet(
+                challengeNewCompletionUsersKey(date),
+                userId,
+                dateToTimestamp(date),
+            ),
         )
     }
 
@@ -328,6 +352,18 @@ export const trackNotifyOptIn = async (date: string, userId: string): Promise<vo
     ])
 }
 
+/** Count a successful explicit Join action once per user per UTC day. */
+export const trackSubscribeTap = async (date: string, userId: string): Promise<boolean> => {
+    const isNew = await trySetUserDedup(subscribedDedupKey(date, userId), TTL_24H, userId)
+    if (!isNew) return false
+
+    await Promise.all([
+        redis.incrBy(subscribeTapCounterKey(date), 1),
+        trackDailyActiveEngager(date, userId),
+    ])
+    return true
+}
+
 /**
  * Track a help-icon tap event (deduplicated per user per post per day).
  * Uses SET NX on analytics:helped:{date}:{postId}:{userId} with 24h TTL.
@@ -339,7 +375,7 @@ export const trackHelpTap = async (
     userId: string,
 ): Promise<boolean> => {
     const dedupKey = `analytics:helped:${date}:${postId}:${userId}`
-    const isNew = await trySetDedup(dedupKey, TTL_24H)
+    const isNew = await trySetUserDedup(dedupKey, TTL_24H, userId)
     if (!isNew) return false
 
     await redis.incrBy(helpTapCounterKey(date), 1)

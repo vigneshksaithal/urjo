@@ -9,6 +9,11 @@ const completionOverlayPath = join(
 	"src/client/components/CompletionOverlay.svelte",
 );
 const completionOverlaySource = readFileSync(completionOverlayPath, "utf-8");
+const resultCardPath = join(
+	process.cwd(),
+	"src/client/components/ResultCard.svelte",
+);
+const resultCardSource = readFileSync(resultCardPath, "utf-8");
 
 describe("GameView.svelte continue button flow", () => {
 	it("routes the completion Continue action to the level path first", () => {
@@ -40,42 +45,67 @@ describe("GameView.svelte continue button flow", () => {
 		expect(handleLevelSelectBody).not.toContain("simplifiedCtas.primary.id");
 	});
 
-	it("wires victory comments through explicit confirmation before posting", () => {
-		expect(gameViewSource).toContain('import VictoryCommentComposer from "../components/VictoryCommentComposer.svelte";');
-		expect(gameViewSource).toContain("let showVictoryCommentComposer = $state(false);");
-		expect(gameViewSource).toContain(
-			"onCommentVictory={() => (showVictoryCommentComposer = true)}",
-		);
-		expect(gameViewSource).toContain('<VictoryCommentComposer');
-		expect(gameViewSource).toContain('isOpen={showVictoryCommentComposer}');
-		expect(gameViewSource).toContain('onClose={() => (showVictoryCommentComposer = false)}');
-		expect(gameViewSource).toContain('onSubmit={submitVictoryComment}');
+	it("renders the optional victory comment separately from continuing", () => {
+		expect(gameViewSource).not.toContain('import VictoryCommentComposer from "../components/VictoryCommentComposer.svelte";');
+		expect(gameViewSource).not.toContain("let showVictoryCommentComposer = $state(false);");
+		expect(gameViewSource).toContain("onCommentVictory={submitVictoryComment}");
+		expect(gameViewSource).not.toContain("<VictoryCommentComposer");
 		expect(gameViewSource).toContain('fetch("/api/game/result-comment"');
 		expect(gameViewSource).toContain('commentMessage');
-		expect(gameViewSource).not.toContain("showVictoryCommentConfirm");
-		expect(gameViewSource).not.toContain("ConfirmDialog");
-		expect(completionOverlaySource).toContain("Comment Your Victory");
+		expect(gameViewSource).not.toContain("showVictoryCommentComposer = $state(false);");
+		expect(completionOverlaySource).toContain("Post comment");
+		expect(completionOverlaySource).not.toContain("Comment and Continue");
 		expect(completionOverlaySource).toContain("onCommentVictory");
+		expect(completionOverlaySource).toContain("Comment");
+		expect(completionOverlaySource).toContain('bind:value={commentMessage}');
+		expect(completionOverlaySource).toContain('placeholder="Add an optional message"');
+		expect(completionOverlaySource).toContain("<input");
+		expect(completionOverlaySource).toContain('type="text"');
+		expect(completionOverlaySource).not.toContain("textarea");
 		expect(completionOverlaySource).toContain("onChallenge");
 		expect(completionOverlaySource).not.toContain("onChallengeAndContinue");
 	});
 
-	it("keeps Continue and Challenge together in the second success-screen row", () => {
-		expect(completionOverlaySource).toContain('class="grid grid-cols-2 gap-3 w-full"');
-		// Button text is conditional: {#if hasChallenged}✓ Challenge Created{:else}Challenge{/if}
-		expect(completionOverlaySource).toMatch(/\{:else\}\s*Challenge\s*\{\/if\}/);
-		expect(completionOverlaySource).toContain("border-white/60 text-white");
-		expect(completionOverlaySource).toContain("bg-yellow-500 text-yellow-950");
+	it("keeps commenting primary while progression remains separate", () => {
+		expect(completionOverlaySource).toContain("Continue");
+		expect(completionOverlaySource).toContain("Post comment");
+		expect(completionOverlaySource).toContain(">Challenge<");
+		expect(completionOverlaySource).toMatch(/>\s*Open rival\s*</);
+		expect(completionOverlaySource).toContain('"Share rival"');
+		expect(completionOverlaySource).toContain('data-action-priority="comment-challenge-create-continue"');
+		expect(completionOverlaySource).toContain("Post publicly in the score thread");
 		expect(gameViewSource).toContain("onChallenge={requestChallenge}");
 		expect(gameViewSource).not.toContain("showChallengeAndContinueConfirm");
 		expect(gameViewSource).not.toContain("confirmChallengeAndContinue");
+	});
+
+	it("keeps Continue in a fixed result footer", () => {
+		expect(completionOverlaySource).toContain(
+			'<footer aria-label="Completion actions" data-action-priority="comment-challenge-create-continue" class="flex-none rounded-t-[28px] bg-[#2C2C2E] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">',
+		);
+		expect(completionOverlaySource).toContain(
+			'<main class="flex min-h-0 flex-1 flex-col items-center justify-start overflow-hidden px-5 pb-3 pt-[max(1rem,env(safe-area-inset-top))] text-center">',
+		);
+	});
+
+	it("keeps the comment form with the result actions", () => {
+		expect(completionOverlaySource).toContain('aria-label="Completion actions"');
+		expect(completionOverlaySource).toContain('id="victory-comment"');
+	});
+
+	it("sends only the server completion receipt from both comment entry points", () => {
+		expect(gameViewSource).toContain("completionId,");
+		expect(gameViewSource).not.toContain("colorGrid: buildVictoryColorGrid");
+		expect(gameViewSource).not.toContain("mistakes,");
+		expect(resultCardSource).toContain("JSON.stringify({ completionId })");
+		expect(resultCardSource).not.toContain("JSON.stringify(resultCardData)");
 	});
 
 	it("makes challenge post consent clear before posting as the user", () => {
 		expect(completionOverlaySource).toContain('import ChallengeComposer from "./ChallengeComposer.svelte";');
 		expect(completionOverlaySource).toContain("<ChallengeComposer");
 		expect(completionOverlaySource).toContain("isOpen={showChallengeComposer}");
-		expect(completionOverlaySource).toContain('onClose={closeChallengeComposer}');
+		expect(completionOverlaySource).toContain('onClose={() => (showChallengeComposer = false)}');
 		expect(completionOverlaySource).toContain("onSubmit={submitChallenge}");
 		expect(completionOverlaySource).not.toContain("Challenge title");
 		expect(completionOverlaySource).not.toContain("Beat my time if you can!");

@@ -31,6 +31,9 @@ const seasonLeaderboardKey = (seasonId: string): string =>
 const seasonResultsKey = (seasonId: string): string =>
     `season:${seasonId}:results`
 
+const seasonRewardedKey = (seasonId: string): string =>
+    `season:${seasonId}:rewarded`
+
 const economyKey = (userId: string): string =>
     `user:${userId}:economy`
 
@@ -229,6 +232,11 @@ export const getSeasonRecap = async (seasonId: string): Promise<SeasonRecap> => 
  * Uses the same coin-awarding pattern as the economy module.
  */
 export const awardSeasonRewards = async (seasonId: string): Promise<void> => {
+    // Results written by older versions mean that season was already paid.
+    // There is no safe way to infer missing legacy per-player markers, so the
+    // historical results record is the compatibility idempotency boundary.
+    if (await redis.get(seasonResultsKey(seasonId)) !== undefined) return
+
     const key = seasonLeaderboardKey(seasonId)
 
     for (const reward of SEASON_TOP_REWARDS) {
@@ -243,19 +251,53 @@ export const awardSeasonRewards = async (seasonId: string): Promise<void> => {
 
         const userId = entry.member
 
-        // Award coins using the same pattern as referrals/economy
-        const coinsStr = await redis.hGet(economyKey(userId), 'coins')
-        const totalCoinsStr = await redis.hGet(economyKey(userId), 'totalCoins')
-        const coins = parseInt(coinsStr ?? '0', 10)
-        const totalCoins = parseInt(totalCoinsStr ?? '0', 10)
-
-        await redis.hSet(economyKey(userId), {
-            coins: String(coins + reward.coins),
-            totalCoins: String(totalCoins + reward.coins),
-        })
+        await awardSeasonPlayerOnce(seasonId, userId, reward.coins)
     }
 
     // Store season results for history
     const recap = await getSeasonRecap(seasonId)
-    await redis.set(seasonResultsKey(seasonId), JSON.stringify(recap))
+    await redis.set(seasonResultsKey(seasonId), JSON.stringify(recap), { nx: true })
+}
+
+const awardSeasonPlayerOnce = async (
+    seasonId: string,
+    userId: string,
+    rewardCoins: number,
+): Promise<void> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        if (await tryAwardSeasonPlayer(seasonId, userId, rewardCoins)) return
+    }
+
+    throw new Error(`Unable to atomically award ${seasonId} reward to ${userId}`)
+}
+
+const tryAwardSeasonPlayer = async (
+    seasonId: string,
+    userId: string,
+    rewardCoins: number,
+): Promise<boolean> => {
+    const rewardedKey = seasonRewardedKey(seasonId)
+    const userEconomyKey = economyKey(userId)
+    const transaction = await redis.watch(rewardedKey, userEconomyKey)
+    if (await redis.hGet(rewardedKey, userId) !== undefined) {
+        await transaction.unwatch()
+        return true
+    }
+
+    const [coinsRaw, totalCoinsRaw] = await Promise.all([
+        redis.hGet(userEconomyKey, 'coins'),
+        redis.hGet(userEconomyKey, 'totalCoins'),
+    ])
+    await transaction.multi()
+    await transaction.hSet(userEconomyKey, {
+        coins: String(parseCoins(coinsRaw) + rewardCoins),
+        totalCoins: String(parseCoins(totalCoinsRaw) + rewardCoins),
+    })
+    await transaction.hSet(rewardedKey, { [userId]: String(rewardCoins) })
+    return (await transaction.exec()).length > 0
+}
+
+const parseCoins = (raw: string | undefined): number => {
+    const parsed = parseInt(raw ?? '0', 10)
+    return Number.isNaN(parsed) ? 0 : parsed
 }
